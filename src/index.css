@@ -1,0 +1,6 @@
+/* Reset global y base están en App.css (única fuente de verdad). */
+body {
+  color: #e5e5e5;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

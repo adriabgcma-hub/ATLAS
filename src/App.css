@@ -1,0 +1,46 @@
+:root {
+  color: #d8f6ff;
+  background: #02070b;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #02070b;
+}
+
+button,
+input,
+textarea,
+select { font: inherit; }
+
+.app-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.app-label {
+  position: absolute;
+  z-index: 3;
+  top: 28px;
+  left: 32px;
+  color: rgba(186, 239, 255, 0.84);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  pointer-events: none;
+  user-select: none;
+}

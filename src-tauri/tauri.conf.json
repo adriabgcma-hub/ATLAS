@@ -1,0 +1,52 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Atlas",
+  "version": "0.1.0",
+  "identifier": "com.atlas.next",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "Atlas",
+        "width": 1000,
+        "height": 700,
+        "minWidth": 480,
+        "minHeight": 400,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["hudWindow"],
+          "state": "active"
+        }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: asset: http://asset.localhost https://asset.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data: blob: https: http://asset.localhost https://asset.localhost; font-src 'self' data: asset:; connect-src 'self' ipc: asset: http://asset.localhost https://asset.localhost; media-src 'self' asset: data: blob:; object-src 'none'; base-uri 'self'; frame-src 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}
