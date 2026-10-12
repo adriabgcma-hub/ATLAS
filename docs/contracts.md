@@ -107,6 +107,31 @@ type ConfirmationResponse = Correlation & {
 
 Nunca se debe interpretar la ausencia de respuesta como autorización. Las confirmaciones caducan y se vinculan a un único `requestId`.
 
+## Origen del mensaje
+
+```ts
+type Source = 'local' | 'telegram'
+```
+
+`local` es la barra de input de la app; `telegram` es el bot consultado por
+polling saliente. El núcleo trata ambos igual; solo cambia el origen registrado.
+
+## Mensajes añadidos a la conversación
+
+```ts
+type MessageRole = 'user' | 'assistant'
+
+type MessageAppended = Correlation & {
+  type: 'conversation.message_appended'
+  role: MessageRole
+  content: string // no vacío, máximo 4000 caracteres
+  source: Source
+}
+```
+
+El frontend suscribe este evento y representa el mensaje sin distinguir el origen:
+la cadencia visual es idéntica en ambos canales.
+
 ## Errores
 
 Los errores expuestos al frontend deben ser seguros para mostrar:

@@ -63,6 +63,14 @@ El runtime recibe un contexto acotado y devuelve texto, eventos de razonamiento 
 
 Cada herramienta declara identidad, versión, esquema de entrada, esquema de salida, nivel de riesgo y requisitos de permiso. Los adaptadores externos se mantienen aislados para poder sustituirlos o desactivarlos.
 
+### Relay Telegram (canal externo, Fase 2)
+
+El bot de Telegram no habla con la app directamente. Un relay Python aparte lo
+consulta por polling saliente y sirve la cola FIFO por HTTP solo en la red
+local. El núcleo drena esa cola (`relay_drain`) e ingiere cada mensaje como
+canal `telegram`, con los mismos contratos y sesiones que el input local. Sin
+webhooks: el relay nunca se expone a internet.
+
 ## Flujo de una petición
 
 1. El usuario escribe o activa una entrada.
@@ -77,7 +85,9 @@ Cada herramienta declara identidad, versión, esquema de entrada, esquema de sal
 
 ## Estado de implementación
 
-- **Activo**: ventana Tauri transparente, escena WebGL, orbe y órbitas.
-- **Planificado**: chat, sesiones, runtime de IA, memoria y registro de herramientas.
+- **Activo**: ventana Tauri transparente, escena WebGL, orbe y órbitas, barra de
+  input, sesiones identificadas y cancelables, IPC de conversación y relay Telegram.
+- **Planificado**: runtime de IA (Groq registrado, sin integrar), memoria y
+  registro de herramientas.
 - **No activar por defecto**: micrófono, escucha permanente, wake word, TTS y agentes autónomos.
 

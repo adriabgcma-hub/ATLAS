@@ -17,3 +17,5 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 tauri = { version = "2.11.3", features = ["macos-private-api"] }
 tauri-plugin-global-shortcut = "2.3.2"
+serde = { version = "1", features = ["derive"] }
+atlas-core = { path = "../crates/atlas-core" }

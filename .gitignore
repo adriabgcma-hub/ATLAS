@@ -103,3 +103,8 @@ DerivedData/
 *.local
 tmp/
 temp/
+
+# Python (relay)
+__pycache__/
+*.py[cod]
+.venv/

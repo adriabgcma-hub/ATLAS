@@ -44,3 +44,92 @@ select { font: inherit; }
   pointer-events: none;
   user-select: none;
 }
+
+/* ── Barra de input (Fase 2) ────────────────────────────────────────────
+   Abajo a la izquierda, espejo de la etiqueta ATLAS (mismo margen 32/28).
+   Vidrio oscuro translúcido con filo neón cian; el foco enciende el borde.
+   La clase `.input-bar` es el origen DOM de las letras de energía. */
+.chat-input-shell {
+  position: absolute;
+  left: 32px;
+  bottom: 28px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(480px, calc(100vw - 64px));
+  padding: 6px 6px 6px 18px;
+  border: 1px solid rgba(63, 164, 255, 0.26);
+  border-radius: 14px;
+  background: rgba(8, 20, 30, 0.58);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    inset 0 0 18px rgba(63, 164, 255, 0.08);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.chat-input-shell:focus-within {
+  border-color: rgba(0, 217, 255, 0.55);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.4),
+    0 0 22px rgba(0, 217, 255, 0.14),
+    inset 0 0 18px rgba(63, 164, 255, 0.12);
+}
+
+.input-bar {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #d8f6ff;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  caret-color: #3fa4ff;
+  outline: none;
+}
+
+.input-bar::placeholder {
+  color: rgba(122, 180, 222, 0.45);
+}
+
+.chat-send-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(118, 196, 255, 0.35);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(63, 164, 255, 0.35),
+    rgba(20, 70, 120, 0.5) 70%
+  );
+  color: #b8e2ff;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 120ms ease;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: rgba(0, 217, 255, 0.65);
+  box-shadow: 0 0 14px rgba(0, 217, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.chat-send-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
