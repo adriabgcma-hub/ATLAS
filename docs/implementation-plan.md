@@ -49,9 +49,7 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 - [ ] Commit publicado con permiso explícito.
 - Cambios **sin commitear** (ver `git status`).
 
-## Fase 3 — Cerebro en Python + panel (en curso)
-
-> El LLM vive en el relay 24/7 con la app cerrada (decisión del usuario).
+## Fase 3 — Cerebro en Python + panel (en curso)> El LLM vive en el relay 24/7 con la app cerrada (decisión del usuario).
 > Rust adelgaza a transporte; el panel muestra mensajes del LLM vengan de
 > donde vengan.
 
@@ -67,6 +65,22 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       hidrata sin letras y solo vuelan los mensajes nuevos (vistos por
       `requestId:rol`).
 - [ ] Verificación Telegram real con app cerrada.
+- [ ] Commit publicado con permiso explícito.
+
+## Fase 4 — Tools de calendario (en curso)
+
+> `calendar_read` (todos) + `calendar_write` (solo editables, con
+> confirmación). Bucle multi-turno en el cerebro, UI de confirmación.
+
+- [x] CalDAV escritura (create/update/delete, UID, escape RFC 5545, parche textual).
+- [x] Registro, ejecutor con allowlist servidora, confirmaciones con caducidad,
+      `/v1/confirm`, `permission_respond`, panel ámbar en UI.
+- [x] Verificado live: lectura, confirm→deny, confirm→allow con rechazo en
+      Familia (no editable), escritura real en Deberes (PUT aceptado).
+- [x] Fix panel fantasma: sin reset al cambiar de sesión se acumulaban
+      historiales (`seq` persistido en disco + reset por `sessionId` en reducer).
+- [x] Comandos `/clear` (sesión nueva real) y `/help` (sin gastar Groq).
+- [ ] Re-verificar lectura/borrado del evento de prueba al despejar throttle.
 - [ ] Commit publicado con permiso explícito.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)

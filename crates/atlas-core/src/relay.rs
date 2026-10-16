@@ -10,8 +10,8 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::contracts::{
-    AtlasError, Correlation, EventType, MessageAppended, OutEvent, Role, SessionEvent,
-    SessionState, Source, codes,
+    AtlasError, ConfirmationRequest, Correlation, EventType, MessageAppended, OutEvent, RiskLevel,
+    Role, SessionEvent, SessionState, Source, codes,
 };
 
 fn unreachable(message: &str) -> AtlasError {
@@ -170,6 +170,25 @@ fn convert(value: &serde_json::Value) -> Option<(u64, OutEvent)> {
                 }),
             ))
         }
+        "confirmation" => {
+            let risk: RiskLevel =
+                serde_json::from_value(value.get("risk")?.clone()).ok()?;
+            Some((
+                seq,
+                OutEvent::Confirm(ConfirmationRequest {
+                    correlation: Correlation {
+                        request_id: text_field(value, "requestId")?,
+                        session_id: text_field(value, "sessionId")?,
+                        timestamp: text_field(value, "timestamp")?,
+                    },
+                    kind: EventType::PermissionConfirmationRequired,
+                    tool_id: text_field(value, "toolId")?,
+                    summary: text_field(value, "summary")?,
+                    risk,
+                    expires_at: text_field(value, "expiresAt")?,
+                }),
+            ))
+        }
         _ => None,
     }
 }
@@ -229,8 +248,7 @@ pub fn post_send(
 }
 
 /// Pide al cerebro cancelar una petición (idempotente).
-pub fn post_cancel(
-    base_url: &str,
+pub fn post_cancel(    base_url: &str,
     request_id: &str,
     timeout: Duration,
 ) -> Result<(), AtlasError> {
@@ -243,6 +261,28 @@ pub fn post_cancel(
         timeout,
     )?;
     Ok(())
+}
+
+/// Responde a una petición de confirmación. Devuelve si fue aceptada
+/// (false también cuando caducó o no existe: idempotente).
+pub fn post_confirm(
+    base_url: &str,
+    request_id: &str,
+    decision: &str,
+    timeout: Duration,
+) -> Result<bool, AtlasError> {
+    let payload = serde_json::json!({ "requestId": request_id, "decision": decision });
+    let parsed = http(
+        "POST",
+        base_url,
+        "/v1/confirm",
+        Some(payload.to_string().as_bytes()),
+        timeout,
+    )?;
+    Ok(parsed
+        .get("accepted")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false))
 }
 
 /// Mensaje guardado en una instantánea de sesión.
@@ -377,11 +417,30 @@ mod tests {
         let url = fake_brain(vec![
             ("/v1/send", r#"{"ok": true, "requestId": "r", "sessionId": "s"}"#),
             ("/v1/cancel", r#"{"ok": true, "cancelled": false}"#),
+            ("/v1/confirm", r#"{"ok": true, "accepted": true}"#),
         ]);
         let (request_id, session_id) =
             post_send(&url, "hola", "local", Duration::from_secs(5)).expect("send ok");
         assert_eq!((request_id.as_str(), session_id.as_str()), ("r", "s"));
         post_cancel(&url, "r", Duration::from_secs(5)).expect("cancel ok");
+        assert!(post_confirm(&url, "r", "allow_once", Duration::from_secs(5)).expect("confirm ok"));
+    }
+
+    #[test]
+    fn confirmation_se_convierte() {
+        let url = fake_brain(vec![(
+            "/v1/events?since=0",
+            r#"{"events": [
+              {"seq": 1, "kind": "confirmation",
+               "type": "permission.confirmation_required",
+               "requestId": "r", "sessionId": "s", "timestamp": "t",
+               "toolId": "calendar_write", "summary": "Crear X",
+               "risk": "write", "expiresAt": "e"}
+            ]}"#,
+        )]);
+        let fetched = get_events(&url, 0, Duration::from_secs(5)).expect("fetch ok");
+        assert_eq!(fetched.items.len(), 1);
+        assert!(matches!(fetched.items[0].1, OutEvent::Confirm(_)));
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { Orbits } from './components/orb/Orbits'
 import { AtlasScene, type ScenePort } from './components/scene/Scene'
 import { InputBar } from './components/chat/InputBar'
 import { ConversationPanel } from './components/chat/ConversationPanel'
+import { ConfirmationPanel } from './components/chat/ConfirmationPanel'
 import {
   conversationReducer,
   initialConversationState,
@@ -14,6 +15,8 @@ import { deriveOrbState } from './state/orbState'
 import type {
   ActiveSession,
   AtlasError,
+  ConfirmationDecision,
+  ConfirmationRequest,
   MessageAppended,
   MessageRole,
   SendResult,
@@ -58,6 +61,10 @@ interface RelayEventRow {
   source?: Source
   state?: SessionState
   message?: string
+  toolId?: string
+  summary?: string
+  risk?: string
+  expiresAt?: string
 }
 
 interface LetterPump {
@@ -237,6 +244,29 @@ export default function App() {
                 ...(typeof row.message === 'string' ? { message: row.message } : {}),
               },
             })
+          } else if (
+            row.kind === 'confirmation' &&
+            typeof row.toolId === 'string' &&
+            typeof row.summary === 'string' &&
+            (row.risk === 'read' ||
+              row.risk === 'write' ||
+              row.risk === 'external' ||
+              row.risk === 'destructive') &&
+            typeof row.expiresAt === 'string'
+          ) {
+            dispatch({
+              type: 'permission.confirmation_required',
+              event: {
+                type: 'permission.confirmation_required',
+                requestId: row.requestId,
+                sessionId: row.sessionId,
+                timestamp: row.timestamp,
+                toolId: row.toolId,
+                summary: row.summary,
+                risk: row.risk,
+                expiresAt: row.expiresAt,
+              },
+            })
           }
         }
       })
@@ -277,6 +307,15 @@ export default function App() {
         if (event.payload.role === 'user' && rememberMessage(event.payload.requestId, event.payload.role)) {
           enqueueLetters(event.payload.content)
         }
+      })
+        .then((unsub) => {
+          unsubs.push(unsub)
+        })
+        .catch(() => {
+          /* sin eventos: modo degradado */
+        })
+      listen<ConfirmationRequest>('permission.confirmation_required', (event) => {
+        dispatch({ type: 'permission.confirmation_required', event: event.payload })
       })
         .then((unsub) => {
           unsubs.push(unsub)
@@ -353,6 +392,30 @@ export default function App() {
     })
   }, [conversation.pendingRequestIds])
 
+  const handlePermissionRespond = useCallback(
+    (requestId: string, decision: ConfirmationDecision) => {
+      const done = () => dispatch({ type: 'permission.resolved', requestId })
+      if (!inTauri()) {
+        fetch('http://127.0.0.1:8765/v1/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId, decision }),
+        })
+          .then(() => done())
+          .catch(() => {
+            /* relay no disponible: se conserva la tarjeta */
+          })
+        return
+      }
+      invoke<boolean>('permission_respond', { requestId, decision })
+        .then(() => done())
+        .catch(() => {
+          /* relay no disponible: se conserva la tarjeta */
+        })
+    },
+    [],
+  )
+
   const orbState = deriveOrbState(
     sessionStateToOrbInput(conversation.sessionState, conversation.messages.length > 0),
   )
@@ -362,8 +425,18 @@ export default function App() {
       <Orbits asleep={false} />
       <AtlasScene agentTone="neutral" orbState={orbState} levelRef={levelRef} portRef={scenePortRef} />
       <div className="app-label" aria-label="Atlas">ATLAS</div>
-      {conversation.messages.length > 0 && (
-        <ConversationPanel messages={conversation.messages} />
+      {(conversation.messages.length > 0 || conversation.confirmations.length > 0) && (
+        <div className="chat-stack">
+          {conversation.confirmations.length > 0 && (
+            <ConfirmationPanel
+              items={conversation.confirmations}
+              onRespond={handlePermissionRespond}
+            />
+          )}
+          {conversation.messages.length > 0 && (
+            <ConversationPanel messages={conversation.messages} />
+          )}
+        </div>
       )}
       <InputBar
         onSubmit={handleSubmit}

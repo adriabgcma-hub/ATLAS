@@ -25,11 +25,15 @@ Variables de entorno (valores solo en `.env` local, nunca en Git):
   GROQ_API_KEY_1..3          Claves rotativas. Vacías = stub local explícito.
   GROQ_MODEL                 Modelo (defecto openai/gpt-oss-120b).
   GROQ_TEMPERATURE            Temperatura 0..2 (defecto 0.7).
+  RELAY_TIMEZONE             Zona horaria del contexto (defecto Europe/Madrid).
   RELAY_HOST                 IP de escucha. Vacío = IP LAN autodetectada.
   RELAY_PORT                 Puerto (defecto 8765).
   RELAY_DATA_DIR             Estado en disco (defecto temp/atlas-relay, dentro
                              del directorio de trabajo).
   RELAY_CORS_ORIGIN          Origen CORS (defecto vacío = sin CORS). Solo dev.
+  CALDAV_EDIT_CALENDARS      Nombres con permiso de escritura, separados por
+                             comas (defecto: Exámenes,Celebraciones,Horario,
+                             Deberes). Solo lectura en el resto.
 
 Códigos de salida: 0 ok, 1 fallo en ejecución, 2 error de configuración.
 """
@@ -48,8 +52,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NoReturn
+
+import atlas_caldav
 
 MAX_CONTENT_LEN = 4000
 MAX_BODY_BYTES = 64 * 1024
@@ -59,6 +66,25 @@ GROQ_TIMEOUT_S = 25
 OP_TIMEOUT_S = 30
 MAX_HISTORY = 6
 STORE_HISTORY = 100
+DEFAULT_TIMEZONE = "Europe/Madrid"
+
+# Sistema fijo (cacheable: no cambia entre llamadas) y contexto variable.
+SYSTEM_FIXED = (
+    "Eres Atlas, un asistente personal que acompaña al usuario desde su servidor. "
+    "Responde siempre en el idioma en que te escriban (por defecto, español). "
+    "Tono cercano pero sin tutear: hable de usted, directo y sin rodeos ni formalismos innecesarios. "
+    "Si no sabes algo, dilo. Conciso por defecto; detalle solo si lo piden. "
+    "Reproduce los nombres propios (calendarios, personas) literalmente, "
+    "sin abreviarlos ni alterarlos. Reporte el resultado de las herramientas "
+    "tal cual, sin reinterpretarlo ni inventar motivos. "
+    "Si el canal actual es Telegram, sé más breve. "
+    "Tienes herramientas de calendario: úsala cuando pregunten por eventos "
+    "en vez de inventar."
+)
+
+_DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+          "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 GROQ_API = "https://api.groq.com/openai/v1/chat/completions"
 TELEGRAM_API = "https://api.telegram.org"
@@ -66,6 +92,61 @@ TELEGRAM_API = "https://api.telegram.org"
 USER_AGENT = "AtlasRelay/3"
 
 TERMINAL_STATES = {"idle", "cancelled", "completed", "failed"}
+
+CONFIRM_TIMEOUT_S = 300
+MAX_TURNS = 4
+
+EDITABLE_DEFAULT = "Exámenes,Celebraciones,Horario,Deberes"
+
+# Catálogo de herramientas (ver docs/tools.md). El riesgo decide si la
+# ejecución es automática (read) o con confirmación en UI (write).
+TOOL_DEFS = [
+    {
+        "id": "calendar_read",
+        "risk": "read",
+        "requiresConfirmation": False,
+        "description": "Lee próximos eventos del calendario iCloud.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "días hacia adelante (1..31)"},
+                "calendar": {"type": "string", "description": "nombre del calendario (opcional)"},
+            },
+        },
+    },
+    {
+        "id": "calendar_write",
+        "risk": "write",
+        "requiresConfirmation": True,
+        "description": ("Crea, actualiza o borra eventos. SOLO en calendarios editables; "
+                        "cualquier otro se rechaza."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "update", "delete"]},
+                "calendar": {"type": "string", "description": "nombre del calendario"},
+                "uid": {"type": "string", "description": "requerido para update/delete"},
+                "summary": {"type": "string", "description": "título"},
+                "start": {"type": "string", "description": "YYYY-MM-DD o YYYY-MM-DDTHH:MM"},
+                "end": {"type": "string", "description": "fin (mismo formato)"},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+            },
+            "required": ["action", "calendar"],
+        },
+    },
+]
+
+
+def norm_name(name: str) -> str:
+    return name.strip().casefold()
+
+
+def tool_payload() -> list[dict]:
+    """Catálogo en formato OpenAI function calling para Groq."""
+    return [{"type": "function",
+             "function": {"name": t["id"], "description": t["description"],
+                          "parameters": t["schema"]}} for t in TOOL_DEFS]
 
 
 def log(message: str) -> None:
@@ -122,6 +203,12 @@ def read_env() -> dict:
         fail_config(f"GROQ_TEMPERATURE no es un número: {temp_raw!r}")
     if not 0.0 <= temperature <= 2.0:
         fail_config(f"GROQ_TEMPERATURE fuera de rango 0..2: {temp_raw!r}")
+    timezone_name = os.environ.get("RELAY_TIMEZONE", "").strip() or DEFAULT_TIMEZONE
+    try:
+        import zoneinfo  # noqa: PLC0415 (stdlib, validación temprana)
+        zoneinfo.ZoneInfo(timezone_name)
+    except Exception:
+        fail_config(f"RELAY_TIMEZONE desconocida: {timezone_name!r}")
 
     return {
         "token": os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
@@ -129,6 +216,12 @@ def read_env() -> dict:
         "groq_keys": groq_keys,
         "groq_model": model,
         "groq_temperature": temperature,
+        "timezone": timezone_name,
+        "caldav_user": os.environ.get("CALDAV_USERNAME", "").strip(),
+        "caldav_password": os.environ.get("CALDAV_APP_PASSWORD", "").strip(),
+        "editable": {norm_name(chunk) for chunk in
+                     os.environ.get("CALDAV_EDIT_CALENDARS",
+                                    EDITABLE_DEFAULT).split(",") if chunk.strip()},
         "host": os.environ.get("RELAY_HOST", "").strip(),
         "port": port,
         "data_dir": resolved,
@@ -168,6 +261,9 @@ class Brain:
         self.sessions: dict = {}
         self.active_id: str | None = None
         self.offset = 0
+        self._caldav: atlas_caldav.CalDAVClient | None = None
+        self.confirmations: dict = {}
+        self._cal_cache: dict = {}
         self._load()
 
     # -- persistencia ----------------------------------------------------
@@ -186,6 +282,10 @@ class Brain:
             active = data.get("active_id")
             if isinstance(active, str) and active in self.sessions:
                 self.active_id = active
+            seq = data.get("seq", 0)
+            if isinstance(seq, int) and seq >= 0:
+                # El cursor sobrevive al reinicio: los clientes no quedan ciegos.
+                self.seq = seq
             # Operaciones a medias murieron con el proceso anterior: a reposo.
             for session in self.sessions.values():
                 if session.get("state") not in TERMINAL_STATES:
@@ -201,7 +301,15 @@ class Brain:
 
     def _save_sessions(self) -> None:
         sessions_path, _ = self._paths()
-        atomic_write(sessions_path, {"sessions": self.sessions, "active_id": self.active_id})
+        # Poda: activa + 19 recientes (cada /clear crea sesión).
+        if len(self.sessions) > 20:
+            keep = [self.active_id] + [sid for sid in self.sessions
+                                       if sid != self.active_id][-19:]
+            self.sessions = {sid: self.sessions[sid] for sid in keep
+                             if sid in self.sessions}
+        atomic_write(sessions_path, {"sessions": self.sessions,
+                                     "active_id": self.active_id,
+                                     "seq": self.seq})
 
     def _save_offset(self) -> None:
         _, offset_path = self._paths()
@@ -258,18 +366,105 @@ class Brain:
     def events_since(self, cursor: int) -> list[dict]:
         with self.lock:
             return [e for e in self.events if e["seq"] > cursor]
-
     def current_seq(self) -> int:
         with self.lock:
             return self.seq
 
+    # -- calendario (solo lectura en v1) ----------------------------------
+    def calendar_status(self) -> str:
+        if not self.cfg.get("caldav_user") or not self.cfg.get("caldav_password"):
+            return "disabled"
+        with self.lock:
+            return "enabled" if self._caldav is not None else "standby"
+
+    def _caldav_client(self) -> atlas_caldav.CalDAVClient:
+        username = self.cfg.get("caldav_user", "")
+        password = self.cfg.get("caldav_password", "")
+        if not username or not password:
+            raise atlas_caldav.CalDAVError("no configurado")
+        with self.lock:
+            client = self._caldav
+        if client is None:
+            client = atlas_caldav.CalDAVClient(username, password)
+            client.discover()
+            with self.lock:
+                self._caldav = client
+        return client
+
+    def calendar_calendars(self) -> list[dict]:
+        try:
+            return self._caldav_client().discover()
+        except atlas_caldav.CalDAVError:
+            with self.lock:
+                self._caldav = None  # redescubrir la próxima vez
+            raise
+
+    def calendar_upcoming(self, days: int) -> list[dict]:
+        # Caché breve: una pregunta repetida no re-golpea iCloud.
+        with self.lock:
+            cached = self._cal_cache.get(days)
+            if cached and time.time() - cached[0] < 120:
+                return cached[1]
+        try:
+            events = self._caldav_client().upcoming(days)
+        except atlas_caldav.CalDAVError:
+            with self.lock:
+                self._caldav = None
+            raise
+        with self.lock:
+            self._cal_cache[days] = (time.time(), events)
+        return events
+
     # -- recepción -------------------------------------------------------
+    def _local_reply(self, text: str, source: str, chat_id: int | None = None) -> dict:
+        """Respuesta directa sin Groq (comandos). Ahorra cuota y es exacta."""
+        command = text.strip()
+        with self.lock:
+            if command == "/clear":
+                # Sesión nueva y vacía: contexto realmente limpio.
+                self.active_id = None
+            session = self._active()
+            session["state"] = "completed"
+            session["updated_at"] = utc_now()
+            request_id = new_id("req")
+            if command == "/clear":
+                content = "Historial reiniciado. ¿En qué le puedo ayudar?"
+            else:  # /help
+                content = ("Comandos: /clear (reiniciar la conversación). "
+                           "También puedo consultar su calendario iCloud "
+                           "y, con su permiso, crear, modificar o borrar "
+                           "eventos en sus calendarios editables.")
+                session["messages"].append({
+                    "requestId": request_id, "sessionId": session["id"],
+                    "role": "user", "content": text, "source": source,
+                    "timestamp": utc_now(),
+                })
+            session["messages"].append({
+                "requestId": new_id("req"), "sessionId": session["id"],
+                "role": "assistant", "content": content, "source": "local",
+                "timestamp": utc_now(),
+            })
+            session["messages"] = session["messages"][-STORE_HISTORY:]
+            self._save_sessions()
+            self._push_state(session["id"], request_id, "thinking")
+            if command != "/clear":
+                self._push_message(session["id"], request_id, "user", text, source)
+            self._push_state(session["id"], request_id, "responding")
+            self._push_message(session["id"], request_id, "assistant",
+                               content, "local")
+            self._push_state(session["id"], request_id, "completed")
+            if source == "telegram" and chat_id is not None:
+                self._send_telegram(chat_id, content)
+            return {"requestId": request_id, "sessionId": session["id"]}
+
     def receive(self, content: str, source: str, chat_id: int | None = None) -> dict:
         """Registra una petición y la encola al worker. Devuelve ids."""
         text = content.strip()
         if not text:
             raise ValueError("empty_message")
         text = text[:MAX_CONTENT_LEN]
+        if text in ("/clear", "/help"):
+            return self._local_reply(text, source, chat_id)
         with self.lock:
             session = self._active()
             session["state"] = "thinking"
@@ -297,6 +492,7 @@ class Brain:
             if len(self.cancelled) > 2000:
                 self.cancelled.clear()
             self.cancelled.add(request_id)
+            found = False
             for session in self.sessions.values():
                 pending_here = any(
                     m.get("requestId") == request_id and m.get("role") == "user"
@@ -307,24 +503,199 @@ class Brain:
                     session["updated_at"] = utc_now()
                     self._push_state(session["id"], request_id, "cancelled")
                     self._save_sessions()
-                    return True
-            return False
+                    found = True
+            # Interrumpe una confirmación en espera (equivale a denegar).
+            entry = self.confirmations.pop(request_id, None)
+            if entry is not None:
+                entry["decision"] = "deny"
+                entry["event"].set()
+            return found
 
     # -- Groq ------------------------------------------------------------
-    def groq_chat(self, history: list[dict]) -> tuple[str, str | None]:
-        """(texto, error). Sin claves → stub local explícito."""
+    def _context_block(self, channel: str) -> str:
+        """Fecha/hora server-side (zona configurable) + canal. Bloque variable,
+        separado del sistema fijo para no romper la caché de prefijo."""
+        import zoneinfo  # noqa: PLC0415 (stdlib)
+        now = datetime.now(zoneinfo.ZoneInfo(self.cfg["timezone"]))
+        canal = "Telegram" if channel == "telegram" else "aplicación"
+        return (f"Contexto actual: {_DIAS[now.weekday()]} {now.day} de "
+                f"{_MESES[now.month - 1]} de {now.year}, "
+                f"{now.strftime('%H:%M')} ({self.cfg['timezone']}). "
+                f"Canal actual: {canal}.")
+
+    # -- herramientas ----------------------------------------------------
+    def _tool_def(self, tool_id: str) -> dict | None:
+        return next((t for t in TOOL_DEFS if t["id"] == tool_id), None)
+
+    def _resolve_calendar(self, name: str) -> dict | None:
+        """Calendario por nombre (insensible a mayúsculas/espacios) o por id."""
+        if not name:
+            return None
+        try:
+            client = self._caldav_client()
+        except atlas_caldav.CalDAVError:
+            return None
+        wanted = norm_name(name)
+        for cal in client.calendars:
+            if norm_name(cal.get("name", "")) == wanted or cal.get("id") == name:
+                return cal
+        return None
+
+    def execute_tool(self, tool_id: str, args: dict) -> str:
+        """Ejecuta una herramienta. Devuelve texto para el modelo."""
+        if tool_id == "calendar_read":
+            try:
+                days = max(1, min(int(args.get("days", 7)), 31))
+            except (ValueError, TypeError):
+                days = 7
+            try:
+                events = self.calendar_upcoming(days)
+            except atlas_caldav.CalDAVError as exc:
+                return f"calendario no disponible ({exc})"
+            wanted = args.get("calendar")
+            if wanted:
+                events = [e for e in events
+                          if norm_name(e.get("calendar", "")) == norm_name(str(wanted))]
+            if not events:
+                return "sin eventos en ese rango"
+            lines = [f"{e['start'][:16]} {e['summary'][:80]} [{e['calendar']}] "
+                     f"(uid {e['uid']})" for e in events[:20]]
+            return "Eventos:\n" + "\n".join(lines)
+        if tool_id == "calendar_write":
+            return self._execute_write(args)
+        return "herramienta desconocida"
+
+    def _execute_write(self, args: dict) -> str:
+        action = args.get("action")
+        calendar_name = str(args.get("calendar", ""))
+        if action not in ("create", "update", "delete"):
+            return "acción inválida (create|update|delete)"
+        # Rechazo rápido sin red cuando viene un nombre (los ids con "/" pasan
+        # a resolución; tras descubrir se revalida igualmente).
+        if "/" not in calendar_name and norm_name(calendar_name) not in self.cfg["editable"]:
+            return "calendario no editable (solo lectura)"
+        try:
+            client = self._caldav_client()
+        except atlas_caldav.CalDAVError as exc:
+            return f"calendario no disponible ({exc})"
+        wanted = norm_name(calendar_name)
+        cal = next((c for c in client.calendars
+                    if norm_name(c.get("name", "")) == wanted
+                    or c.get("id") == calendar_name), None)
+        if cal is None:
+            return "calendario desconocido"
+        if norm_name(cal["name"]) not in self.cfg["editable"]:
+            return "calendario no editable (solo lectura)"
+        try:
+            if action == "create":
+                summary = str(args.get("summary", "")).strip()
+                start = str(args.get("start", "")).strip()
+                if not summary or not start:
+                    return "create necesita summary y start"
+                uid = new_id("evt").replace("evt-", "") + "@atlas"
+                ics = atlas_caldav.build_vevent(
+                    uid, summary, start,
+                    str(args.get("end", "") or "") or None,
+                    str(args.get("description", "") or ""),
+                    str(args.get("location", "") or ""),
+                    self.cfg["timezone"])
+                url = client.collection_url(cal["id"]) + uid + ".ics"
+                client.put_event(url, ics, new=True)
+                return f"creado «{summary}» en {cal['name']} (uid {uid})"
+            uid = str(args.get("uid", "")).strip()
+            if not uid:
+                return f"{action} necesita uid"
+            url = client.find_event_url(cal["id"], uid)
+            if not url:
+                return "evento no encontrado"
+            if action == "delete":
+                client.delete_event(url)
+                return f"borrado en {cal['name']} (uid {uid})"
+            raw = client.get_event(url)
+            patched = atlas_caldav.patch_vevent(
+                raw,
+                str(args.get("summary") or "") or None,
+                str(args.get("start") or "") or None,
+                str(args.get("end") or "") or None,
+                str(args.get("description") or "") or None,
+                str(args.get("location") or "") or None,
+                self.cfg["timezone"])
+            if patched is None:
+                return "evento ilegible"
+            client.put_event(url, patched)
+            return f"modificado en {cal['name']} (uid {uid})"
+        except atlas_caldav.CalDAVError as exc:
+            return f"calendario: {exc}"
+        except ValueError:
+            return "fecha inválida (YYYY-MM-DD o YYYY-MM-DDTHH:MM)"
+
+    def _confirm_summary(self, tool_id: str, args: dict) -> tuple[str, str]:
+        """(resumen para la UI, riesgo)."""
+        if tool_id == "calendar_write":
+            action = args.get("action", "?")
+            calendar = args.get("calendar", "?")
+            summary = str(args.get("summary", ""))
+            start = str(args.get("start", ""))
+            uid = str(args.get("uid", ""))[:8]
+            if action == "create":
+                text = f"Crear «{summary}» en {calendar}" + (f" el {start}" if start else "")
+            elif action == "update":
+                text = f"Modificar evento ({uid}…) en {calendar}"
+                if summary:
+                    text += f": «{summary}»"
+            elif action == "delete":
+                text = f"Borrar evento ({uid}…) en {calendar}"
+            else:
+                text = f"Calendario: {action} en {calendar}"
+            return (text, "write")
+        return (f"Ejecutar {tool_id}", "external")
+
+    def ask_confirmation(self, request_id: str, session_id: str,
+                         tool_id: str, args: dict) -> str | None:
+        """Emite la petición y espera. Devuelve la decisión o None (timeout)."""
+        summary, risk = self._confirm_summary(tool_id, args)
+        entry = {"tool": tool_id, "args": args, "event": threading.Event(),
+                 "decision": None, "expires": time.time() + CONFIRM_TIMEOUT_S}
+        with self.lock:
+            self.confirmations[request_id] = entry
+            self._push_event({
+                "kind": "confirmation", "type": "permission.confirmation_required",
+                "requestId": request_id, "sessionId": session_id,
+                "timestamp": utc_now(), "toolId": tool_id,
+                "summary": summary, "risk": risk,
+                "expiresAt": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                           time.gmtime(entry["expires"])),
+            })
+        entry["event"].wait(CONFIRM_TIMEOUT_S)
+        with self.lock:
+            self.confirmations.pop(request_id, None)
+        return entry["decision"]
+
+    def confirm(self, request_id: str, decision: str) -> bool:
+        """Registra la decisión del usuario. False si caducó o no existe."""
+        with self.lock:
+            entry = self.confirmations.get(request_id)
+            if entry is None or time.time() > entry["expires"]:
+                self.confirmations.pop(request_id, None)
+                return False
+            entry["decision"] = decision
+            entry["event"].set()
+            return True
+
+    def groq_completion(self, messages: list[dict]
+                        ) -> tuple[str | None, list | None, str | None]:
+        """Un turno con tools. Devuelve (contenido, tool_calls, error)."""
         keys = self.cfg["groq_keys"]
         if not keys:
-            last_user = next(
-                (m["content"] for m in reversed(history) if m["role"] == "user"), "")
-            return (f"(stub local · sin claves Groq) Recibido: {last_user}", None)
+            return (None, None, "no_keys")
         body = json.dumps({
             "model": self.cfg["groq_model"],
             "temperature": self.cfg["groq_temperature"],
-            "messages": [{"role": m["role"], "content": m["content"]}
-                         for m in history[-MAX_HISTORY:]],
+            "messages": messages,
+            "tools": tool_payload(),
+            "tool_choice": "auto",
         }).encode("utf-8")
-        last_err: str | None = "unknown"
+        last_err = "unknown"
         for index, key in enumerate(keys):
             req = urllib.request.Request(
                 GROQ_API, data=body,
@@ -336,23 +707,24 @@ class Brain:
             try:
                 with urllib.request.urlopen(req, timeout=GROQ_TIMEOUT_S) as response:
                     data = json.load(response)
-                text = ((data.get("choices") or [{}])[0].get("message", {})
-                        .get("content", "") or "").strip()
-                if not text:
-                    return ("", "empty_response")
-                return (text, None)
+                message = (data.get("choices") or [{}])[0].get("message", {})
+                content = (message.get("content") or "").strip() or None
+                calls = message.get("tool_calls") or None
+                if content is None and not calls:
+                    return (None, None, "empty_response")
+                return (content, calls, None)
             except urllib.error.HTTPError as exc:
                 if exc.code in (401, 403, 429) or 500 <= exc.code < 600:
                     last_err = f"http_{exc.code}"
                     if index + 1 < len(keys):
                         continue
-                return ("", f"http_{exc.code}")
+                return (None, None, f"http_{exc.code}")
             except Exception:
                 last_err = "unreachable"
                 if index + 1 < len(keys):
                     continue
-                return ("", "unreachable")
-        return ("", last_err or "unknown")
+                return (None, None, "unreachable")
+        return (None, None, last_err)
 
     # -- worker ----------------------------------------------------------
     def worker(self) -> None:
@@ -365,15 +737,8 @@ class Brain:
             finally:
                 self.jobs.task_done()
 
-    def _process(self, job: dict) -> None:
-        request_id = job["request_id"]
-        with self.lock:
-            session = self.sessions.get(job["session_id"])
-            if session is None:
-                return
-            history = [{"role": m["role"], "content": m["content"]}
-                       for m in session["messages"]]
-        text, error = self.groq_chat(history)
+    def _complete(self, request_id: str, job: dict, text: str, error: str | None) -> None:
+        """Cierra la operación (vía común de stub, LLM y tools)."""
         with self.lock:
             session = self.sessions.get(job["session_id"])
             if session is None:
@@ -403,6 +768,67 @@ class Brain:
             if job["source"] == "telegram" and job.get("chat_id") is not None:
                 reply = text if error is None else "Lo siento, ahora mismo no puedo responder."
                 self._send_telegram(job["chat_id"], reply[:MAX_CONTENT_LEN])
+
+    def _handle_tool_call(self, job: dict, call: dict) -> str:
+        """Ejecuta una tool_call del modelo (con confirmación si toca)."""
+        try:
+            function = call["function"]
+            name = function["name"]
+            args = json.loads(function.get("arguments") or "{}")
+            if not isinstance(args, dict):
+                args = {}
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return "llamada malformada"
+        tool = self._tool_def(name)
+        if tool is None:
+            return "herramienta desconocida"
+        if tool["requiresConfirmation"]:
+            # El tiempo del usuario no consume el plazo de la operación.
+            job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
+            decision = self.ask_confirmation(job["request_id"], job["session_id"],
+                                             name, args)
+            if decision != "allow_once":
+                return ("denegada por el usuario"
+                        if decision == "deny" else "caducada sin respuesta")
+        return self.execute_tool(name, args)
+
+    def _process(self, job: dict) -> None:
+        request_id = job["request_id"]
+        with self.lock:
+            session = self.sessions.get(job["session_id"])
+            if session is None:
+                return
+            history = [{"role": m["role"], "content": m["content"]}
+                       for m in session["messages"]]
+        channel = job.get("source", "local")
+        if not self.cfg["groq_keys"]:
+            last_user = next((m["content"] for m in reversed(history)
+                              if m["role"] == "user"), "")
+            self._complete(request_id, job,
+                           f"(stub local · sin claves Groq) Recibido: {last_user}",
+                           None)
+            return
+        messages: list[dict] = [
+            {"role": "system", "content": SYSTEM_FIXED},
+            {"role": "system", "content": self._context_block(channel)},
+        ]
+        messages.extend(history[-MAX_HISTORY:])
+        for _ in range(MAX_TURNS):
+            content, calls, error = self.groq_completion(messages)
+            if error is not None:
+                self._complete(request_id, job, "", error)
+                return
+            if not calls:
+                self._complete(request_id, job, content or "(vacío)", None)
+                return
+            messages.append({"role": "assistant", "content": content or "",
+                             "tool_calls": calls})
+            for call in calls:
+                result = self._handle_tool_call(job, call if isinstance(call, dict) else {})
+                call_id = call.get("id", "") if isinstance(call, dict) else ""
+                messages.append({"role": "tool", "tool_call_id": call_id,
+                                 "content": result})
+        self._complete(request_id, job, "", "max_turns")
 
     # -- Telegram --------------------------------------------------------
     def _telegram_call(self, method: str, payload: dict, timeout: int) -> dict:
@@ -527,11 +953,42 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
                 with brain.lock:
                     queued = len(brain.events)
                 self._json(200, {"ok": True, "telegram": status["telegram"],
-                                 "llm": status["llm"], "events": queued})
+                                 "llm": status["llm"], "calendar": status["calendar"],
+                                 "events": queued})
                 return
             if parsed.path == "/v1/session":
                 self._json(200, {"session": brain.get_snapshot(),
                                  "cursor": brain.current_seq()})
+                return
+            if parsed.path == "/v1/calendar/calendars":
+                try:
+                    calendars = brain.calendar_calendars()
+                except atlas_caldav.CalDAVError as exc:
+                    if str(exc) == "no configurado":
+                        self._json(501, {"ok": False, "error": "calendar_not_configured"})
+                    else:
+                        self._json(502, {"ok": False, "error": "calendar_upstream"})
+                    return
+                self._json(200, {"calendars": calendars})
+                return
+            if parsed.path == "/v1/calendar/upcoming":
+                query = urllib.parse.parse_qs(parsed.query)
+                try:
+                    days = int(query.get("days", ["7"])[0])
+                    if not 1 <= days <= 31:
+                        raise ValueError
+                except ValueError:
+                    self._json(400, {"ok": False, "error": "bad_days"})
+                    return
+                try:
+                    events = brain.calendar_upcoming(days)
+                except atlas_caldav.CalDAVError as exc:
+                    if str(exc) == "no configurado":
+                        self._json(501, {"ok": False, "error": "calendar_not_configured"})
+                    else:
+                        self._json(502, {"ok": False, "error": "calendar_upstream"})
+                    return
+                self._json(200, {"events": events})
                 return
             if parsed.path == "/v1/events":
                 query = urllib.parse.parse_qs(parsed.query)
@@ -579,6 +1036,18 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
                 cancelled = brain.cancel(request_id)
                 self._json(200, {"ok": True, "cancelled": cancelled})
                 return
+            if path == "/v1/confirm":
+                request_id = payload.get("requestId", "")
+                decision = payload.get("decision", "")
+                if not isinstance(request_id, str) or not request_id:
+                    self._json(400, {"ok": False, "error": "bad_request"})
+                    return
+                if decision not in ("allow_once", "deny"):
+                    self._json(400, {"ok": False, "error": "bad_decision"})
+                    return
+                accepted = brain.confirm(request_id, decision)
+                self._json(200, {"ok": True, "accepted": accepted})
+                return
             self._json(404, {"ok": False, "error": "not_found"})
 
     return Handler
@@ -599,6 +1068,7 @@ def main() -> int:
     status = {
         "telegram": "enabled" if cfg["token"] else "disabled",
         "llm": "groq" if cfg["groq_keys"] else "stub",
+        "calendar": brain.calendar_status(),
     }
     if cfg["token"] and not cfg["allowed"]:
         fail_config("Con bot activo, TELEGRAM_ALLOWED_USER_IDS no puede estar vacío.")

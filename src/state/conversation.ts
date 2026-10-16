@@ -1,6 +1,7 @@
 import type {
   ActiveSession,
   ChatMessage,
+  ConfirmationRequest,
   MessageAppended,
   SessionEvent,
   SessionState,
@@ -20,6 +21,8 @@ export interface ConversationState {
   /** requestIds en vuelo (thinking/responding): sirven para cancelar. */
   pendingRequestIds: string[]
   lastError: string | null
+  /** Confirmaciones pendientes de la UI (una por requestId). */
+  confirmations: ConfirmationRequest[]
 }
 
 export const initialConversationState: ConversationState = {
@@ -28,6 +31,7 @@ export const initialConversationState: ConversationState = {
   messages: [],
   pendingRequestIds: [],
   lastError: null,
+  confirmations: [],
 }
 
 export type ConversationAction =
@@ -35,6 +39,8 @@ export type ConversationAction =
   | { type: 'conversation.message_appended'; event: MessageAppended }
   | { type: 'conversation.error'; message: string; requestId?: string }
   | { type: 'conversation.hydrate'; session: ActiveSession }
+  | { type: 'permission.confirmation_required'; event: ConfirmationRequest }
+  | { type: 'permission.resolved'; requestId: string }
   | { type: 'conversation.reset' }
 
 /** Tope de mensajes en el frontal (el cerebro guarda 100; margen local). */
@@ -58,6 +64,15 @@ function toChatMessage(event: MessageAppended): ChatMessage {
   }
 }
 
+/**
+ * Nueva sesión en los eventos = panel nuevo. Sin esto, cada `/clear`
+ * acumulaba su "Historial reiniciado" sobre las sesiones anteriores.
+ */
+function ensureSession(state: ConversationState, sessionId: string): ConversationState {
+  if (state.sessionId === null || state.sessionId === sessionId) return state
+  return { ...initialConversationState, sessionId }
+}
+
 export function conversationReducer(
   state: ConversationState,
   action: ConversationAction,
@@ -65,34 +80,51 @@ export function conversationReducer(
   switch (action.type) {
     case 'session.state_changed': {
       const { event } = action
+      const base = ensureSession(state, event.sessionId)
       const pending =
         event.state === 'cancelled' || event.state === 'completed' || event.state === 'failed'
-          ? state.pendingRequestIds.filter((id) => id !== event.requestId)
-          : state.pendingRequestIds.includes(event.requestId)
-            ? state.pendingRequestIds
-            : [...state.pendingRequestIds, event.requestId]
+          ? base.pendingRequestIds.filter((id) => id !== event.requestId)
+          : base.pendingRequestIds.includes(event.requestId)
+            ? base.pendingRequestIds
+            : [...base.pendingRequestIds, event.requestId]
       return {
-        ...state,
+        ...base,
         sessionId: event.sessionId,
         sessionState: event.state,
         pendingRequestIds: pending,
-        lastError: event.state === 'failed' ? (event.message ?? 'unknown_error') : state.lastError,
+        lastError: event.state === 'failed' ? (event.message ?? 'unknown_error') : base.lastError,
       }
     }
     case 'conversation.message_appended': {
+      const base = ensureSession(state, action.event.sessionId)
       const message = toChatMessage(action.event)
-      if (state.messages.some((m) => m.requestId === message.requestId && m.role === message.role)) {
-        return state
+      if (base.messages.some((m) => m.requestId === message.requestId && m.role === message.role)) {
+        return base
       }
-      const messages = [...state.messages, message]
+      const messages = [...base.messages, message]
       return {
-        ...state,
+        ...base,
         sessionId: action.event.sessionId,
         messages: messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages,
       }
     }
     case 'conversation.error': {
       return { ...state, sessionState: 'failed', lastError: action.message }
+    }
+    case 'permission.confirmation_required': {
+      const base = ensureSession(state, action.event.sessionId)
+      const rest = base.confirmations.filter(
+        (c) => c.requestId !== action.event.requestId,
+      )
+      return { ...base, confirmations: [...rest, action.event] }
+    }
+    case 'permission.resolved': {
+      return {
+        ...state,
+        confirmations: state.confirmations.filter(
+          (c) => c.requestId !== action.requestId,
+        ),
+      }
     }
     case 'conversation.hydrate': {
       // Al reabrir, una operación a medias ya murió con el proceso anterior:
@@ -104,6 +136,8 @@ export function conversationReducer(
         messages: action.session.messages,
         pendingRequestIds: [],
         lastError: null,
+        // Las confirmaciones son en vivo: al recargar caducan solas.
+        confirmations: [],
       }
     }
     case 'conversation.reset': {

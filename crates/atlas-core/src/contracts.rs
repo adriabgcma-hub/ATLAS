@@ -19,6 +19,7 @@ pub mod codes {
     pub const INVALID_SOURCE: &str = "invalid_source";
     pub const RELAY_UNREACHABLE: &str = "relay_unreachable";
     pub const RELAY_INVALID: &str = "relay_invalid";
+    pub const BAD_DECISION: &str = "bad_decision";
     pub const INTERNAL: &str = "internal_error";
 }
 
@@ -52,6 +53,16 @@ pub enum Role {
     Assistant,
 }
 
+/// Nivel de riesgo de una herramienta (ver `contracts.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskLevel {
+    Read,
+    Write,
+    External,
+    Destructive,
+}
+
 /// Nombre de evento tal cual viaja por IPC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EventType {
@@ -59,6 +70,8 @@ pub enum EventType {
     SessionStateChanged,
     #[serde(rename = "conversation.message_appended")]
     MessageAppended,
+    #[serde(rename = "permission.confirmation_required")]
+    PermissionConfirmationRequired,
 }
 
 /// Identificadores de correlación. Se generan en el núcleo.
@@ -125,12 +138,29 @@ pub struct MessageAppended {
     pub source: Source,
 }
 
+/// Evento `permission.confirmation_required`. La ausencia de respuesta nunca
+/// autoriza: la petición caduca en el cerebro.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfirmationRequest {
+    #[serde(flatten)]
+    pub correlation: Correlation,
+    #[serde(rename = "type")]
+    pub kind: EventType,
+    #[serde(rename = "toolId")]
+    pub tool_id: String,
+    pub summary: String,
+    pub risk: RiskLevel,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: String,
+}
+
 /// Evento listo para emitir por IPC, en orden.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum OutEvent {
     Session(SessionEvent),
     Message(MessageAppended),
+    Confirm(ConfirmationRequest),
 }
 
 /// Error seguro para mostrar en el frontend.

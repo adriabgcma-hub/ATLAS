@@ -10,7 +10,10 @@
   → http://127.0.0.1:8765 (núcleo lo drena vía `ATLAS_RELAY_URL`; el frontal
   web en dev lo sondea directo con CORS solo para ese origen).
 - El relay **no** recarga solo: reinícialo (`pkill -f "server/atlas_relay.py"` y
-  arrancar de nuevo) cada vez que cambies `server/atlas_relay.py`.
+  arrancar de nuevo) cada vez que cambies algo en `server/`.
 - Nunca commitees `.env` (ignorado por Git): lleva tokens y API keys reales.
 - Tauri no lee `.env` solo: para `tauri dev`/`build` con claves,
   `set -a; . ./.env; set +a` antes (el relay y las pruebas Rust igual).
+- iCloud CalDAV: prohibido martillear. Cada prueba contra iCloud (una sola
+  petición de lectura o más) requiere permiso explícito del usuario, con pausa
+  entre intentos. Apple limita (throttle 403) ante ráfagas.

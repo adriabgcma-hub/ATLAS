@@ -135,16 +135,24 @@ select { font: inherit; }
 }
 
 /* ── Panel de conversación (Fase 3) ───────────────────────────────────
-   Encima de la barra de input, mismo ancho y mismo vidrio oscuro.
-   Solo presenta historial (eventos IPC → reducer); sin lógica. */
-.chat-panel {
+   Pila encima de la barra de input: confirmaciones + historial.
+   Solo presenta (eventos IPC → reducer); sin lógica. */
+.chat-stack {
   position: absolute;
   left: 32px;
   bottom: 104px;
   z-index: 4;
-  width: min(480px, calc(100vw - 64px));
-  max-height: min(38vh, 420px);
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(480px, calc(100vw - 64px));
+  max-height: min(46vh, 520px);
+}
+
+.chat-panel {
+  display: flex;
+  width: 100%;
+  max-height: min(30vh, 340px);
   border: 1px solid rgba(63, 164, 255, 0.22);
   border-radius: 14px;
   background: rgba(8, 20, 30, 0.52);
@@ -202,4 +210,78 @@ select { font: inherit; }
   letter-spacing: 0.01em;
   color: #d8f6ff;
   overflow-wrap: anywhere;
+}
+
+/* ── Confirmación de herramienta ──────────────────────────────────────
+   Acento ámbar (riesgo write): pide decisión explícita, nunca autoriza sola. */
+.chat-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.chat-confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 201, 83, 0.45);
+  border-radius: 14px;
+  background: rgba(30, 24, 8, 0.62);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    0 0 18px rgba(255, 201, 83, 0.1),
+    inset 0 0 18px rgba(255, 201, 83, 0.06);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+}
+
+.chat-confirm-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #f2e7c9;
+  overflow-wrap: anywhere;
+}
+
+.chat-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-confirm-allow,
+.chat-confirm-deny {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition:
+    box-shadow 160ms ease,
+    transform 120ms ease;
+}
+
+.chat-confirm-allow {
+  border: 1px solid rgba(0, 217, 255, 0.5);
+  background: rgba(20, 70, 120, 0.5);
+  color: #dff4ff;
+}
+
+.chat-confirm-allow:hover {
+  box-shadow: 0 0 14px rgba(0, 217, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.chat-confirm-deny {
+  border: 1px solid rgba(255, 107, 107, 0.45);
+  background: rgba(80, 24, 24, 0.4);
+  color: #ffd9d9;
+}
+
+.chat-confirm-deny:hover {
+  box-shadow: 0 0 14px rgba(255, 107, 107, 0.3);
+  transform: translateY(-1px);
 }

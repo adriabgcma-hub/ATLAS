@@ -52,10 +52,58 @@ Body: `{"content": "…", "source": "local"|"telegram"}` (defecto `local`).
 
 Errores: `400 empty_message` (vacío), `400 bad_source`, `400 bad_body`.
 
+Comandos de chat (respuesta directa sin Groq): `/clear` (sesión nueva y
+vacía) y `/help` (ayuda). Valen por ambos canales.
+
 ### `POST /v1/cancel`
 
 Body: `{"requestId": "req-…"}` → `{"ok": true, "cancelled": true|false}`.
 Idempotente: una petición desconocida devuelve `ok` sin efectos.
+Interrumpe también una confirmación en espera (equivale a denegar).
+
+### `POST /v1/confirm`
+
+Body: `{"requestId": "req-…", "decision": "allow_once"|"deny"}` →
+`{"ok": true, "accepted": true|false}` (`false` también si caducó o no existe).
+`decision` inválida → `400 bad_decision`.
+
+### Eventos de confirmación
+
+En `/v1/events` con `kind: "confirmation"`:
+
+```json
+{"seq": 8, "kind": "confirmation", "type": "permission.confirmation_required",
+ "requestId": "req-…", "sessionId": "ses-…", "timestamp": "…",
+ "toolId": "calendar_write", "summary": "Crear «Dentista» en Deberes",
+ "risk": "write", "expiresAt": "…"}
+```
+
+## Herramientas (function calling)
+
+El cerebro ofrece el catálogo de `docs/tools.md` al modelo en cada turno
+(máx. 4 turnos). Flujo: `tool_calls` → ejecutar lo legible / pedir
+confirmación lo sensible → respuestas `role: tool` → turno final. El tiempo
+de la confirmación no consume el plazo de la operación (30 s + espera).
+
+### `GET /v1/calendar/calendars`
+
+```json
+{"calendars": [{"id": "/…/", "name": "Casa"}]}
+```
+
+Sin credenciales → `501 calendar_not_configured`; fallo iCloud → `502 calendar_upstream`.
+
+### `GET /v1/calendar/upcoming?days=N`
+
+```json
+{"events": [{"uid": "…", "summary": "Dentista", "start": "…", "end": "…",
+             "status": "", "location": "", "calendar": "Casa"}]}
+```
+
+`days` 1..31 (defecto 7); fuera de rango → `400 bad_days`. Solo iCloud.
+Nota: iCloud limita (throttle 403) ante ráfagas; el relay lo presenta
+como `502 calendar_upstream` y reintenta en la siguiente petición. Uso
+normal (peticiones sueltas) no lo dispara.
 
 ## Variables de entorno (nombres; valores solo en `.env` local)
 
@@ -65,6 +113,22 @@ Idempotente: una petición desconocida devuelve `ok` sin efectos.
 - `RELAY_HOST` (defecto IP LAN), `RELAY_PORT` (defecto `8765`),
   `RELAY_DATA_DIR` (defecto `temp/atlas-relay`, dentro del repo),
   `RELAY_CORS_ORIGIN` (vacío = sin CORS; solo dev web)
+- `CALDAV_USERNAME` (tu Apple ID), `CALDAV_APP_PASSWORD` (contraseña de app)
+- `RELAY_TIMEZONE` (defecto `Europe/Madrid`; la hora del contexto sale de aquí,
+  nunca de APIs del Mac, para poder correr el servidor donde sea)
+
+## Sistema y contexto (Groq)
+
+Cada llamada lleva dos mensajes `system` + historial (últimos 6):
+
+1. **Fijo** (estable entre llamadas → aprovecha caché de prefijo): identidad de
+   Atlas, idioma del usuario, tono cercano sin tutear, concisión, brevedad en
+   Telegram. Sin system prompt no hay nada de esto: pedirlo fue decisión explícita.
+2. **Variable** (separado para no romper la caché): fecha/hora desde
+   `RELAY_TIMEZONE` + canal actual (`Telegram` | `aplicación`).
+
+La agenda solo entra vía tools (decisión explícita): el calendario está
+conectado al relay, pero el LLM no lo ve hasta que haya herramientas.
 
 ## Límites y notas
 

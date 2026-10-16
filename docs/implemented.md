@@ -6,6 +6,19 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Fase 4: tools de calendario
+
+- **Commit:** `Fase 4: tools de calendario`
+- **Fecha:** `2026-10-16`
+- **Descripción:** `calendar_read` (todos, auto) + `calendar_write` (solo
+  Exámenes/Celebraciones/Horario/Deberes, siempre con confirmación en UI).
+  Bucle multi-turno con function calling, allowlist servidora (ni el permiso
+  del usuario la salta), confirmaciones con caducidad, panel ámbar.
+  Verificado live: lectura, deny, allow con rechazo en Familia, escritura real
+  en Deberes. Throttle de Apple intermitente durante las pruebas.
+- **Documentación relacionada:** `docs/tools.md`, `docs/relay-api.md`,
+  `docs/implementation-plan.md`.
+
 ### Fase 3: cerebro en Python + panel
 
 - **Commit:** `Fase 3: cerebro en Python y panel`

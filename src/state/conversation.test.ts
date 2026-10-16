@@ -61,8 +61,7 @@ describe('conversationReducer', () => {
     expect(s3.messages).toHaveLength(2)
   })
 
-  it('completed limpia el request en vuelo', () => {
-    const s1 = conversationReducer(initialConversationState, {
+  it('completed limpia el request en vuelo', () => {    const s1 = conversationReducer(initialConversationState, {
       type: 'session.state_changed',
       event: stateChanged('thinking'),
     })
@@ -83,8 +82,23 @@ describe('conversationReducer', () => {
     expect(next.lastError).toBe('relay_unreachable')
   })
 
-  it('hydrate conserva historial y aparca estados a medias en idle', () => {
-    const next = conversationReducer(initialConversationState, {
+  it('nueva sesión reinicia el panel', () => {
+    const s1 = conversationReducer(initialConversationState, {
+      type: 'conversation.message_appended',
+      event: appended('user'),
+    })
+    expect(s1.messages).toHaveLength(1)
+    const other = { ...appended('assistant'), sessionId: 'ses-2', requestId: 'req-9' }
+    const s2 = conversationReducer(s1, {
+      type: 'conversation.message_appended',
+      event: other,
+    })
+    expect(s2.sessionId).toBe('ses-2')
+    expect(s2.messages).toHaveLength(1)
+    expect(s2.messages[0].role).toBe('assistant')
+  })
+
+  it('hydrate conserva historial y aparca estados a medias en idle', () => {    const next = conversationReducer(initialConversationState, {
       type: 'conversation.hydrate',
       session: {
         sessionId: 'ses-1',
@@ -127,5 +141,42 @@ describe('sessionStateToOrbInput + deriveOrbState', () => {
     expect(isSessionSettled('responding')).toBe(false)
     expect(isSessionSettled('completed')).toBe(true)
     expect(isSessionSettled('cancelled')).toBe(true)
+  })
+})
+
+describe('confirmaciones', () => {
+  const confirmation = {
+    type: 'permission.confirmation_required' as const,
+    requestId: 'req-9',
+    sessionId: 'ses-1',
+    timestamp: '2026-10-12T00:00:00.000Z',
+    toolId: 'calendar_write',
+    summary: 'Crear «Dentista» en Deberes',
+    risk: 'write' as const,
+    expiresAt: '2026-10-12T00:05:00.000Z',
+  }
+
+  it('acumula por requestId sin duplicar', () => {
+    const s1 = conversationReducer(initialConversationState, {
+      type: 'permission.confirmation_required',
+      event: confirmation,
+    })
+    const s2 = conversationReducer(s1, {
+      type: 'permission.confirmation_required',
+      event: confirmation,
+    })
+    expect(s2.confirmations).toHaveLength(1)
+  })
+
+  it('resolved retira la tarjeta', () => {
+    const s1 = conversationReducer(initialConversationState, {
+      type: 'permission.confirmation_required',
+      event: confirmation,
+    })
+    const s2 = conversationReducer(s1, {
+      type: 'permission.resolved',
+      requestId: 'req-9',
+    })
+    expect(s2.confirmations).toHaveLength(0)
   })
 })

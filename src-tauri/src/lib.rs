@@ -40,6 +40,9 @@ fn emit_all(app: &AppHandle, events: &[atlas_core::OutEvent]) {
             atlas_core::OutEvent::Message(e) => {
                 let _ = app.emit("conversation.message_appended", e);
             }
+            atlas_core::OutEvent::Confirm(e) => {
+                let _ = app.emit("permission.confirmation_required", e);
+            }
         }
     }
 }
@@ -142,7 +145,24 @@ fn conversation_cancel(
     Ok(())
 }
 
-/// Instantánea de la sesión activa del cerebro (para hidratar al abrir).
+/// Responde a una petición de confirmación (`allow_once` | `deny`).
+/// Devuelve si fue aceptada (false también al caducar: idempotente).
+#[tauri::command]
+fn permission_respond(
+    request_id: String,
+    decision: String,
+    state: State<CoreState>,
+) -> Result<bool, AtlasError> {
+    if decision != "allow_once" && decision != "deny" {
+        return Err(AtlasError::new(
+            codes::BAD_DECISION,
+            "Decisión inválida.",
+            false,
+        ));
+    }
+    let url = state.relay_url.clone();
+    atlas_core::post_confirm(&url, &request_id, &decision, Duration::from_secs(5))
+}
 /// Arranca el cursor en el borde vivo: lo ya mostrado no se re-juega.
 #[tauri::command]
 fn session_get(state: State<CoreState>) -> Result<Option<ActiveSessionView>, AtlasError> {
@@ -191,6 +211,7 @@ pub fn run() {
             conversation_cancel,
             session_get,
             relay_drain,
+            permission_respond,
         ])
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

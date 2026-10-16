@@ -45,6 +45,16 @@ export interface AtlasError {
   requestId?: string
 }
 
+export type ConfirmationDecision = 'allow_once' | 'deny'
+
+export interface ConfirmationRequest extends Correlation {
+  type: 'permission.confirmation_required'
+  toolId: string
+  summary: string
+  risk: 'read' | 'write' | 'external' | 'destructive'
+  expiresAt: string
+}
+
 /** Mensaje guardado en el estado de conversación del frontend. */
 export interface ChatMessage {
   requestId: string
