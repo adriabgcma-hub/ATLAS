@@ -1,18 +1,17 @@
-//! Núcleo de sesiones de Atlas (Fase 2).
+//! Núcleo de Atlas (Fase 3).
 //!
-//! Puro y sin Tauri: contratos, sesiones y cliente del relay. La capa
-//! `src-tauri` lo envuelve en comandos IPC y eventos.
+//! Fino por diseño: contratos tipados + cliente HTTP del cerebro Python
+//! (`server/atlas_relay.py`), que es el dueño de sesiones, Groq y Telegram.
+//! Sin Tauri, sin sesiones locales, sin claves.
 
 pub mod contracts;
 pub mod relay;
-pub mod session;
 
 pub use contracts::{
-    AtlasError, Correlation, EventType, MessageAppended, Role, SessionEvent, SessionState,
-    Source, codes, now_iso8601, MAX_CONTENT_LEN,
+    AtlasError, Correlation, EventType, MessageAppended, OutEvent, Role, SessionEvent,
+    SessionState, Source, codes, now_iso8601, MAX_CONTENT_LEN,
 };
-pub use relay::{FetchResult, RelayMessage, fetch_messages};
-pub use session::{
-    ChatMessage, DrainOutcome, OutEvent, Responder, SendOutcome, Session, SessionManager,
-    StubResponder, is_transition_allowed, OP_TIMEOUT, STUB_DELAY,
+pub use relay::{
+    FetchedEvents, SessionSnapshot, SnapshotMessage, get_events, get_session, post_cancel,
+    post_send,
 };

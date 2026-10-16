@@ -37,6 +37,9 @@ export type ConversationAction =
   | { type: 'conversation.hydrate'; session: ActiveSession }
   | { type: 'conversation.reset' }
 
+/** Tope de mensajes en el frontal (el cerebro guarda 100; margen local). */
+const MAX_MESSAGES = 200
+
 const TERMINAL: ReadonlySet<SessionState> = new Set([
   'idle',
   'cancelled',
@@ -81,10 +84,11 @@ export function conversationReducer(
       if (state.messages.some((m) => m.requestId === message.requestId && m.role === message.role)) {
         return state
       }
+      const messages = [...state.messages, message]
       return {
         ...state,
         sessionId: action.event.sessionId,
-        messages: [...state.messages, message],
+        messages: messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages,
       }
     }
     case 'conversation.error': {

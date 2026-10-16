@@ -133,3 +133,73 @@ select { font: inherit; }
   opacity: 0.35;
   cursor: default;
 }
+
+/* ── Panel de conversación (Fase 3) ───────────────────────────────────
+   Encima de la barra de input, mismo ancho y mismo vidrio oscuro.
+   Solo presenta historial (eventos IPC → reducer); sin lógica. */
+.chat-panel {
+  position: absolute;
+  left: 32px;
+  bottom: 104px;
+  z-index: 4;
+  width: min(480px, calc(100vw - 64px));
+  max-height: min(38vh, 420px);
+  display: flex;
+  border: 1px solid rgba(63, 164, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(8, 20, 30, 0.52);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    inset 0 0 18px rgba(63, 164, 255, 0.06);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+}
+
+.chat-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 16px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(63, 164, 255, 0.35) transparent;
+}
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+.chat-msg-user {
+  align-self: flex-end;
+  align-items: flex-end;
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  background: rgba(20, 70, 120, 0.35);
+}
+
+.chat-msg-assistant {
+  align-self: flex-start;
+  border: 1px solid rgba(118, 196, 255, 0.2);
+  background: rgba(14, 30, 44, 0.55);
+}
+
+.chat-msg-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(122, 180, 222, 0.6);
+}
+
+.chat-msg-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: #d8f6ff;
+  overflow-wrap: anywhere;
+}

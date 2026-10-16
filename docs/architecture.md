@@ -63,13 +63,18 @@ El runtime recibe un contexto acotado y devuelve texto, eventos de razonamiento 
 
 Cada herramienta declara identidad, versión, esquema de entrada, esquema de salida, nivel de riesgo y requisitos de permiso. Los adaptadores externos se mantienen aislados para poder sustituirlos o desactivarlos.
 
-### Relay Telegram (canal externo, Fase 2)
+### Servidor Python: el cerebro (Fase 3)
 
-El bot de Telegram no habla con la app directamente. Un relay Python aparte lo
-consulta por polling saliente y sirve la cola FIFO por HTTP solo en la red
-local. El núcleo drena esa cola (`relay_drain`) e ingiere cada mensaje como
-canal `telegram`, con los mismos contratos y sesiones que el input local. Sin
-webhooks: el relay nunca se expone a internet.
+El relay es el dueño único de sesiones, historial, Groq y Telegram, con la
+app abierta o cerrada:
+
+- Consulta el bot por polling saliente y responde por `sendMessage` directo
+  (24/7 aunque la app esté cerrada). Sin webhooks: nunca se expone a internet.
+- Llama a Groq con 3 API keys rotativas (solo entorno local, nunca repo ni UI).
+- Un worker único procesa en FIFO estricto; sesiones persistidas en disco.
+- Sirve eventos por HTTP solo en red local (`/v1/events`): la app drena y
+  presenta cuando está abierta. El núcleo Rust es transporte (contratos + HTTP),
+  sin estado propio.
 
 ## Flujo de una petición
 
@@ -86,8 +91,8 @@ webhooks: el relay nunca se expone a internet.
 ## Estado de implementación
 
 - **Activo**: ventana Tauri transparente, escena WebGL, orbe y órbitas, barra de
-  input, sesiones identificadas y cancelables, IPC de conversación y relay Telegram.
-- **Planificado**: runtime de IA (Groq registrado, sin integrar), memoria y
-  registro de herramientas.
+  input, panel de conversación, cerebro Python 24/7 (sesiones, Groq con rotación,
+  Telegram con respuesta directa) e IPC de eventos.
+- **Planificado**: memoria, registro de herramientas y streaming progresivo.
 - **No activar por defecto**: micrófono, escucha permanente, wake word, TTS y agentes autónomos.
 

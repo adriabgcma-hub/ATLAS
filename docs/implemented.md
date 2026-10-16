@@ -6,6 +6,31 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Fase 3: cerebro en Python + panel
+
+- **Commit:** `Fase 3: cerebro en Python y panel`
+- **Fecha:** `2026-10-16`
+- **Descripción:** el cerebro se muda al relay Python 24/7 (sesiones
+  persistidas, Groq con 3 claves rotativas, worker FIFO, respuesta directa a
+  Telegram, cola de eventos). Rust adelgaza a contratos + HTTP (`session.rs` y
+  `provider.rs` eliminados). Panel de conversación con respuestas del LLM.
+  Verificación: cerebro live con Groq real; incidencia 403 por UA de urllib
+  resuelta con UA propio; fix replay (cursor vivo en `/v1/session`, hidratación
+  sin letras, vistos por `requestId:rol`).
+- **Documentación relacionada:** `docs/architecture.md`,
+  `docs/implementation-plan.md`, `docs/relay-api.md`.
+
+### Revisión de estabilidad (2026-10-16)
+
+- **Commit:** `Fase 3: cerebro en Python y panel`
+- **Descripción:** relay: poda del conjunto de canceladas, backoff exponencial
+  del poll (5s→60s), salida dura con token inválido, `health.events` honesto,
+  timestamps en log. Frontal: tope de 200 mensajes, poda de timers al drenar.
+  Rust: cero warnings, clippy limpio. Suite verde + ciclo Groq live.
+- **Limitaciones conocidas:** cola de jobs sin cota (latencia crece si Groq va
+  lento); redelivery de Telegram ante caída entre batches (duplicado posible);
+  eventos en memoria (no sobreviven al reinicio; el historial sí).
+
 ### Fase 2: canales, relay y sesiones
 
 - **Commit:** `Fase 2: canales, relay y sesiones`

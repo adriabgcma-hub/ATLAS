@@ -1,8 +1,7 @@
-//! Cliente mínimo del relay de Atlas (Fase 2).
+//! Cliente HTTP mínimo del cerebro Python (Fase 3). Solo std.
 //!
-//! Solo std: `GET /v1/messages?since=N` contra el relay Python en la red local.
-//! Sin dependencias HTTP para mantener el núcleo ligero. Solo `http://`:
-//! el relay nunca se expone a internet (polling saliente, bind LAN).
+//! El cerebro (sesiones, Groq, Telegram) vive en `server/atlas_relay.py`.
+//! Este módulo solo transporta eventos y peticiones por la red local.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -10,30 +9,10 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::contracts::{AtlasError, Source, codes};
-
-/// Mensaje tal cual lo sirve el relay.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RelayMessage {
-    pub seq: u64,
-    pub content: String,
-    pub source: Source,
-    #[serde(default)]
-    pub ts: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessagesBody {
-    messages: Vec<serde_json::Value>,
-}
-
-/// Resultado de una lectura del relay.
-#[derive(Debug, Clone)]
-pub struct FetchResult {
-    pub messages: Vec<RelayMessage>,
-    /// Elementos con forma inválida (se omiten sin abortar).
-    pub skipped: usize,
-}
+use super::contracts::{
+    AtlasError, Correlation, EventType, MessageAppended, OutEvent, Role, SessionEvent,
+    SessionState, Source, codes,
+};
 
 fn unreachable(message: &str) -> AtlasError {
     AtlasError::new(codes::RELAY_UNREACHABLE, message, true)
@@ -63,12 +42,13 @@ fn split_host_port(base_url: &str) -> Result<(String, u16), AtlasError> {
     }
 }
 
-/// Lee los mensajes nuevos del relay (`seq > since`), en orden.
-pub fn fetch_messages(
+fn http(
+    method: &str,
     base_url: &str,
-    since: u64,
+    path: &str,
+    body: Option<&[u8]>,
     timeout: Duration,
-) -> Result<FetchResult, AtlasError> {
+) -> Result<serde_json::Value, AtlasError> {
     let (host, port) = split_host_port(base_url)?;
     let addr = format!("{host}:{port}")
         .to_socket_addrs()
@@ -81,59 +61,289 @@ pub fn fetch_messages(
         .set_read_timeout(Some(timeout))
         .map_err(|_| unreachable("No se pudo configurar el relay."))?;
 
-    let request = format!(
-        "GET /v1/messages?since={since} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-    );
+    let mut request = format!("{method} {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n");
+    if let Some(payload) = body {
+        request.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            payload.len()
+        ));
+    }
+    request.push_str("\r\n");
     stream
         .write_all(request.as_bytes())
-        .map_err(|_| unreachable("No se pudo pedir mensajes al relay."))?;
+        .map_err(|_| unreachable("No se pudo escribir al relay."))?;
+    if let Some(payload) = body {
+        stream
+            .write_all(payload)
+            .map_err(|_| unreachable("No se pudo escribir al relay."))?;
+    }
     let mut raw = Vec::new();
     stream
         .read_to_end(&mut raw)
         .map_err(|_| unreachable("El relay cortó la respuesta."))?;
 
     let text = String::from_utf8_lossy(&raw);
-    let (head, body) = text
+    let (head, body_text) = text
         .split_once("\r\n\r\n")
         .ok_or_else(|| invalid("Respuesta del relay sin cabeceras."))?;
-    let status = head.lines().next().unwrap_or("");
-    if !(status.contains(" 200 ") || status.ends_with(" 200")) {
+    let status: u16 = head
+        .lines()
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+    if !(200..300).contains(&status) {
+        // El relay explica el 400 con `{error: <codigo>}`.
+        if status == 400 {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_text) {
+                if parsed.get("error").and_then(|e| e.as_str()) == Some("empty_message") {
+                    return Err(AtlasError::new(
+                        codes::EMPTY_MESSAGE,
+                        "El mensaje está vacío.",
+                        false,
+                    ));
+                }
+            }
+        }
         return Err(invalid("El relay devolvió un estado inesperado."));
     }
-    let parsed: MessagesBody =
-        serde_json::from_str(body).map_err(|_| invalid("Cuerpo del relay inválido."))?;
+    serde_json::from_str(body_text).map_err(|_| invalid("Cuerpo del relay inválido."))
+}
 
-    let mut messages = Vec::new();
+/// Eventos nuevos del cerebro (`seq > since`), convertidos y en orden.
+#[derive(Debug, Clone)]
+pub struct FetchedEvents {
+    pub items: Vec<(u64, OutEvent)>,
+    /// Elementos con forma inválida (se omiten sin abortar).
+    pub skipped: usize,
+}
+
+fn text_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|field| field.as_str())
+        .map(|field| field.to_string())
+        .filter(|field| !field.is_empty())
+}
+
+fn convert(value: &serde_json::Value) -> Option<(u64, OutEvent)> {
+    let seq = value.get("seq")?.as_u64()?;
+    match value.get("kind")?.as_str()? {
+        "message" => {
+            let role: Role = serde_json::from_value(value.get("role")?.clone()).ok()?;
+            let source: Source = serde_json::from_value(value.get("source")?.clone()).ok()?;
+            let content = text_field(value, "content")?;
+            Some((
+                seq,
+                OutEvent::Message(MessageAppended {
+                    correlation: Correlation {
+                        request_id: text_field(value, "requestId")?,
+                        session_id: text_field(value, "sessionId")?,
+                        timestamp: text_field(value, "timestamp")?,
+                    },
+                    kind: EventType::MessageAppended,
+                    role,
+                    content,
+                    source,
+                }),
+            ))
+        }
+        "state" => {
+            let state: SessionState =
+                serde_json::from_value(value.get("state")?.clone()).ok()?;
+            Some((
+                seq,
+                OutEvent::Session(SessionEvent {
+                    correlation: Correlation {
+                        request_id: text_field(value, "requestId")?,
+                        session_id: text_field(value, "sessionId")?,
+                        timestamp: text_field(value, "timestamp")?,
+                    },
+                    kind: EventType::SessionStateChanged,
+                    state,
+                    message: value
+                        .get("message")
+                        .and_then(|field| field.as_str())
+                        .map(|field| field.to_string()),
+                }),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Lee los eventos nuevos del cerebro.
+pub fn get_events(
+    base_url: &str,
+    since: u64,
+    timeout: Duration,
+) -> Result<FetchedEvents, AtlasError> {
+    let parsed = http(
+        "GET",
+        base_url,
+        &format!("/v1/events?since={since}"),
+        None,
+        timeout,
+    )?;
+    let mut items = Vec::new();
     let mut skipped = 0;
-    for item in parsed.messages {
-        match serde_json::from_value::<RelayMessage>(item) {
-            Ok(message) => messages.push(message),
-            Err(_) => skipped += 1,
+    let empty = Vec::new();
+    let raw = parsed
+        .get("events")
+        .and_then(|events| events.as_array())
+        .unwrap_or(&empty);
+    for item in raw {
+        match convert(item) {
+            Some(converted) => items.push(converted),
+            None => skipped += 1,
         }
     }
-    messages.sort_by_key(|m| m.seq);
-    Ok(FetchResult { messages, skipped })
+    items.sort_by_key(|(seq, _)| *seq);
+    Ok(FetchedEvents { items, skipped })
+}
+
+/// Envía un mensaje al cerebro. Devuelve `(requestId, sessionId)`.
+pub fn post_send(
+    base_url: &str,
+    content: &str,
+    source: &str,
+    timeout: Duration,
+) -> Result<(String, String), AtlasError> {
+    let payload = serde_json::json!({ "content": content, "source": source });
+    let parsed = http(
+        "POST",
+        base_url,
+        "/v1/send",
+        Some(payload.to_string().as_bytes()),
+        timeout,
+    )?;
+    match (
+        text_field(&parsed, "requestId"),
+        text_field(&parsed, "sessionId"),
+    ) {
+        (Some(request_id), Some(session_id)) => Ok((request_id, session_id)),
+        _ => Err(invalid("El relay no devolvió identificadores.")),
+    }
+}
+
+/// Pide al cerebro cancelar una petición (idempotente).
+pub fn post_cancel(
+    base_url: &str,
+    request_id: &str,
+    timeout: Duration,
+) -> Result<(), AtlasError> {
+    let payload = serde_json::json!({ "requestId": request_id });
+    http(
+        "POST",
+        base_url,
+        "/v1/cancel",
+        Some(payload.to_string().as_bytes()),
+        timeout,
+    )?;
+    Ok(())
+}
+
+/// Mensaje guardado en una instantánea de sesión.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SnapshotMessage {
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    pub role: Role,
+    pub content: String,
+    pub source: Source,
+    pub timestamp: String,
+}
+
+/// Instantánea de la sesión activa del cerebro (`None` si no hay).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionSnapshot {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    pub state: SessionState,
+    pub messages: Vec<SnapshotMessage>,
+}
+
+pub fn get_session(
+    base_url: &str,
+    timeout: Duration,
+) -> Result<(Option<SessionSnapshot>, u64), AtlasError> {
+    let parsed = http("GET", base_url, "/v1/session", None, timeout)?;
+    let cursor = parsed.get("cursor").and_then(|seq| seq.as_u64()).unwrap_or(0);
+    let snapshot = match parsed.get("session") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(snapshot) => serde_json::from_value(snapshot.clone())
+            .map(Some)
+            .map_err(|_| invalid("Sesión del relay ilegible."))?,
+    };
+    Ok((snapshot, cursor))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use std::net::TcpListener;
 
-    /// Relay falso en localhost: responde una vez con `body`.
-    fn fake_relay(body: &str) -> String {
+    /// Cerebro falso en localhost: sirve `routes` (path → cuerpo).
+    /// Consume la petición entera (cabeceras + cuerpo según Content-Length),
+    /// como un servidor HTTP real, antes de responder.
+    fn fake_brain(routes: Vec<(&'static str, &'static str)>) -> String {
+        use std::io::BufRead;
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr").to_string();
-        let owned = body.to_string();
         std::thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
+            for stream in listener.incoming().take(routes.len()) {
+                let Ok(stream) = stream else {
+                    break;
+                };
+                let mut reader = std::io::BufReader::new(stream);
+                let mut first = String::new();
+                if reader.read_line(&mut first).unwrap_or(0) == 0 {
+                    continue;
+                }
+                let path = first
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .to_string();
+                let mut content_length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let trimmed = line.trim_end().to_lowercase();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = trimmed.strip_prefix("content-length:") {
+                        content_length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                if content_length > 0 {
+                    let mut body_buf = vec![0u8; content_length];
+                    if std::io::Read::read_exact(&mut reader, &mut body_buf).is_err() {
+                        continue;
+                    }
+                }
+                let mut stream = reader.into_inner();
+                let body = routes
+                    .iter()
+                    .find(|(route, _)| *route == path)
+                    .map(|(_, body)| *body)
+                    .unwrap_or(r#"{"ok":false,"error":"not_found"}"#);
+                let status = if body.contains("not_found") {
+                    "404 Not Found"
+                } else {
+                    "200 OK"
+                };
                 let response = format!(
-                    "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                    owned.len(),
-                    owned
+                    "HTTP/1.0 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
                 );
                 let _ = stream.write_all(response.as_bytes());
             }
@@ -142,34 +352,46 @@ mod tests {
     }
 
     #[test]
-    fn fetch_ordena_y_omite_invalidos() {
-        let url = fake_relay(
-            r#"{"messages":[
-              {"seq": 3, "content": "tercero", "source": "telegram"},
-              {"seq": 1, "content": "  ", "source": "local"},
-              {"seq": 2, "content": "segundo", "source": "sms"}
+    fn events_convierte_y_omite_invalidos() {
+        let url = fake_brain(vec![(
+            "/v1/events?since=0",
+            r#"{"events": [
+              {"seq": 2, "kind": "message", "type": "conversation.message_appended",
+               "requestId": "r2", "sessionId": "s", "timestamp": "t",
+               "role": "assistant", "content": "hola", "source": "local"},
+              {"seq": 1, "kind": "state", "type": "session.state_changed",
+               "requestId": "r1", "sessionId": "s", "timestamp": "t",
+               "state": "thinking"},
+              {"seq": 3, "kind": "message", "role": "user"}
             ]}"#,
-        );
-        let result = fetch_messages(&url, 0, Duration::from_secs(5)).expect("fetch ok");
-        // seq 1 llega (el núcleo lo omitirá por vacío); seq 2 se omite (origen malo).
-        assert_eq!(result.messages.len(), 2);
-        assert_eq!(result.messages[0].seq, 1);
-        assert_eq!(result.messages[1].seq, 3);
-        assert_eq!(result.skipped, 1);
+        )]);
+        let fetched = get_events(&url, 0, Duration::from_secs(5)).expect("fetch ok");
+        assert_eq!(fetched.items.len(), 2);
+        assert_eq!(fetched.items[0].0, 1);
+        assert_eq!(fetched.items[1].0, 2);
+        assert_eq!(fetched.skipped, 1);
     }
 
     #[test]
-    fn fetch_a_puerto_cerrado_es_reintentable() {
-        let err = fetch_messages("http://127.0.0.1:1", 0, Duration::from_millis(300))
+    fn send_devuelve_ids_y_cancel_no_falla() {
+        let url = fake_brain(vec![
+            ("/v1/send", r#"{"ok": true, "requestId": "r", "sessionId": "s"}"#),
+            ("/v1/cancel", r#"{"ok": true, "cancelled": false}"#),
+        ]);
+        let (request_id, session_id) =
+            post_send(&url, "hola", "local", Duration::from_secs(5)).expect("send ok");
+        assert_eq!((request_id.as_str(), session_id.as_str()), ("r", "s"));
+        post_cancel(&url, "r", Duration::from_secs(5)).expect("cancel ok");
+    }
+
+    #[test]
+    fn https_se_rechaza_y_caido_es_reintentable() {
+        let err = get_events("https://127.0.0.1:8765", 0, Duration::from_secs(1))
+            .expect_err("https no");
+        assert_eq!(err.code, codes::RELAY_INVALID);
+        let err = get_events("http://127.0.0.1:1", 0, Duration::from_millis(300))
             .expect_err("sin relay");
         assert_eq!(err.code, codes::RELAY_UNREACHABLE);
         assert!(err.retryable);
-    }
-
-    #[test]
-    fn https_se_rechaza() {
-        let err = fetch_messages("https://127.0.0.1:8765", 0, Duration::from_secs(1))
-            .expect_err("https no");
-        assert_eq!(err.code, codes::RELAY_INVALID);
     }
 }

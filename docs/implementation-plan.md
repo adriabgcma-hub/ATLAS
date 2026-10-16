@@ -49,6 +49,26 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 - [ ] Commit publicado con permiso explícito.
 - Cambios **sin commitear** (ver `git status`).
 
+## Fase 3 — Cerebro en Python + panel (en curso)
+
+> El LLM vive en el relay 24/7 con la app cerrada (decisión del usuario).
+> Rust adelgaza a transporte; el panel muestra mensajes del LLM vengan de
+> donde vengan.
+
+- [x] Relay cerebro: sesiones persistidas, Groq rotativo, worker FIFO único,
+      respuesta directa a Telegram, cola de eventos (`/v1/events|send|cancel|session`).
+- [x] Núcleo Rust fino (contratos + HTTP): `session.rs` y `provider.rs`
+      eliminados (un solo cerebro, sin duplicar sesiones ni claves).
+- [x] Panel de conversación (usuario + ATLAS, marca de canal TG).
+- [x] Pruebas (`cargo test`, `cargo check`, build, lint, vitest, cerebro live
+      con Groq real). Incidencia: Groq 403 al UA de urllib → UA propio.
+- [x] Fix replay: el cursor se reinicia en cada carga y re-jugaba toda la cola
+      (letras sin fin). Ahora `/v1/session` devuelve el cursor vivo, el frontal
+      hidrata sin letras y solo vuelan los mensajes nuevos (vistos por
+      `requestId:rol`).
+- [ ] Verificación Telegram real con app cerrada.
+- [ ] Commit publicado con permiso explícito.
+
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 
 - `GROQ_API_KEY_1/2/3` — rotación Groq (pendiente de uso).

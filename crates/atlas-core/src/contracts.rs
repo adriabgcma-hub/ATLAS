@@ -125,6 +125,14 @@ pub struct MessageAppended {
     pub source: Source,
 }
 
+/// Evento listo para emitir por IPC, en orden.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum OutEvent {
+    Session(SessionEvent),
+    Message(MessageAppended),
+}
+
 /// Error seguro para mostrar en el frontend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AtlasError {

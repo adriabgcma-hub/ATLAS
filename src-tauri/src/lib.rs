@@ -1,31 +1,28 @@
-//! Capa Tauri de Atlas (Fase 2): ventana, atajo global y comandos IPC.
+//! Capa Tauri de Atlas (Fase 3): ventana, atajo global y comandos IPC.
 //!
-//! Fina por diseño: toda la lógica de sesiones vive en `atlas-core`.
-//! Esta capa valida el borde, emite eventos y programa el stub diferido.
+//! Fina por diseño: el cerebro (sesiones, Groq, Telegram) vive en el relay
+//! Python. Esta capa transporta peticiones y eventos, sin estado propio.
 
 use std::sync::Mutex;
 use std::time::Duration;
 
-use atlas_core::{
-    AtlasError, OutEvent, SessionManager, Source, codes, fetch_messages, STUB_DELAY,
-};
+use atlas_core::{AtlasError, Source, codes, get_events, get_session, post_cancel, post_send};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-/// URL del relay Python en la red local. No es un secreto.
+/// URL del cerebro en la red local. No es un secreto.
 fn default_relay_url() -> String {
     std::env::var("ATLAS_RELAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8765".to_string())
 }
 
 struct CoreState {
-    manager: Mutex<SessionManager>,
     relay_url: String,
     relay_cursor: Mutex<u64>,
 }
 
-fn parse_source(raw: Option<String>) -> Result<Source, AtlasError> {
+fn parse_source(raw: Option<String>) -> Result<&'static str, AtlasError> {
     match raw.as_deref() {
-        None | Some("local") => Ok(Source::Local),
-        Some("telegram") => Ok(Source::Telegram),
+        None | Some("local") => Ok("local"),
+        Some("telegram") => Ok("telegram"),
         Some(_) => Err(AtlasError::new(
             codes::INVALID_SOURCE,
             "Origen desconocido.",
@@ -34,13 +31,13 @@ fn parse_source(raw: Option<String>) -> Result<Source, AtlasError> {
     }
 }
 
-fn emit_all(app: &AppHandle, events: &[OutEvent]) {
+fn emit_all(app: &AppHandle, events: &[atlas_core::OutEvent]) {
     for event in events {
         match event {
-            OutEvent::Session(e) => {
+            atlas_core::OutEvent::Session(e) => {
                 let _ = app.emit("session.state_changed", e);
             }
-            OutEvent::Message(e) => {
+            atlas_core::OutEvent::Message(e) => {
                 let _ = app.emit("conversation.message_appended", e);
             }
         }
@@ -85,13 +82,34 @@ struct ActiveSessionView {
     messages: Vec<MessageView>,
 }
 
-/// Barre timeouts pendientes y devuelve sus eventos para emitir.
-fn take_sweep_events(state: &State<CoreState>) -> Result<Vec<OutEvent>, AtlasError> {
-    let mut manager = state.manager.lock().map_err(|_| poisoned())?;
-    Ok(manager.sweep_timeouts())
+/// Drena los eventos nuevos del cerebro, actualiza el cursor y los emite.
+fn drain_events(state: &State<CoreState>, app: &AppHandle) -> Result<DrainResult, AtlasError> {
+    let (url, cursor) = {
+        let cursor = state.relay_cursor.lock().map_err(|_| poisoned())?;
+        (state.relay_url.clone(), *cursor)
+    };
+    let fetched = get_events(&url, cursor, Duration::from_secs(3))?;
+    let max = fetched
+        .items
+        .iter()
+        .map(|(seq, _)| *seq)
+        .max()
+        .unwrap_or(cursor);
+    if let Ok(mut stored) = state.relay_cursor.lock() {
+        if max > *stored {
+            *stored = max;
+        }
+    }
+    let events: Vec<atlas_core::OutEvent> =
+        fetched.items.into_iter().map(|(_, event)| event).collect();
+    emit_all(app, &events);
+    Ok(DrainResult {
+        delivered: events.len(),
+        skipped: fetched.skipped,
+    })
 }
 
-/// Registra un mensaje (canal local o Telegram) y abre la operación.
+/// Envía un mensaje al cerebro y drena de inmediato (eco sin espera).
 #[tauri::command]
 fn conversation_send(
     content: String,
@@ -100,112 +118,63 @@ fn conversation_send(
     app: AppHandle,
 ) -> Result<SendResult, AtlasError> {
     let src = parse_source(source)?;
-    emit_all(&app, &take_sweep_events(&state)?);
-
-    let outcome = {
-        let mut manager = state.manager.lock().map_err(|_| poisoned())?;
-        manager.send(&content, src)?
-    };
-    emit_all(&app, &outcome.events);
-
-    // Respuesta diferida del stub (Fase 2). La cancelación la suprime porque
-    // `complete_stub` es idempotente ante operaciones terminadas.
-    let delayed_app = app.clone();
-    let request_id = outcome.request_id.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(STUB_DELAY);
-        let events = delayed_app
-            .state::<CoreState>()
-            .manager
-            .lock()
-            .map(|mut manager| manager.complete_stub(&request_id))
-            .unwrap_or(Ok(Vec::new()));
-        if let Ok(events) = events {
-            emit_all(&delayed_app, &events);
-        }
-    });
-
+    let url = state.relay_url.clone();
+    let (request_id, session_id) =
+        post_send(&url, &content, src, Duration::from_secs(10))?;
+    // Drenado inmediato: el input local se representa sin esperar al ciclo.
+    let _ = drain_events(&state, &app);
     Ok(SendResult {
-        request_id: outcome.request_id,
-        session_id: outcome.session_id,
+        request_id,
+        session_id,
     })
 }
 
-/// Cancela una operación en curso. Idempotente ante terminales.
+/// Pide al cerebro cancelar una petición (idempotente).
 #[tauri::command]
 fn conversation_cancel(
     request_id: String,
     state: State<CoreState>,
     app: AppHandle,
 ) -> Result<(), AtlasError> {
-    emit_all(&app, &take_sweep_events(&state)?);
-    let events = {
-        let mut manager = state.manager.lock().map_err(|_| poisoned())?;
-        manager.cancel(&request_id)?
-    };
-    emit_all(&app, &events);
+    let url = state.relay_url.clone();
+    post_cancel(&url, &request_id, Duration::from_secs(5))?;
+    let _ = drain_events(&state, &app);
     Ok(())
 }
 
-/// Devuelve la sesión activa, si existe (para hidratar el frontend al abrir).
+/// Instantánea de la sesión activa del cerebro (para hidratar al abrir).
+/// Arranca el cursor en el borde vivo: lo ya mostrado no se re-juega.
 #[tauri::command]
 fn session_get(state: State<CoreState>) -> Result<Option<ActiveSessionView>, AtlasError> {
-    let manager = state.manager.lock().map_err(|_| poisoned())?;
-    Ok(manager.active().map(|session| ActiveSessionView {
-        session_id: session.id.clone(),
+    let url = state.relay_url.clone();
+    let (snapshot, cursor) = get_session(&url, Duration::from_secs(5))?;
+    if let Ok(mut stored) = state.relay_cursor.lock() {
+        if cursor > *stored {
+            *stored = cursor;
+        }
+    }
+    Ok(snapshot.map(|session| ActiveSessionView {
+        session_id: session.session_id,
         state: session.state,
         messages: session
             .messages
-            .iter()
+            .into_iter()
             .map(|m| MessageView {
-                request_id: m.request_id.clone(),
-                session_id: m.session_id.clone(),
+                request_id: m.request_id,
+                session_id: m.session_id,
                 role: m.role,
-                content: m.content.clone(),
+                content: m.content,
                 source: m.source,
-                timestamp: m.timestamp.clone(),
+                timestamp: m.timestamp,
             })
             .collect(),
     }))
 }
 
-/// Drena el relay (polling) e ingiere sus mensajes como canal `telegram`.
+/// Drena los eventos nuevos del cerebro (ciclo del frontend).
 #[tauri::command]
 fn relay_drain(state: State<CoreState>, app: AppHandle) -> Result<DrainResult, AtlasError> {
-    emit_all(&app, &take_sweep_events(&state)?);
-
-    let (url, cursor) = {
-        let cursor = state.relay_cursor.lock().map_err(|_| poisoned())?;
-        (state.relay_url.clone(), *cursor)
-    };
-    let fetched = fetch_messages(&url, cursor, Duration::from_secs(3))?;
-
-    let outcome = {
-        let mut manager = state.manager.lock().map_err(|_| poisoned())?;
-        manager.ingest(fetched.messages.clone())
-    };
-    let max_seq = fetched
-        .messages
-        .iter()
-        .map(|m| m.seq)
-        .max()
-        .unwrap_or(cursor);
-    if let Ok(mut stored) = state.relay_cursor.lock() {
-        if max_seq > *stored {
-            *stored = max_seq;
-        }
-    }
-
-    let mut events = Vec::new();
-    for item in &outcome.outcomes {
-        events.extend(item.events.clone());
-    }
-    emit_all(&app, &events);
-
-    Ok(DrainResult {
-        delivered: outcome.delivered,
-        skipped: outcome.skipped + fetched.skipped,
-    })
+    drain_events(&state, &app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -214,7 +183,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(CoreState {
-            manager: Mutex::new(SessionManager::new()),
             relay_url: default_relay_url(),
             relay_cursor: Mutex::new(0),
         })

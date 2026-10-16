@@ -13,3 +13,4 @@ Documentación del proyecto Atlas.
 - [Release](./release.md): describe las comprobaciones y comandos para generar y publicar bundles.
 - [Testing](./testing.md): define las pruebas para TypeScript, Tauri, Rust, Python e integración.
 - [Tools](./tools.md): reservado para el catálogo de herramientas de Atlas.
+- [API del cerebro](./relay-api.md): documenta la API HTTP del relay Python (eventos, sesiones, límites y entorno).

@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { Orbits } from './components/orb/Orbits'
 import { AtlasScene, type ScenePort } from './components/scene/Scene'
 import { InputBar } from './components/chat/InputBar'
+import { ConversationPanel } from './components/chat/ConversationPanel'
 import {
   conversationReducer,
   initialConversationState,
@@ -14,8 +15,11 @@ import type {
   ActiveSession,
   AtlasError,
   MessageAppended,
+  MessageRole,
   SendResult,
   SessionEvent,
+  SessionState,
+  Source,
 } from './types/contracts'
 import './App.css'
 
@@ -41,11 +45,19 @@ interface LetterJob {
   index: number
 }
 
-/** Fila del relay (`GET /v1/messages`). Solo dev: en Tauri drena el núcleo. */
-interface RelayRow {
+/** Fila de eventos del cerebro (`GET /v1/events`). Solo dev. */
+interface RelayEventRow {
   seq: number
-  content: string
-  source: string
+  kind: string
+  type: string
+  requestId: string
+  sessionId: string
+  timestamp: string
+  role?: MessageRole
+  content?: string
+  source?: Source
+  state?: SessionState
+  message?: string
 }
 
 interface LetterPump {
@@ -69,6 +81,9 @@ function pumpQueue(pump: LetterPump): void {
   if (pump.pumping.current) return
   if (pump.queue.current.length === 0) {
     pump.retries.current = 0
+    // Sin trabajos ni bombeo no quedan timers vivos: poda del registro
+    // (misma identidad de array para la limpieza al desmontar).
+    pump.timers.current.length = 0
     return
   }
   if (!pump.port.current) {
@@ -117,6 +132,24 @@ export default function App() {
   const pumpRetryRef = useRef(0)
   // Cursor del sondeo dev (sin Tauri no hay núcleo que lo guarde).
   const devRelayCursorRef = useRef(0)
+  // Vistos (requestId:rol): las letras solo vuelan para mensajes nuevos,
+  // nunca para re-juegos del historial (recargas, HMR, cursor atrasado).
+  const seenRef = useRef<Set<string>>(new Set())
+  const rememberMessage = useCallback((requestId: string, role: string): boolean => {
+    const key = `${requestId}:${role}`
+    if (seenRef.current.has(key)) return false
+    seenRef.current.add(key)
+    if (seenRef.current.size > 1000) {
+      const oldest = seenRef.current.values().next().value
+      if (oldest !== undefined) seenRef.current.delete(oldest)
+    }
+    return true
+  }, [])
+  const seedSeen = useCallback((messages: Array<{ requestId: string; role: string }>) => {
+    for (const message of messages) {
+      seenRef.current.add(`${message.requestId}:${message.role}`)
+    }
+  }, [])
 
   const [conversation, dispatch] = useReducer(conversationReducer, initialConversationState)
 
@@ -132,6 +165,86 @@ export default function App() {
     })
   }, [])
 
+  // Primera pasada del sondeo: situarse en el borde vivo sin re-jugar nada
+  // (el panel se hidrata por /v1/session).
+  const devSyncedRef = useRef(false)
+
+  // Sondeo dev de eventos del cerebro (navegador). Extraído para poder
+  // llamarlo justo tras enviar, sin esperar al intervalo. Las letras solo
+  // vuelan para mensajes de usuario: la respuesta del LLM vive en el panel
+  // y en el brillo del orbe, no en la barra de input.
+  const pollDevRelay = useCallback(() => {
+    fetch(`http://127.0.0.1:8765/v1/events?since=${devRelayCursorRef.current}`)
+      .then((response) => {
+        if (!response.ok) throw new Error('relay_http')
+        return response.json() as Promise<{ events?: RelayEventRow[] }>
+      })
+      .then((data) => {
+        const rows = data.events ?? []
+        if (!devSyncedRef.current) {
+          for (const row of rows) {
+            devRelayCursorRef.current = Math.max(devRelayCursorRef.current, row.seq)
+          }
+          devSyncedRef.current = true
+          return
+        }
+        for (const row of rows) {
+          devRelayCursorRef.current = Math.max(devRelayCursorRef.current, row.seq)
+          if (
+            row.kind === 'message' &&
+            (row.role === 'user' || row.role === 'assistant') &&
+            (row.source === 'local' || row.source === 'telegram') &&
+            typeof row.content === 'string' &&
+            row.content.trim()
+          ) {
+            dispatch({
+              type: 'conversation.message_appended',
+              event: {
+                type: 'conversation.message_appended',
+                requestId: row.requestId,
+                sessionId: row.sessionId,
+                timestamp: row.timestamp,
+                role: row.role,
+                content: row.content,
+                source: row.source,
+              },
+            })
+            if (row.role === 'user' && rememberMessage(row.requestId, row.role)) {
+              enqueueLetters(row.content)
+            }
+          } else if (
+            row.kind === 'state' &&
+            typeof row.state === 'string' &&
+            (
+              row.state === 'idle' ||
+              row.state === 'thinking' ||
+              row.state === 'awaiting_confirmation' ||
+              row.state === 'executing' ||
+              row.state === 'responding' ||
+              row.state === 'cancelled' ||
+              row.state === 'completed' ||
+              row.state === 'failed'
+            )
+          ) {
+            dispatch({
+              type: 'session.state_changed',
+              event: {
+                type: 'session.state_changed',
+                requestId: row.requestId,
+                sessionId: row.sessionId,
+                timestamp: row.timestamp,
+                state: row.state,
+                ...(typeof row.message === 'string' ? { message: row.message } : {}),
+              },
+            })
+          }
+        }
+      })
+      .catch(() => {
+        /* relay no disponible */
+      })
+  }, [enqueueLetters, rememberMessage])
+
   // Suscripción a eventos del núcleo + hidratación + drenado del relay.
   useEffect(() => {
     const timers = letterTimersRef.current
@@ -142,7 +255,10 @@ export default function App() {
     if (inTauri()) {
       invoke<ActiveSession | null>('session_get')
         .then((session) => {
-          if (!cancelled && session) dispatch({ type: 'conversation.hydrate', session })
+          if (!cancelled && session) {
+            seedSeen(session.messages)
+            dispatch({ type: 'conversation.hydrate', session })
+          }
         })
         .catch(() => {
           /* núcleo aún no listo: se hidratará con los eventos */
@@ -158,7 +274,9 @@ export default function App() {
         })
       listen<MessageAppended>('conversation.message_appended', (event) => {
         dispatch({ type: 'conversation.message_appended', event: event.payload })
-        enqueueLetters(event.payload.content)
+        if (event.payload.role === 'user' && rememberMessage(event.payload.requestId, event.payload.role)) {
+          enqueueLetters(event.payload.content)
+        }
       })
         .then((unsub) => {
           unsubs.push(unsub)
@@ -173,65 +291,25 @@ export default function App() {
         })
       }, RELAY_DRAIN_MS)
     } else {
-      // DEV (navegador, sin Tauri ni núcleo): sondeo directo del relay para
-      // ver el canal Telegram con los mismos visuales. Vía canónica: IPC.
-      drainTimer = window.setInterval(() => {
-        fetch(`http://127.0.0.1:8765/v1/messages?since=${devRelayCursorRef.current}`)
-          .then((response) => {
-            if (!response.ok) throw new Error('relay_http')
-            return response.json() as Promise<{ messages?: RelayRow[] }>
-          })
-          .then((data) => {
-            for (const row of data.messages ?? []) {
-              devRelayCursorRef.current = Math.max(devRelayCursorRef.current, row.seq)
-              if (row.source !== 'telegram' && row.source !== 'local') continue
-              if (typeof row.content !== 'string' || !row.content.trim()) continue
-              const stamp = new Date().toISOString()
-              const requestId = `dev-relay-${row.seq}`
-              const source = row.source as 'local' | 'telegram'
-              dispatch({
-                type: 'session.state_changed',
-                event: {
-                  type: 'session.state_changed',
-                  requestId,
-                  sessionId: 'dev-session',
-                  timestamp: stamp,
-                  state: 'thinking',
-                },
-              })
-              dispatch({
-                type: 'conversation.message_appended',
-                event: {
-                  type: 'conversation.message_appended',
-                  requestId,
-                  sessionId: 'dev-session',
-                  timestamp: stamp,
-                  role: 'user',
-                  content: row.content,
-                  source,
-                },
-              })
-              enqueueLetters(row.content)
-              letterTimersRef.current.push(
-                window.setTimeout(() => {
-                  dispatch({
-                    type: 'session.state_changed',
-                    event: {
-                      type: 'session.state_changed',
-                      requestId,
-                      sessionId: 'dev-session',
-                      timestamp: new Date().toISOString(),
-                      state: 'completed',
-                    },
-                  })
-                }, 900),
-              )
-            }
-          })
-          .catch(() => {
-            /* relay no disponible */
-          })
-      }, RELAY_DRAIN_MS)
+      // DEV (navegador, sin Tauri ni núcleo): hidrata el historial y sondea
+      // eventos nuevos con los mismos visuales. Vía canónica: IPC.
+      fetch('http://127.0.0.1:8765/v1/session')
+        .then((response) => {
+          if (!response.ok) throw new Error('relay_http')
+          return response.json() as Promise<{ session: ActiveSession | null }>
+        })
+        .then((data) => {
+          if (cancelled) return
+          if (data.session) {
+            seedSeen(data.session.messages)
+            dispatch({ type: 'conversation.hydrate', session: data.session })
+          }
+        })
+        .catch(() => {
+          /* relay no disponible */
+        })
+      pollDevRelay()
+      drainTimer = window.setInterval(pollDevRelay, RELAY_DRAIN_MS)
     }
 
     return () => {
@@ -240,21 +318,30 @@ export default function App() {
       window.clearInterval(drainTimer)
       for (const timer of timers) clearTimeout(timer)
     }
-  }, [enqueueLetters])
+  }, [enqueueLetters, pollDevRelay, rememberMessage, seedSeen])
 
-  // Envío local: el núcleo emite los eventos y las letras llegan por el
-  // mismo camino que las de Telegram. Sin Tauri (navegador), eco visual.
+  // Envío local: en Tauri va al cerebro por IPC; en dev va al cerebro por
+  // HTTP directo (mismo bucle de eventos). Sin relay, eco visual.
   const handleSubmit = useCallback(
     (content: string) => {
       if (!inTauri()) {
-        enqueueLetters(content)
+        fetch('http://127.0.0.1:8765/v1/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, source: 'local' }),
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error('relay_http')
+            pollDevRelay()
+          })
+          .catch(() => enqueueLetters(content))
         return
       }
       invoke<SendResult>('conversation_send', { content, source: 'local' }).catch((error: unknown) => {
         dispatch({ type: 'conversation.error', message: errorCode(error) })
       })
     },
-    [enqueueLetters],
+    [enqueueLetters, pollDevRelay],
   )
 
   const handleCancel = useCallback(() => {
@@ -275,6 +362,9 @@ export default function App() {
       <Orbits asleep={false} />
       <AtlasScene agentTone="neutral" orbState={orbState} levelRef={levelRef} portRef={scenePortRef} />
       <div className="app-label" aria-label="Atlas">ATLAS</div>
+      {conversation.messages.length > 0 && (
+        <ConversationPanel messages={conversation.messages} />
+      )}
       <InputBar
         onSubmit={handleSubmit}
         onCancel={handleCancel}

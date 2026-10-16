@@ -12,3 +12,5 @@
 - El relay **no** recarga solo: reinícialo (`pkill -f "server/atlas_relay.py"` y
   arrancar de nuevo) cada vez que cambies `server/atlas_relay.py`.
 - Nunca commitees `.env` (ignorado por Git): lleva tokens y API keys reales.
+- Tauri no lee `.env` solo: para `tauri dev`/`build` con claves,
+  `set -a; . ./.env; set +a` antes (el relay y las pruebas Rust igual).
