@@ -6,6 +6,18 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### UI: anillo pensando + toggle del chat + panel suave
+
+- **Commit:** `UI: anillo pensando + toggle del chat + panel suave`
+- **Fecha:** `2026-10-16`
+- **Descripción:** barra de entrada compacta (320px) con indicador orbital
+  de pensamiento y toggle del panel apilados en el mismo hueco con fundido
+  cruzado (sin desmontar nodos ni reiniciar el giro). Animaciones del panel
+  con blur y easing (950ms aparecer, 1250ms desaparecer). Burbuja de
+  órbita con estilo frosted glass. Colores fijos del agente (sin paleta
+  multi-agente). Verificado: build, lint, test (13/13).
+- **Documentación relacionada:** `docs/implementation-plan.md`.
+
 ### Fase 4: tools de calendario
 
 - **Commit:** `Fase 4: tools de calendario`
