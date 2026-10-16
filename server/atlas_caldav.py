@@ -14,6 +14,7 @@ import datetime
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 import xml.etree.ElementTree as ET
 
 DAV = "{DAV:}"
@@ -27,6 +28,7 @@ def _absolute(base: str, href: str) -> str:
 
 
 BASE = "https://caldav.icloud.com"
+MAX_EVENTS_PER_CALENDAR = 50
 
 USER_AGENT = "AtlasRelay/3"
 
@@ -41,31 +43,39 @@ def _auth_header(username: str, password: str) -> str:
 
 
 def _request(url: str, method: str, username: str, password: str,
-             body: str | None, depth: str | None = None,
-             timeout: int = 20) -> bytes:
+              body: str | None, depth: str | None = None,
+              timeout: int = 20, retries: int = 3) -> bytes:
     data = body.encode("utf-8") if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", _auth_header(username, password))
-    req.add_header("User-Agent", USER_AGENT)
-    if data is not None:
-        req.add_header("Content-Type", "application/xml; charset=utf-8")
-        req.add_header("Content-Length", str(len(data)))
-    if depth is not None:
-        req.add_header("Depth", depth)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return response.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code == 401:
-            raise CalDAVError("credenciales rechazadas") from exc
-        if exc.code == 403:
-            # Apple limita (throttle) ante ráfagas; no son las credenciales.
-            raise CalDAVError("limitado por iCloud, reintentar") from exc
-        if exc.code == 404:
-            raise CalDAVError("recurso no encontrado") from exc
-        raise CalDAVError(f"http_{exc.code}") from exc
-    except Exception as exc:
-        raise CalDAVError(f"red ({type(exc).__name__})") from exc
+    last_exc = None
+    for attempt in range(retries):
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", _auth_header(username, password))
+        req.add_header("User-Agent", USER_AGENT)
+        if data is not None:
+            req.add_header("Content-Type", "application/xml; charset=utf-8")
+            req.add_header("Content-Length", str(len(data)))
+        if depth is not None:
+            req.add_header("Depth", depth)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                raise CalDAVError("credenciales rechazadas") from exc
+            if exc.code == 403:
+                last_exc = exc
+                if attempt + 1 < retries:
+                    wait = 5 * (2 ** attempt)
+                    time.sleep(wait)
+                    continue
+                raise CalDAVError("limitado por iCloud, reintentar") from exc
+            if exc.code == 404:
+                raise CalDAVError("recurso no encontrado") from exc
+            raise CalDAVError(f"http_{exc.code}") from exc
+        except Exception as exc:
+            raise CalDAVError(f"red ({type(exc).__name__})") from exc
+    raise CalDAVError("limitado por iCloud, reintentar") from last_exc
+
 
 
 def _hrefs(multistatus: bytes) -> list[str]:
@@ -108,6 +118,19 @@ class CalDAVClient:
     def _call(self, url: str, method: str, body: str | None = None,
               depth: str | None = None) -> bytes:
         return _request(url, method, self.username, self.password, body, depth)
+
+    def _call_get(self, url: str) -> str:
+        """GET de un recurso (evento .ics). Devuelve el texto."""
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("Authorization", _auth_header(self.username, self.password))
+        req.add_header("User-Agent", USER_AGENT)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response:
+                return response.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            raise CalDAVError(f"http_{exc.code}") from exc
+        except Exception as exc:
+            raise CalDAVError(f"red ({type(exc).__name__})") from exc
 
     def discover(self) -> list[dict]:
         """Autentica y lista calendarios. Devuelve [{id, name}]."""
@@ -166,40 +189,78 @@ class CalDAVClient:
         return calendars
 
     def upcoming(self, days: int = 7, calendar_id: str | None = None) -> list[dict]:
-        """Eventos desde ahora hasta `days` días (recurrencias expandidas)."""
+        """Eventos desde ahora hasta `days` días.
+
+        Usa PROPFIND + GET en vez de REPORT: Apple limita las peticiones REPORT
+        con throttle (403), pero PROPFIND y GET funcionan sin restricción.
+        Las recurrencias no se expanden (se devuelve el evento base).
+        """
         if not self.home_set:
             self.discover()
         now = datetime.datetime.now(datetime.timezone.utc)
         end = now + datetime.timedelta(days=max(1, min(days, 31)))
-        stamp = "%Y%m%dT%H%M%SZ"
-        targets = [c for c in self.calendars
-                   if calendar_id is None or c["id"] == calendar_id]
+        if calendar_id is None:
+            targets = list(self.calendars)
+        else:
+            targets = [c for c in self.calendars if c["id"] == calendar_id]
+        if not targets:
+            return []
+        cal_by_id = {c["id"].rstrip("/"): c["name"] for c in targets}
         events = []
-        for index, calendar in enumerate(targets):
-            # iCloud limita ráfagas: pausa entre REPORTs.
-            if index > 0:
-                time.sleep(1.5)
-            url = _absolute(BASE, calendar["id"])
-            report = self._call(url, "REPORT",
-                                f"""<?xml version="1.0" encoding="utf-8" ?>
-                                <C:calendar-query xmlns:D="DAV:"
-                                xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop>
-                                <D:getetag /><C:calendar-data>
-                                <C:expand start="{now.strftime(stamp)}"
-                                end="{end.strftime(stamp)}" />
-                                </C:calendar-data></D:prop>
-                                <C:filter><C:comp-filter name="VCALENDAR">
-                                <C:comp-filter name="VEVENT">
-                                <C:time-range start="{now.strftime(stamp)}"
-                                end="{end.strftime(stamp)}" />
-                                </C:comp-filter></C:comp-filter></C:filter>
-                                </C:calendar-query>""",
-                                depth="1")
-            for vevent in parse_icalendar(report):
-                vevent["calendar"] = calendar["name"]
-                events.append(vevent)
-        events.sort(key=lambda e: e.get("start") or "")
-        return events
+        for calendar in targets:
+            cal_url = _absolute(BASE, calendar["id"])
+            # 1. PROPFIND para listar los .ics del calendario.
+            prop_body = """<?xml version="1.0" encoding="utf-8" ?>
+            <D:propfind xmlns:D="DAV:"><D:prop><D:getetag /></D:prop></D:propfind>"""
+            try:
+                listing = self._call(cal_url, "PROPFIND", prop_body, depth="1")
+            except CalDAVError:
+                continue
+            try:
+                tree = ET.fromstring(listing)
+            except ET.ParseError:
+                continue
+            # 2. GET cada .ics y parsear VEVENT (concurrente, limitado).
+            ics_hrefs = [r.findtext(f"{DAV}href") or ""
+                         for r in tree.findall(f"{DAV}response")
+                         if (r.findtext(f"{DAV}href") or "").endswith(".ics")]
+            ics_hrefs = ics_hrefs[:MAX_EVENTS_PER_CALENDAR]
+
+            def _fetch_one(href):
+                event_url = _absolute(BASE, href)
+                try:
+                    return self._call_get(event_url)
+                except CalDAVError:
+                    return None
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(_fetch_one, ics_hrefs))
+            for ics_data in results:
+                if not ics_data:
+                    continue
+                for block in split_vevents(ics_data):
+                    parsed = parse_vevent(block)
+                    if parsed:
+                        parsed["calendar"] = calendar["name"]
+                        events.append(parsed)
+        # Filtrar por rango de fechas (sin REPORT, el filtrado es client-side).
+        now_str = now.strftime("%Y%m%dT%H%M%SZ")
+        end_str = end.strftime("%Y%m%dT%H%M%SZ")
+        filtered = []
+        for e in events:
+            start = e.get("start", "")
+            if not start:
+                continue
+            # Normalizar: si es solo fecha (sin T), añadir T000000Z
+            if "T" not in start:
+                start += "T000000Z"
+            if start < now_str[:8] + "T000000Z":
+                continue
+            if start > end_str:
+                continue
+            filtered.append(e)
+        filtered.sort(key=lambda e: e.get("start") or "")
+        return filtered
 
     def collection_url(self, calendar_id: str) -> str:
         """URL de la colección (redescubre si el id no está en caché)."""
@@ -215,31 +276,31 @@ class CalDAVClient:
         return self.collection_url(calendar_id)
 
     def find_event_url(self, calendar_id: str, uid: str) -> str | None:
-        """URL del evento con ese UID (match exacto en cliente: el prop-filter
-        de Apple devuelve 412)."""
+        """URL del evento con ese UID (match exacto en cliente)."""
         base = self._calendar_url(calendar_id)
-        report = self._call(base, "REPORT",
-                            """<?xml version="1.0" encoding="utf-8" ?>
-                            <C:calendar-query xmlns:D="DAV:"
-                            xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop>
-                            <D:getetag /><C:calendar-data /></D:prop>
-                            <C:filter><C:comp-filter name="VCALENDAR">
-                            <C:comp-filter name="VEVENT" />
-                            </C:comp-filter></C:filter></C:calendar-query>""",
-                            depth="1")
+        prop_body = """<?xml version="1.0" encoding="utf-8" ?>
+        <D:propfind xmlns:D="DAV:"><D:prop><D:getetag /></D:prop></D:propfind>"""
         try:
-            root = ET.fromstring(report)
-        except ET.ParseError as exc:
-            raise CalDAVError("búsqueda ilegible") from exc
+            listing = self._call(base, "PROPFIND", prop_body, depth="1")
+        except CalDAVError:
+            return None
+        try:
+            root = ET.fromstring(listing)
+        except ET.ParseError:
+            return None
         for response in root.findall(f"{DAV}response"):
-            href = response.findtext(f"{DAV}href")
-            data = response.findtext(f".//{CALDAV}calendar-data")
-            if not href or not data:
+            href = response.findtext(f"{DAV}href") or ""
+            if not href.endswith(".ics"):
                 continue
-            for block in split_vevents(data):
+            event_url = _absolute(BASE, href)
+            try:
+                ics_data = self._call_get(event_url)
+            except CalDAVError:
+                continue
+            for block in split_vevents(ics_data):
                 parsed = parse_vevent(block)
                 if parsed and parsed.get("uid") == uid:
-                    return _absolute(BASE, href)
+                    return event_url
         return None
 
     def get_event(self, url: str) -> str:
@@ -301,6 +362,16 @@ def parse_icalendar(multistatus: bytes) -> list[dict]:
             parsed = parse_vevent(vevent)
             if parsed:
                 events.append(parsed)
+    return events
+
+
+def parse_icalendar_single(ical: str) -> list[dict]:
+    """Extrae VEVENTs de un bloque calendar-data (sin envoltura multistatus)."""
+    events = []
+    for block in split_vevents(ical):
+        parsed = parse_vevent(block)
+        if parsed:
+            events.append(parsed)
     return events
 
 
