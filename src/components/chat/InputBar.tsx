@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-
 /**
  * Barra de transmisión a Atlas (Fase 2).
  *
@@ -12,14 +11,20 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 interface InputBarProps {
   onSubmit: (content: string) => void
   onCancel: () => void
+  onTogglePanel: () => void
   pending: boolean
+  thinking: boolean
+  expanded: boolean
   placeholder?: string
 }
 
 export function InputBar({
   onSubmit,
   onCancel,
+  onTogglePanel,
   pending,
+  thinking,
+  expanded,
   placeholder = 'Transmite a Atlas…',
 }: InputBarProps) {
   const [value, setValue] = useState('')
@@ -45,8 +50,47 @@ export function InputBar({
     inputRef.current?.focus()
   }
 
+  // El anillo y el chevron conviven apilados con fundido cruzado: nunca se
+  // desmonta nada, así el giro no se reinicia ni parpadea al cambiar.
   return (
     <form className="chat-input-shell" onSubmit={handleSubmit}>
+      <span className="slot">
+        <button
+          type="button"
+          className={`orbit-status${thinking ? '' : ' faded'}`}
+          onClick={onTogglePanel}
+          aria-label={expanded ? 'Minimizar chat' : 'Expandir chat'}
+          title={expanded ? 'Minimizar chat' : 'Expandir chat'}
+          tabIndex={thinking ? 0 : -1}
+        >
+          <span className="orbit-status-ring" aria-hidden="true">
+            <span className="orbit-status-sat" />
+          </span>
+        </button>
+        <button
+          type="button"
+          className={`chat-pane-btn${thinking ? ' faded' : ''}`}
+          data-open={expanded}
+          onClick={onTogglePanel}
+          aria-label={expanded ? 'Minimizar chat' : 'Expandir chat'}
+          title={expanded ? 'Minimizar chat' : 'Expandir chat'}
+          tabIndex={thinking ? -1 : 0}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+      </span>
       <input
         ref={inputRef}
         className="input-bar"

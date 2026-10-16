@@ -2,9 +2,7 @@ import { useRef, useMemo, useEffect, useCallback } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { RefObject } from 'react'
-import type { OrbTone } from '../../types/visual'
 import type { OrbState } from '../../state/orbState'
-import { ORB_PALETTE } from '../../state/palette'
 
 /**
  * Escena WebGL ÚNICA (optimización B): fusiona el grid cibernético y el
@@ -78,8 +76,7 @@ void main() {
   float perspective = 1.0 - abs(uv.y);
   gridLine *= perspective;
 
-  // Tinte por agente: un único color interpolado desde React
-  // (fuente de verdad: src/state/palette.ts).
+  // Tinte de Atlas: color único y fijo de la interfaz.
   vec3 tintColor = uToneColor;
 
   // ═══════════════════════════════════════════════════════════
@@ -91,8 +88,8 @@ void main() {
 
   // Solo donde hay línea, aplicamos el brillo neón
   if (gridLine > 0.01) {
-    // Retícula siempre blanca (petición del propietario): el tinte del
-    // agente vive en el horizonte y la onda expansiva, no en las líneas.
+    // Retícula siempre blanca (petición del propietario): el tinte de
+    // Atlas vive en el horizonte y la onda expansiva, no en las líneas.
     vec3 lineColor = vec3(0.95, 0.97, 1.0);
 
     // Capas de energía neón. Multiplicadores moderados: si la suma aditiva
@@ -169,7 +166,13 @@ const INPUT_BAR_SELECTOR = '.input-bar'
 const ORB_TARGET = new THREE.Vector3(0, 0, 0)
 // Vector temporal reutilizable en el bucle de frames (single-threaded).
 const tmpVec = new THREE.Vector3()
-const tmpColor = new THREE.Color()
+
+// Atlas es único: colores fijos, sin tonos por agente (idénticos al
+// «neutral» anterior: cero cambio visual).
+const ATLAS_TITANIUM_RGB: [number, number, number] = [0.949, 0.969, 1.0]
+const ATLAS_LETTER_RGB: [number, number, number] = [0.12, 0.55, 1.0]
+const ATLAS_DUST_TONE = new THREE.Color(...ATLAS_TITANIUM_RGB)
+const ATLAS_LETTER_TONE = new THREE.Color(...ATLAS_LETTER_RGB)
 
 // ── Secuencia de arranque (boot, 2026-08-24) ─────────────────
 // Un solo reloj (BootClock) avanza en el primer useFrame del canvas;
@@ -279,13 +282,11 @@ function domPointToWorld(px: number, py: number, width: number, height: number):
 }
 
 function CyberGrid({
-  agentTone,
   orbState,
   orbPulseRef,
   bootClockRef,
   sleepRef,
 }: {
-  agentTone: OrbTone
   orbState: OrbState
   orbPulseRef: RefObject<number>
   bootClockRef: RefObject<BootClock | null>
@@ -307,13 +308,8 @@ function CyberGrid({
     // El primer useFrame lo pone al valor correcto (nace a negro con boot).
     uBootFade: { value: 0 },
     uDim: { value: 0 },
-    uToneColor: { value: new THREE.Color(...ORB_PALETTE.neutral.rgb) },
+    uToneColor: { value: new THREE.Color(...ATLAS_TITANIUM_RGB) },
   }), [])
-
-  const targetColor = useMemo(
-    () => new THREE.Color(...ORB_PALETTE[agentTone].rgb),
-    [agentTone],
-  )
 
   useFrame(() => {
     if (!materialRef.current) return
@@ -332,8 +328,6 @@ function CyberGrid({
 
     // Sueño: apagado suave del suelo.
     u.uDim.value = sleepRef?.current?.v ?? 0
-
-    ;(u.uToneColor.value as THREE.Color).lerp(targetColor, 0.10)
 
     // El horizonte "respira" cuando Atlas habla/responde (Pilar 5 ligero).
     const boostTarget = orbState === 'responding' || orbState === 'speaking' ? 1 : 0
@@ -423,12 +417,10 @@ interface DustLayer {
 }
 
 function StarDust({
-  agentTone,
   orbState,
   bootClockRef,
   sleepRef,
 }: {
-  agentTone: OrbTone
   orbState: OrbState
   bootClockRef: RefObject<BootClock | null>
   sleepRef?: RefObject<{ v: number }>
@@ -437,11 +429,6 @@ function StarDust({
   const layersRef = useRef<DustLayer[] | null>(null)
   // El polvo acelera mientras Atlas piensa/responde/habla (Pilar 5 ligero).
   const boostRef = useRef(1)
-
-  const targetColor = useMemo(
-    () => new THREE.Color(...ORB_PALETTE[agentTone].rgb),
-    [agentTone],
-  )
 
   // Pool construido en efecto y añadido imperativamente (regla react-compiler:
   // ninguna instancia GL durante el render). Dispose completo al desmontar.
@@ -464,7 +451,7 @@ function StarDust({
         opacity: layer.opacity,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        color: DUST_BASE_COLOR.clone(),
+        color: DUST_BASE_COLOR.clone().lerp(ATLAS_DUST_TONE, DUST_TONE_MIX),
         sizeAttenuation: true,
       })
       const points = new THREE.Points(geometry, material)
@@ -516,10 +503,6 @@ function StarDust({
         attr.setY(i, y)
       }
       attr.needsUpdate = true
-
-      // Tinte coherente con la paleta: base azul fría mezclada con el tono.
-      tmpColor.copy(DUST_BASE_COLOR).lerp(targetColor, DUST_TONE_MIX)
-      material.color.lerp(tmpColor, 0.1)
 
       // Opacidad = arranque × sueño (escritura continua: son 3 capas).
       const bootT = bootClockRef.current?.t ?? 999
@@ -949,31 +932,18 @@ function EnergyCore({
   )
 }
 
-// Azul eléctrico para letras sin agente activo: el titanio «neutral» es casi
-// blanco y las letras se leían como blanco pleno (petición del propietario).
-const LETTER_NEUTRAL_RGB: [number, number, number] = [0.12, 0.55, 1.0]
-
+// Azul eléctrico de las letras de Atlas (fijo, sin tonos).
 function LetterStream({
-  agentTone,
   portRef,
   orbPulseRef,
 }: {
-  agentTone: OrbTone
   portRef: RefObject<ScenePort | null>
   orbPulseRef: RefObject<number>
 }) {
   const { camera, size, scene } = useThree()
   const viewRef = useRef({ camera, size })
-  const toneColorRef = useRef(new THREE.Color(...ORB_PALETTE.neutral.rgb))
+  const toneColorRef = useRef(ATLAS_LETTER_TONE.clone())
   const poolRef = useRef<LetterPool | null>(null)
-
-  const targetTone = useMemo(
-    () =>
-      agentTone === 'neutral'
-        ? new THREE.Color(...LETTER_NEUTRAL_RGB)
-        : new THREE.Color(...ORB_PALETTE[agentTone].rgb),
-    [agentTone],
-  )
 
   // El pool se construye en efecto y se añade al scene imperativamente:
   // nada de instancias GL creadas durante el render (regla del compilador).
@@ -1071,7 +1041,6 @@ function LetterStream({
   useFrame((_, delta) => {
     viewRef.current.camera = camera
     viewRef.current.size = size
-    toneColorRef.current.lerp(targetTone, 0.10)
 
     const pool = poolRef.current
     if (!pool) return
@@ -1160,7 +1129,6 @@ function BootDriver({
 }
 
 export function AtlasScene({
-  agentTone = 'neutral',
   orbState = 'idle',
   visible = true,
   portRef,
@@ -1168,7 +1136,6 @@ export function AtlasScene({
   asleep = false,
   levelRef,
 }: {
-  agentTone?: OrbTone
   orbState?: OrbState
   visible?: boolean
   portRef?: RefObject<ScenePort | null>
@@ -1202,14 +1169,13 @@ export function AtlasScene({
       >
         <SleepDriver asleep={asleep} sleepRef={sleepRef} />
         <BootDriver bootClockRef={bootClockRef} orbPulseRef={orbPulseRef} />
-        <CyberGrid agentTone={agentTone} orbState={orbState} orbPulseRef={orbPulseRef} bootClockRef={bootClockRef} sleepRef={sleepRef} />
+        <CyberGrid orbState={orbState} orbPulseRef={orbPulseRef} bootClockRef={bootClockRef} sleepRef={sleepRef} />
         <CameraRig bootClockRef={bootClockRef} sleepRef={sleepRef} />
-        <StarDust agentTone={agentTone} orbState={orbState} bootClockRef={bootClockRef} sleepRef={sleepRef} />
+        <StarDust orbState={orbState} bootClockRef={bootClockRef} sleepRef={sleepRef} />
         <ShootingStars orbState={orbState} bootClockRef={bootClockRef} sleepRef={sleepRef} />
         <EnergyCore state={orbState} orbPulseRef={orbPulseRef} bootClockRef={bootClockRef} sleepRef={sleepRef} levelRef={levelRef} />
         {portRef && (
           <LetterStream
-            agentTone={agentTone}
             portRef={portRef}
             orbPulseRef={orbPulseRef}
           />

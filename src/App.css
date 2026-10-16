@@ -57,8 +57,8 @@ select { font: inherit; }
   display: flex;
   align-items: center;
   gap: 6px;
-  width: min(480px, calc(100vw - 64px));
-  padding: 6px 6px 6px 18px;
+  width: min(320px, calc(100vw - 64px));
+  padding: 4px 4px 4px 12px;
   border: 1px solid rgba(63, 164, 255, 0.26);
   border-radius: 14px;
   background: rgba(8, 20, 30, 0.58);
@@ -67,9 +67,11 @@ select { font: inherit; }
     inset 0 0 18px rgba(63, 164, 255, 0.08);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  opacity: 0.85;
   transition:
     border-color 180ms ease,
-    box-shadow 180ms ease;
+    box-shadow 180ms ease,
+    opacity 180ms ease;
 }
 
 .chat-input-shell:focus-within {
@@ -78,6 +80,7 @@ select { font: inherit; }
     0 10px 34px rgba(0, 0, 0, 0.4),
     0 0 22px rgba(0, 217, 255, 0.14),
     inset 0 0 18px rgba(63, 164, 255, 0.12);
+  opacity: 1;
 }
 
 .input-bar {
@@ -86,7 +89,7 @@ select { font: inherit; }
   border: 0;
   background: transparent;
   color: #d8f6ff;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.02em;
   caret-color: #3fa4ff;
   outline: none;
@@ -134,6 +137,160 @@ select { font: inherit; }
   cursor: default;
 }
 
+/* ── Estado orbital: satélite que orbita mientras Atlas piensa ────────
+   Indicador puro (no clicable), siempre visible en la barra. */
+.slot {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+}
+
+.slot > button {
+  position: absolute;
+  inset: 0;
+  transition: opacity 500ms ease;
+}
+
+.slot > button.faded {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.orbit-status {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.orbit-status:hover {
+  border-color: rgba(118, 196, 255, 0.35);
+  box-shadow: 0 0 12px rgba(0, 217, 255, 0.12);
+}
+
+.orbit-status-ring {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid rgba(0, 217, 255, 0.85);
+  border-radius: 50%;
+  animation: orbit-spin 2.5s linear infinite;
+}
+
+.orbit-status-sat {
+  position: absolute;
+  left: 50%;
+  top: -3.5px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: #7fd4ff;
+  box-shadow: 0 0 6px rgba(0, 217, 255, 0.9);
+}
+
+@keyframes orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-status-ring {
+    animation: none;
+  }
+  .slot > button {
+    transition: none;
+  }
+}
+
+/* ── Toggle del panel (apilado sobre el anillo en reposo) ─────────── */
+.chat-pane-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(122, 180, 222, 0.55);
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.chat-pane-btn:hover {
+  color: #b8e2ff;
+  border-color: rgba(118, 196, 255, 0.35);
+}
+
+.chat-pane-btn svg {
+  transition: transform 250ms ease;
+}
+
+.chat-pane-btn[data-open="true"] svg {
+  transform: rotate(180deg);
+}
+
+/* ── Burbuja de órbita ────────────────────────────────────────────────
+   Etiqueta de la tarea viva al acercar el puntero. Mismo vidrio que el
+   chat; la posición la escribe el bucle cada frame (sin transiciones). */
+.orbit-bubble {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  max-width: 250px;
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 217, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(8, 20, 30, 0.78);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.45),
+    0 0 16px rgba(0, 217, 255, 0.12);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform;
+  transition: opacity 160ms ease;
+}
+
+.orbit-bubble.visible {
+  opacity: 1;
+}
+
+.orbit-bubble-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(186, 239, 255, 0.9);
+}
+
+.orbit-bubble-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #d8f6ff;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* ── Panel de conversación (Fase 3) ───────────────────────────────────
    Pila encima de la barra de input: confirmaciones + historial.
    Solo presenta (eventos IPC → reducer); sin lógica. */
@@ -147,6 +304,32 @@ select { font: inherit; }
   gap: 10px;
   width: min(480px, calc(100vw - 64px));
   max-height: min(46vh, 520px);
+  transform: translateX(calc(-100% - 48px)) scale(0.97);
+  opacity: 0;
+  filter: blur(16px) saturate(0.8);
+  pointer-events: none;
+  will-change: transform, opacity, filter;
+  transition:
+    transform 1250ms cubic-bezier(0.19, 1, 0.22, 1),
+    opacity 850ms ease,
+    filter 900ms ease;
+}
+
+.chat-stack.open {
+  transform: translateX(0) scale(1);
+  opacity: 1;
+  filter: blur(0);
+  pointer-events: auto;
+  transition:
+    transform 950ms cubic-bezier(0.19, 1, 0.22, 1),
+    opacity 650ms ease,
+    filter 700ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-stack {
+    transition: none;
+  }
 }
 
 .chat-panel {

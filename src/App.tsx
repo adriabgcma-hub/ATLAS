@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useReducer, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { Orbits } from './components/orb/Orbits'
+import { Orbits, type OrbitPort } from './components/orb/Orbits'
 import { AtlasScene, type ScenePort } from './components/scene/Scene'
 import { InputBar } from './components/chat/InputBar'
 import { ConversationPanel } from './components/chat/ConversationPanel'
@@ -41,6 +41,11 @@ function errorCode(error: unknown): string {
     if (typeof code === 'string' && code.length > 0) return code
   }
   return 'invoke_failed'
+}
+
+/** Recorta el detalle de la burbuja (sin estilos de desborde). */
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
 interface LetterJob {
@@ -160,6 +165,24 @@ export default function App() {
 
   const [conversation, dispatch] = useReducer(conversationReducer, initialConversationState)
 
+  // Zona de chat: expandida (panel + barra) o compacta (solo barra).
+  // Persiste entre recargas.
+  const [chatExpanded, setChatExpanded] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('atlas.chatOpen') !== '0'
+    } catch {
+      return true
+    }
+  })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('atlas.chatOpen', chatExpanded ? '1' : '0')
+    } catch {
+      /* almacenamiento no disponible */
+    }
+  }, [chatExpanded])
+
   const enqueueLetters = useCallback((text: string) => {
     if (!text) return
     letterQueueRef.current = [...letterQueueRef.current, { text, index: 0 }]
@@ -267,6 +290,7 @@ export default function App() {
                 expiresAt: row.expiresAt,
               },
             })
+            setChatExpanded(true)
           }
         }
       })
@@ -274,6 +298,47 @@ export default function App() {
         /* relay no disponible */
       })
   }, [enqueueLetters, rememberMessage])
+
+  // Órbitas por operación: cada petición viva (incluidos inputs) tiene su
+  // órbita con etiqueta al hover; al terminar se retira con explosión.
+  const orbitPortRef = useRef<OrbitPort | null>(null)
+  const orbitedRequestsRef = useRef<Set<string>>(new Set())
+  const orbitedConfirmsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const port = orbitPortRef.current
+    if (!port) return
+    const { sessionState, pendingRequestIds, messages, confirmations } = conversation
+    if (sessionState === 'thinking' && pendingRequestIds.length > 0) {
+      const requestId = pendingRequestIds[pendingRequestIds.length - 1]
+      if (!orbitedRequestsRef.current.has(requestId)) {
+        orbitedRequestsRef.current.add(requestId)
+        const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+        port.burstAll()
+        port.spawnOrbit({
+          title: lastUser?.source === 'telegram' ? 'Telegram · Tú' : 'Tú',
+          detail: lastUser ? truncate(lastUser.content, 140) : 'Petición en curso',
+        })
+      }
+    } else if (
+      sessionState === 'completed' ||
+      sessionState === 'cancelled' ||
+      sessionState === 'failed'
+    ) {
+      port.retireAll()
+      orbitedRequestsRef.current.clear()
+      orbitedConfirmsRef.current.clear()
+    }
+    for (const confirmation of confirmations) {
+      if (!orbitedConfirmsRef.current.has(confirmation.requestId)) {
+        orbitedConfirmsRef.current.add(confirmation.requestId)
+        port.spawnOrbit({
+          title: 'Confirmación pendiente',
+          detail: truncate(confirmation.summary, 140),
+        })
+      }
+    }
+  })
 
   // Suscripción a eventos del núcleo + hidratación + drenado del relay.
   useEffect(() => {
@@ -316,6 +381,8 @@ export default function App() {
         })
       listen<ConfirmationRequest>('permission.confirmation_required', (event) => {
         dispatch({ type: 'permission.confirmation_required', event: event.payload })
+        // Una confirmación necesita acción: expande la zona sola.
+        setChatExpanded(true)
       })
         .then((unsub) => {
           unsubs.push(unsub)
@@ -420,28 +487,39 @@ export default function App() {
     sessionStateToOrbInput(conversation.sessionState, conversation.messages.length > 0),
   )
 
+  const thinking =
+    conversation.sessionState === 'thinking' ||
+    conversation.sessionState === 'responding' ||
+    conversation.sessionState === 'awaiting_confirmation' ||
+    conversation.sessionState === 'executing'
+
   return (
     <main className="app-shell">
-      <Orbits asleep={false} />
-      <AtlasScene agentTone="neutral" orbState={orbState} levelRef={levelRef} portRef={scenePortRef} />
+      <Orbits asleep={false} portRef={orbitPortRef} />
+      <AtlasScene orbState={orbState} levelRef={levelRef} portRef={scenePortRef} />
       <div className="app-label" aria-label="Atlas">ATLAS</div>
-      {(conversation.messages.length > 0 || conversation.confirmations.length > 0) && (
-        <div className="chat-stack">
-          {conversation.confirmations.length > 0 && (
-            <ConfirmationPanel
-              items={conversation.confirmations}
-              onRespond={handlePermissionRespond}
-            />
-          )}
-          {conversation.messages.length > 0 && (
-            <ConversationPanel messages={conversation.messages} />
-          )}
-        </div>
-      )}
+      <div className={`chat-stack${chatExpanded ? ' open' : ''}`} aria-hidden={!chatExpanded}>
+        {(conversation.messages.length > 0 || conversation.confirmations.length > 0) && (
+          <>
+            {conversation.confirmations.length > 0 && (
+              <ConfirmationPanel
+                items={conversation.confirmations}
+                onRespond={handlePermissionRespond}
+              />
+            )}
+            {conversation.messages.length > 0 && (
+              <ConversationPanel messages={conversation.messages} />
+            )}
+          </>
+        )}
+      </div>
       <InputBar
         onSubmit={handleSubmit}
         onCancel={handleCancel}
+        onTogglePanel={() => setChatExpanded((expanded) => !expanded)}
         pending={conversation.pendingRequestIds.length > 0}
+        thinking={thinking}
+        expanded={chatExpanded}
       />
     </main>
   )

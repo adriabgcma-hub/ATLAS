@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
-import type { OrbTone } from '../../types/visual'
-import { ORB_PALETTE } from '../../state/palette'
 
-/** Órbita viva: una bola de energía + estela, ligada al agente que la creó. */
+/** Órbita viva: una bola de energía + estela de Atlas. */
 interface OrbitalParticle {
   radius: number
   // Fase actual, integrada frame a frame. NUNCA recalcular desde tiempo
@@ -54,12 +52,10 @@ interface BurstSpark {
 
 /** Puerto imperativo (cero re-renders, como ScenePort): App crea una órbita
  *  al recibir cada petición y retira las vivas al terminar la tarea.
- *  Modelo UNA ÓRBITA VIVA POR AGENTE: crear con un color ya vivo lo
- *  reactiva; cada petición nueva estalla las retiradas y crea frescas. */
+ *  Atlas es único: un solo color; cada petición crea su órbita fresca. */
 export interface OrbitPort {
-  /** Crea la órbita del tono (ATLAS = 'neutral' titanio) con su etiqueta;
-   *  si ya hay una VIVA del mismo color la reactiva y refresca etiqueta. */
-  spawnOrbit: (tone: OrbTone, info?: OrbitInfo) => void
+  /** Crea una órbita de Atlas con su etiqueta. */
+  spawnOrbit: (info?: OrbitInfo) => void
   /** Las órbitas en vivo pasan a retiradas: viven 5 s más y terminan con
    *  una mini-explosión de su color. */
   retireAll: () => void
@@ -96,11 +92,10 @@ const HOVER_COMMIT_MS = 1_000
 // Sprites pre-renderizados en lugar de arc() + shadowBlur por punto: el blur
 // gaussiano de canvas2d saturaba el hilo principal y congelaba la UI.
 // Dos tipos de textura por color (misma fuente `SPRITE_CACHE`):
-//   - BOLA (energía): esfera rellena con núcleo BRILLANTE y borde OSCURO
-//     (gradiente radial) — contraste doble frente a la estela aclarada.
-//     Opaca: tapa su estela y no acumula brillo al solaparse con otras.
-//   - ESTELA: disco plano bien aclarado (TRAIL_TINT) → tono más claro que la
-//     bola, para que el rastro se lea como una cola brillante.
+//   - ANILLO (energía): halo suave + aro nítido + núcleo brillante, estética
+//     HUD de Atlas (nada de blob de plasma). Opaco en el aro: tapa su estela.
+//   - ESTELA: disco plano bien aclarado (TRAIL_TINT) → tono más claro que el
+//     aro, para que el rastro se lea como una cola brillante.
 const SPRITE_CACHE = new Map<string, HTMLCanvasElement>()
 
 function shadeChannels(color: string, amount: number, dark: boolean): [number, number, number] {
@@ -120,7 +115,7 @@ function lighten(color: string, amount: number): string {
 
 // Color con alpha a partir del hex ORIGINAL + tinte + alpha. `dark` oscurece
 // hacia negro (cada canal hacia 0), si no aclara. Parsea hex, no rgb(): los callers
-// deben pasar el color base (hex de la paleta del agente).
+// deben pasar el color base de Atlas (hex).
 function rgba(color: string, amount: number, alpha: number, dark = false): string {
   const [r, g, b] = shadeChannels(color, amount, dark)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
@@ -128,28 +123,15 @@ function rgba(color: string, amount: number, alpha: number, dark = false): strin
 
 const TRAIL_TINT = 0.5
 
-// Orbe de energía: cuerpo relleno con NÚCLEO BRILLANTE y BORDE OSCURO. La
-// estela va aclarada (TRAIL_TINT), así que el contraste doble separa la bola
-// de su propia cola: centro más claro que la cola + periferia más profunda
-// (más oscura que la cola). Opaca (source-over): tapa su estela y no acumula
-// brillo al solaparse.
-const ORB_CORE_TINT = 0.60
-const ORB_CORE_ALPHA = 0.95
-const ORB_MID_TINT = 0.32
-const ORB_MID_ALPHA = 0.95
-const ORB_RIM_DARK = 0.22
-const ORB_RIM_STOP = 0.60
-const ORB_RIM_ALPHA = 1.0
-const ORB_EDGE_STOP = 0.86
-const ORB_EDGE_ALPHA = 0.25
-// El cuerpo lleno vive hasta ~60% del radio del sprite: multiplicador de
-// drawSize para que el borde visible del orbe lea al tamaño de la bola
-// original (2.4), dejando el halo fuera. Un pelín más grande desde la última
-// revisión (2.6 → 3.0).
+// Anillo de energía de Atlas: halo + aro + núcleo (ver getOrbitSprite).
+// El aro tapa su estela (source-over) y al solaparse no acumula brillo.
+// El cuerpo visible vive hasta ~60% del radio del sprite: multiplicador de
+// drawSize para que el aro lea al tamaño de la bola original (2.4), dejando
+// el halo fuera.
 const ORB_BALL_DRAW = 3.0
 
-function getPlasmaSprite(color: string): HTMLCanvasElement {
-  const key = `plasma:${color}`
+function getOrbitSprite(color: string): HTMLCanvasElement {
+  const key = `orbit:${color}`
   const cached = SPRITE_CACHE.get(key)
   if (cached) return cached
 
@@ -159,14 +141,34 @@ function getPlasmaSprite(color: string): HTMLCanvasElement {
   sprite.width = SIZE
   sprite.height = SIZE
   const sctx = sprite.getContext('2d')!
-  const grad = sctx.createRadialGradient(half, half, 0, half, half, half - 1)
-  grad.addColorStop(0, rgba(color, ORB_CORE_TINT, ORB_CORE_ALPHA))
-  grad.addColorStop(0.34, rgba(color, ORB_MID_TINT, ORB_MID_ALPHA))
-  grad.addColorStop(ORB_RIM_STOP, rgba(color, ORB_RIM_DARK, ORB_RIM_ALPHA, true))
-  grad.addColorStop(ORB_EDGE_STOP, rgba(color, ORB_RIM_DARK, ORB_EDGE_ALPHA, true))
-  grad.addColorStop(1, rgba(color, ORB_RIM_DARK, 0, true))
-  sctx.fillStyle = grad
+  // Halo exterior suave.
+  const glow = sctx.createRadialGradient(half, half, 0, half, half, half - 1)
+  glow.addColorStop(0, rgba(color, 0.55, 0.28))
+  glow.addColorStop(0.55, rgba(color, 0.3, 0.12))
+  glow.addColorStop(1, rgba(color, 0.3, 0))
+  sctx.fillStyle = glow
   sctx.fillRect(0, 0, SIZE, SIZE)
+  // Aro de energía: trazo nítido.
+  sctx.strokeStyle = rgba(color, 0.35, 0.95)
+  sctx.lineWidth = 5
+  sctx.beginPath()
+  sctx.arc(half, half, half * 0.52, 0, Math.PI * 2)
+  sctx.stroke()
+  // Filo brillante en el arco superior (lectura de luz).
+  sctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+  sctx.lineWidth = 1.5
+  sctx.beginPath()
+  sctx.arc(half, half, half * 0.52, -Math.PI * 0.8, -Math.PI * 0.2)
+  sctx.stroke()
+  // Núcleo: punto caliente que funde a transparente.
+  const core = sctx.createRadialGradient(half, half, 0, half, half, half * 0.3)
+  core.addColorStop(0, 'rgba(255, 255, 255, 0.95)')
+  core.addColorStop(0.5, rgba(color, 0.5, 0.9))
+  core.addColorStop(1, rgba(color, 0.5, 0))
+  sctx.fillStyle = core
+  sctx.beginPath()
+  sctx.arc(half, half, half * 0.3, 0, Math.PI * 2)
+  sctx.fill()
 
   SPRITE_CACHE.set(key, sprite)
   return sprite
@@ -240,39 +242,30 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
     window.addEventListener('pointermove', onPointerMove)
     document.documentElement.addEventListener('pointerleave', onPointerLeave)
 
-    // En reposo NO hay órbitas: se crean por demanda vía portRef (una por
-    // agente activo) y se retiran al terminar la tarea (+5 s y explosión).
+    // En reposo NO hay órbitas: se crean por demanda vía portRef (a petición
+    // de App) y se retiran al terminar la tarea (+5 s y explosión).
     const orbits: OrbitalParticle[] = []
     const bursts: BurstSpark[] = []
     let spawnCount = 0
 
-    // Sprites perezosos por color de agente (caché de módulo compartida).
+    // Sprites perezosos por color (caché de módulo compartida).
     const spritesByColor = new Map<string, { ball: HTMLCanvasElement; trail: HTMLCanvasElement }>()
     const spritesFor = (color: string) => {
       const cached = spritesByColor.get(color)
       if (cached) return cached
       const entry = {
-        ball: getPlasmaSprite(color),
+        ball: getOrbitSprite(color),
         trail: getDiscSprite(lighten(color, TRAIL_TINT)),
       }
       spritesByColor.set(color, entry)
       return entry
     }
 
-    const spawnOrbit = (tone: OrbTone, info?: OrbitInfo) => {
-      const color = ORB_PALETTE[tone].hex
-      // Una órbita viva por agente: los tool-status repetidos reactivan la
-      // existente en su sitio en vez de duplicar (y refrescan su etiqueta).
-      // Una retirada con el mismo color no se reutiliza: cada petición crea
-      // la suya fresca.
-      const existing = orbits.find((o) => o.color === color && o.retireAt === null)
-      if (existing) {
-        if (info) {
-          existing.title = info.title
-          existing.detail = info.detail
-        }
-        return
-      }
+    // Atlas es único: un solo color azul eléctrico para todas las órbitas.
+    const ATLAS_ORBIT_COLOR = '#3FA4FF'
+
+    const spawnOrbit = (info?: OrbitInfo) => {
+      const color = ATLAS_ORBIT_COLOR
       spritesFor(color)
       const direction = Math.random() < 0.5 ? 1 : -1
       // Banda 1.02–1.30 casi frontal (±0.25 de inclinación): el anillo
@@ -297,7 +290,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
         seenX: -1,
         seenY: -1,
         seenR: 0,
-        title: info?.title ?? ORB_PALETTE[tone].label,
+        title: info?.title ?? 'ATLAS',
         detail: info?.detail ?? '',
         id: spawnCount,
       })
@@ -597,7 +590,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       <div
         ref={bubbleRef}
         className={`orbit-bubble${hover ? ' visible' : ''}`}
-        style={{ '--orbit-tone': hover?.color ?? '#ffffff' } as CSSProperties}
+        style={{ '--orbit-color': hover?.color ?? '#ffffff' } as CSSProperties}
         aria-hidden="true"
       >
         <div className="orbit-bubble-title">{hover?.title}</div>
