@@ -297,13 +297,13 @@ select { font: inherit; }
 .chat-stack {
   position: absolute;
   left: 32px;
-  bottom: 104px;
+  bottom: 88px;
   z-index: 4;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(480px, calc(100vw - 64px));
-  max-height: min(46vh, 520px);
+  width: min(320px, calc(100vw - 64px));
+  max-height: min(52vh, 560px);
   transform: translateX(calc(-100% - 48px)) scale(0.97);
   opacity: 0;
   filter: blur(16px) saturate(0.8);
@@ -393,6 +393,33 @@ select { font: inherit; }
   letter-spacing: 0.01em;
   color: #d8f6ff;
   overflow-wrap: anywhere;
+}
+
+/* Cursor de streaming: parpadea mientras Atlas escribe */
+.stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: #3fa4ff;
+  animation: stream-blink 0.8s step-end infinite;
+}
+
+@keyframes stream-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-cursor {
+    animation: none;
+  }
 }
 
 /* ── Confirmación de herramienta ──────────────────────────────────────
