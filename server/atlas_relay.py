@@ -449,11 +449,25 @@ class Brain:
             request_id = new_id("req")
             if command == "/clear":
                 content = "Historial reiniciado. ¿En qué le puedo ayudar?"
-            else:  # /help
-                content = ("Comandos: /clear (reiniciar la conversación). "
+            elif command == "/help":
+                content = ("Comandos: /clear (reiniciar la conversación), "
+                           "/log (últimos 3 registros del log). "
                            "También puedo consultar su calendario iCloud "
                            "y, con su permiso, crear, modificar o borrar "
                            "eventos en sus calendarios editables.")
+                session["messages"].append({
+                    "requestId": request_id, "sessionId": session["id"],
+                    "role": "user", "content": text, "source": source,
+                    "timestamp": utc_now(),
+                })
+            else:  # /log
+                try:
+                    with open(self.log_path, encoding="utf-8") as fh:
+                        lines = fh.readlines()
+                    last3 = [ln.rstrip("\\n") for ln in lines[-3:]]
+                    content = "Últimos 3 registros del log:\n" + "\n".join(last3) if last3 else "Log vacío."
+                except OSError:
+                    content = "No se pudo leer el log."
                 session["messages"].append({
                     "requestId": request_id, "sessionId": session["id"],
                     "role": "user", "content": text, "source": source,
@@ -484,7 +498,7 @@ class Brain:
         if not text:
             raise ValueError("empty_message")
         text = text[:MAX_CONTENT_LEN]
-        if text in ("/clear", "/help"):
+        if text in ("/clear", "/help", "/log"):
             return self._local_reply(text, source, chat_id)
         with self.lock:
             session = self._active()

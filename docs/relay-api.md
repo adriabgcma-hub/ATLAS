@@ -75,7 +75,8 @@ Body: `{"content": "…", "source": "local"|"telegram"}` (defecto `local`).
 Errores: `400 empty_message` (vacío), `400 bad_source`, `400 bad_body`.
 
 Comandos de chat (respuesta directa sin Groq): `/clear` (sesión nueva y
-vacía) y `/help` (ayuda). Valen por ambos canales.
+vacía), `/help` (ayuda) y `/log` (últimos 3 registros del log, sin llamar
+al LLM). Valen por ambos canales.
 
 ### `POST /v1/cancel`
 
