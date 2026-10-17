@@ -15,7 +15,7 @@ Los eventos usan los mismos nombres y formas que `contracts.md`:
 - `conversation.message_appended` → `{requestId, sessionId, timestamp, role, content, source}`
 
 En `/v1/events` cada evento lleva además `seq` (cursor monótono) y `kind`
-(`message` | `state`).
+(`message` | `state` | `confirmation`).
 
 ## Endpoints
 
@@ -101,9 +101,9 @@ Sin credenciales → `501 calendar_not_configured`; fallo iCloud → `502 calend
 ```
 
 `days` 1..31 (defecto 7); fuera de rango → `400 bad_days`. Solo iCloud.
-Nota: iCloud limita (throttle 403) ante ráfagas; el relay lo presenta
-como `502 calendar_upstream` y reintenta en la siguiente petición. Uso
-normal (peticiones sueltas) no lo dispara.
+Nota: el cliente CalDAV usa PROPFIND + GET (no REPORT) para evitar el
+throttle de Apple. Las lecturas son rápidas (~10 s para todos los
+calendarios) y se cachean 120 s en el relay.
 
 ## Variables de entorno (nombres; valores solo en `.env` local)
 

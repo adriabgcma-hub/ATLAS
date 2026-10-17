@@ -6,6 +6,29 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Fix CalDAV: evitar throttle de Apple
+
+- **Commit:** `Fix CalDAV: evitar throttle de Apple (PROPFIND+GET en vez de REPORT) + ampliar barras de chat/input`
+- **Fecha:** `2026-10-17`
+- **Descripción:** el cliente CalDAV usaba `REPORT` (filtrado por fecha en servidor)
+  que Apple throttled (403). Ahora usa `PROPFIND` (listar .ics) + `GET`
+  (leer cada evento) con concurrencia (ThreadPoolExecutor, 8 workers) y
+  filtrado de fecha en cliente. Caché de 120 s en el relay. Verificado live:
+  lectura de 5 eventos en 11 s, escritura (crear/borrar) con confirmación UI.
+  Barras de chat e input ampliadas a 400 px.
+- **Documentación relacionada:** `docs/tools.md`, `docs/relay-api.md`.
+
+### UI/Chat: streaming visual + limpieza de código muerto
+
+- **Commit:** `UI/Chat: streaming visual + limpieza de codigo muerto del intento de streaming server`
+- **Fecha:** `2026-10-16`
+- **Descripción:** streaming simulado en el frontend (revelado progresivo
+  letra a letra con cursor `▌`, cadencia 18 ms) sin depender del relay.
+  Eliminado código muerto del intento de streaming server-side:
+  `_push_stream`, tipo `StreamChunk`, acción `conversation.stream_chunk`,
+  listener IPC y rama en el poll de dev. Contratos TS/Rust/docs coherentes.
+- **Documentación relacionada:** `docs/contracts.md`, `docs/relay-api.md`.
+
 ### UI: anillo pensando + toggle del chat + panel suave
 
 - **Commit:** `UI: anillo pensando + toggle del chat + panel suave`

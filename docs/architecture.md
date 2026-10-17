@@ -93,6 +93,7 @@ app abierta o cerrada:
 - **Activo**: ventana Tauri transparente, escena WebGL, orbe y órbitas, barra de
   input, panel de conversación, cerebro Python 24/7 (sesiones, Groq con rotación,
   Telegram con respuesta directa) e IPC de eventos.
-- **Planificado**: memoria, registro de herramientas y streaming progresivo.
+- **Planificado**: memoria y registro de herramientas. Streaming progresivo
+  implementado (visual, en frontend, cadencia 18 ms).
 - **No activar por defecto**: micrófono, escucha permanente, wake word, TTS y agentes autónomos.
 
