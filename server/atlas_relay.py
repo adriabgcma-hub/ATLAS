@@ -153,6 +153,21 @@ def log(message: str) -> None:
     print(f"[relay {time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
 
 
+def dlog(brain: "Brain", category: str, message: str, **extra) -> None:
+    """Log detallado a archivo + stderr, con timestamp y categoría."""
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+    line = f"{ts} [{category}] {message}"
+    if extra:
+        line += " " + " ".join(f"{k}={v}" for k, v in extra.items())
+    try:
+        with open(brain.log_path, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+            fh.flush()
+    except OSError:
+        pass
+    print(f"[relay {time.strftime('%H:%M:%S')}] {category}: {message}", file=sys.stderr, flush=True)
+
+
 def fail_config(message: str) -> NoReturn:
     log(f"config: {message}")
     raise SystemExit(2)
@@ -264,6 +279,10 @@ class Brain:
         self._caldav: atlas_caldav.CalDAVClient | None = None
         self.confirmations: dict = {}
         self._cal_cache: dict = {}
+        # Logging detallado + consumo de tokens (Groq).
+        self.log_path = os.path.join(cfg["data_dir"], "relay.log")
+        self.token_usage = {"prompt": 0, "completion": 0, "total": 0,
+                            "calls": 0, "by_model": {}}
         self._load()
 
     # -- persistencia ----------------------------------------------------
@@ -418,6 +437,7 @@ class Brain:
     # -- recepción -------------------------------------------------------
     def _local_reply(self, text: str, source: str, chat_id: int | None = None) -> dict:
         """Respuesta directa sin Groq (comandos). Ahorra cuota y es exacta."""
+        dlog(self, "LOCAL_REPLY", f"command={text.strip()} source={source}")
         command = text.strip()
         with self.lock:
             if command == "/clear":
@@ -459,6 +479,7 @@ class Brain:
 
     def receive(self, content: str, source: str, chat_id: int | None = None) -> dict:
         """Registra una petición y la encola al worker. Devuelve ids."""
+        dlog(self, "RECEIVE", f"source={source} chat_id={chat_id} content={content[:200]}")
         text = content.strip()
         if not text:
             raise ValueError("empty_message")
@@ -486,6 +507,7 @@ class Brain:
 
     def cancel(self, request_id: str) -> bool:
         """Marca cancelada. Idempotente: desconocida también devuelve ok."""
+        dlog(self, "CANCEL", f"request={request_id}")
         with self.lock:
             # El conjunto se poda: solo importan las cancelaciones recientes
             # (mejor esfuerzo; una cancelación tardía se ignora igual).
@@ -673,6 +695,7 @@ class Brain:
 
     def confirm(self, request_id: str, decision: str) -> bool:
         """Registra la decisión del usuario. False si caducó o no existe."""
+        dlog(self, "CONFIRM", f"request={request_id} decision={decision}")
         with self.lock:
             entry = self.confirmations.get(request_id)
             if entry is None or time.time() > entry["expires"]:
@@ -707,6 +730,25 @@ class Brain:
             try:
                 with urllib.request.urlopen(req, timeout=GROQ_TIMEOUT_S) as response:
                     data = json.load(response)
+                usage = data.get("usage") or {}
+                # Registrar consumo de tokens.
+                try:
+                    self.token_usage["prompt"] += int(usage.get("prompt_tokens", 0))
+                    self.token_usage["completion"] += int(usage.get("completion_tokens", 0))
+                    self.token_usage["total"] += int(usage.get("total_tokens", 0))
+                    self.token_usage["calls"] += 1
+                    model = self.cfg["groq_model"]
+                    self.token_usage["by_model"].setdefault(model, {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
+                    self.token_usage["by_model"][model]["prompt"] += int(usage.get("prompt_tokens", 0))
+                    self.token_usage["by_model"][model]["completion"] += int(usage.get("completion_tokens", 0))
+                    self.token_usage["by_model"][model]["total"] += int(usage.get("total_tokens", 0))
+                    self.token_usage["by_model"][model]["calls"] += 1
+                except (ValueError, TypeError):
+                    pass
+                dlog(self, "LLM", f"groq completion ok model={self.cfg['groq_model']}",
+                     prompt_tokens=usage.get("prompt_tokens", 0),
+                     completion_tokens=usage.get("completion_tokens", 0),
+                     total_tokens=usage.get("total_tokens", 0))
                 message = (data.get("choices") or [{}])[0].get("message", {})
                 content = (message.get("content") or "").strip() or None
                 calls = message.get("tool_calls") or None
@@ -739,6 +781,7 @@ class Brain:
 
     def _complete(self, request_id: str, job: dict, text: str, error: str | None) -> None:
         """Cierra la operación (vía común de stub, LLM y tools)."""
+        dlog(self, "COMPLETE", f"request={request_id} error={error} text_len={len(text or '')}")
         with self.lock:
             session = self.sessions.get(job["session_id"])
             if session is None:
@@ -771,6 +814,8 @@ class Brain:
 
     def _handle_tool_call(self, job: dict, call: dict) -> str:
         """Ejecuta una tool_call del modelo (con confirmación si toca)."""
+        function = call.get("function", {}) if isinstance(call, dict) else {}
+        dlog(self, "TOOL", f"call tool={function.get('name')} args={function.get('arguments', '')[:300]} request={job.get('request_id')}")
         try:
             function = call["function"]
             name = function["name"]
@@ -794,16 +839,20 @@ class Brain:
 
     def _process(self, job: dict) -> None:
         request_id = job["request_id"]
+        session_id = job["session_id"]
+        channel = job.get("source", "local")
+        dlog(self, "PROCESS", f"start request={request_id} session={session_id} channel={channel}")
         with self.lock:
-            session = self.sessions.get(job["session_id"])
+            session = self.sessions.get(session_id)
             if session is None:
+                dlog(self, "PROCESS", f"session not found, aborting request={request_id}")
                 return
             history = [{"role": m["role"], "content": m["content"]}
                        for m in session["messages"]]
-        channel = job.get("source", "local")
         if not self.cfg["groq_keys"]:
             last_user = next((m["content"] for m in reversed(history)
                               if m["role"] == "user"), "")
+            dlog(self, "PROCESS", f"no groq keys, stub reply request={request_id}")
             self._complete(request_id, job,
                            f"(stub local · sin claves Groq) Recibido: {last_user}",
                            None)
@@ -813,21 +862,28 @@ class Brain:
             {"role": "system", "content": self._context_block(channel)},
         ]
         messages.extend(history[-MAX_HISTORY:])
-        for _ in range(MAX_TURNS):
+        for turn in range(MAX_TURNS):
+            dlog(self, "PROCESS", f"turn {turn+1}/{MAX_TURNS} request={request_id}")
             content, calls, error = self.groq_completion(messages)
             if error is not None:
+                dlog(self, "PROCESS", f"groq error={error} request={request_id}")
                 self._complete(request_id, job, "", error)
                 return
             if not calls:
+                dlog(self, "PROCESS", f"final response len={len(content or '')} request={request_id}")
                 self._complete(request_id, job, content or "(vacío)", None)
                 return
+            tool_names = [c.get("function", {}).get("name") for c in (calls or [])]
+            dlog(self, "PROCESS", f"tool_calls={tool_names} request={request_id}")
             messages.append({"role": "assistant", "content": content or "",
                              "tool_calls": calls})
             for call in calls:
                 result = self._handle_tool_call(job, call if isinstance(call, dict) else {})
                 call_id = call.get("id", "") if isinstance(call, dict) else ""
+                dlog(self, "TOOL", f"tool={call.get('function', {}).get('name')} result={result[:200]} request={request_id}")
                 messages.append({"role": "tool", "tool_call_id": call_id,
                                  "content": result})
+        dlog(self, "PROCESS", f"max turns reached request={request_id}")
         self._complete(request_id, job, "", "max_turns")
 
     # -- Telegram --------------------------------------------------------
@@ -843,6 +899,7 @@ class Brain:
             return json.load(response)
 
     def _send_telegram(self, chat_id: int, text: str) -> None:
+        dlog(self, "TELEGRAM", f"send chat_id={chat_id} text={text[:200]}")
         try:
             self._telegram_call("sendMessage", {"chat_id": chat_id, "text": text}, 20)
         except Exception as exc:
@@ -1000,6 +1057,30 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
                     self._json(400, {"ok": False, "error": "bad_since"})
                     return
                 self._json(200, {"events": brain.events_since(since)})
+                return
+            if parsed.path == "/v1/logs":
+                query = urllib.parse.parse_qs(parsed.query)
+                try:
+                    tail = int(query.get("tail", ["100"])[0])
+                    if tail < 1 or tail > 10000:
+                        raise ValueError
+                except ValueError:
+                    self._json(400, {"ok": False, "error": "bad_tail"})
+                    return
+                try:
+                    with open(brain.log_path, encoding="utf-8") as fh:
+                        lines = fh.readlines()
+                except OSError:
+                    lines = []
+                tail_lines = lines[-tail:]
+                self._json(200, {"lines": [ln.rstrip("\\n") for ln in tail_lines],
+                                 "total": len(lines)})
+                return
+            if parsed.path == "/v1/stats":
+                with brain.lock:
+                    usage = dict(brain.token_usage)
+                    usage["by_model"] = {k: dict(v) for k, v in brain.token_usage["by_model"].items()}
+                self._json(200, {"token_usage": usage})
                 return
             self._json(404, {"ok": False, "error": "not_found"})
 

@@ -42,6 +42,25 @@ En `/v1/events` cada evento lleva además `seq` (cursor monótono) y `kind`
 
 `since < 0` → `400 bad_since`.
 
+### `GET /v1/logs?tail=N`
+
+Log detallado del relay (respuestas, tokens, tools, interacciones, Telegram).
+
+```json
+{"lines": ["2026-… [PROCESS] start request=…", …], "total": 1234}
+```
+
+`tail` 1..10000 (defecto 100). Archivo: `temp/atlas-relay/relay.log`.
+
+### `GET /v1/stats`
+
+Consumo acumulado de tokens (Groq).
+
+```json
+{"token_usage": {"prompt": 1234, "completion": 567, "total": 1801,
+  "calls": 5, "by_model": {"openai/gpt-oss-120b": {"prompt": …, "completion": …, "total": …, "calls": …}}}}
+```
+
 ### `POST /v1/send`
 
 Body: `{"content": "…", "source": "local"|"telegram"}` (defecto `local`).
