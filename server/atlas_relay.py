@@ -724,6 +724,13 @@ class Brain:
                 "expiresAt": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                            time.gmtime(entry["expires"])),
             })
+        # Avisar por Telegram si hay chat asociado (fuera del lock por red).
+        if chat_id is not None:
+            self._send_telegram(
+                chat_id,
+                f"⏳ Atlas necesita tu confirmación:\n{summary}\n\n"
+                "Responde «sí» / «adelante» para aceptar, o «no» para denegar.\n"
+                "Tienes 5 minutos para responder.")
         entry["event"].wait(CONFIRM_TIMEOUT_S)
         with self.lock:
             self.confirmations.pop(request_id, None)

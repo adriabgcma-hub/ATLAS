@@ -317,6 +317,8 @@ export default function App() {
   const orbitPortRef = useRef<OrbitPort | null>(null)
   const orbitedRequestsRef = useRef<Set<string>>(new Set())
   const orbitedConfirmsRef = useRef<Set<string>>(new Set())
+  /** Mapea confirmation.requestId → id de órbita en Orbits. */
+  const confirmOrbitIdRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     const port = orbitPortRef.current
@@ -345,10 +347,11 @@ export default function App() {
     for (const confirmation of confirmations) {
       if (!orbitedConfirmsRef.current.has(confirmation.requestId)) {
         orbitedConfirmsRef.current.add(confirmation.requestId)
-        port.spawnOrbit({
+        const orbitId = port.spawnOrbit({
           title: 'Confirmación pendiente',
           detail: truncate(confirmation.summary, 140),
         })
+        confirmOrbitIdRef.current.set(confirmation.requestId, orbitId)
       }
     }
   })
@@ -443,7 +446,15 @@ export default function App() {
 
   const handlePermissionRespond = useCallback(
     (requestId: string, decision: ConfirmationDecision) => {
-      const done = () => dispatch({ type: 'permission.resolved', requestId })
+      const port = orbitPortRef.current
+      const orbitId = confirmOrbitIdRef.current.get(requestId)
+      const done = () => {
+        dispatch({ type: 'permission.resolved', requestId })
+        if (port && orbitId !== undefined) {
+          port.retireOrbit(orbitId)
+          confirmOrbitIdRef.current.delete(requestId)
+        }
+      }
       if (!inTauri()) {
         fetch('http://127.0.0.1:8765/v1/confirm', {
           method: 'POST',

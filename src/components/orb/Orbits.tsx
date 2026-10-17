@@ -54,8 +54,10 @@ interface BurstSpark {
  *  al recibir cada petición y retira las vivas al terminar la tarea.
  *  Atlas es único: un solo color; cada petición crea su órbita fresca. */
 export interface OrbitPort {
-  /** Crea una órbita de Atlas con su etiqueta. */
-  spawnOrbit: (info?: OrbitInfo) => void
+  /** Crea una órbita de Atlas con su etiqueta. Devuelve el id de la órbita. */
+  spawnOrbit: (info?: OrbitInfo) => number
+  /** Retira una órbita concreta por su id (vive 5 s más y estalla). */
+  retireOrbit: (id: number) => void
   /** Las órbitas en vivo pasan a retiradas: viven 5 s más y terminan con
    *  una mini-explosión de su color. */
   retireAll: () => void
@@ -264,7 +266,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
     // Atlas es único: un solo color azul eléctrico para todas las órbitas.
     const ATLAS_ORBIT_COLOR = '#3FA4FF'
 
-    const spawnOrbit = (info?: OrbitInfo) => {
+    const spawnOrbit = (info?: OrbitInfo): number => {
       const color = ATLAS_ORBIT_COLOR
       spritesFor(color)
       const direction = Math.random() < 0.5 ? 1 : -1
@@ -272,6 +274,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       // proyectado nunca toca el orbe (radio 0.5) ni pasa por debajo de él.
       // Varias órbitas simultáneas se reparten la banda sin solaparse.
       const baseRadius = 1.02 + (spawnCount % 5) * 0.07
+      const orbitId = spawnCount
       spawnCount += 1
 
       orbits.push({
@@ -292,8 +295,19 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
         seenR: 0,
         title: info?.title ?? 'ATLAS',
         detail: info?.detail ?? '',
-        id: spawnCount,
+        id: orbitId,
       })
+      return orbitId
+    }
+
+    const retireOrbit = (id: number) => {
+      const until = performance.now() + ORBIT_LINGER_MS
+      for (const o of orbits) {
+        if (o.id === id && o.retireAt === null) {
+          o.retireAt = until
+          break
+        }
+      }
     }
 
     const retireAll = () => {
@@ -312,7 +326,8 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       }
     }
 
-    if (portRef) portRef.current = { spawnOrbit, retireAll, burstAll }
+    if (portRef)
+      portRef.current = { spawnOrbit, retireOrbit, retireAll, burstAll }
 
     let lastFrame = -1
     // Factor de sueño (0 despierto → 1 dormido): transición suave ~2 s.
