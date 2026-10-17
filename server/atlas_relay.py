@@ -1217,7 +1217,40 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
     return Handler
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Carga `.env` en os.environ si existe. No pisa variables ya definidas.
+
+    Solo stdlib: formato `KEY=VALUE`, comentarios con `#`, sin comillas
+    complejas. Cualquier variable ya presente en el entorno (por ejemplo al
+    lanzar con `RELAY_PORT=9000 python3 …`) tiene prioridad.
+    """
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError:
+        return
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not key or key in os.environ:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ[key] = value
+
+
 def main() -> int:
+    load_dotenv()
     cfg = read_env()
     os.makedirs(cfg["data_dir"], exist_ok=True)
 
