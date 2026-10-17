@@ -96,6 +96,19 @@ TERMINAL_STATES = {"idle", "cancelled", "completed", "failed"}
 CONFIRM_TIMEOUT_S = 300
 MAX_TURNS = 4
 
+# Palabras que cuentan como confirmación explícita desde Telegram (texto libre).
+CONFIRM_WORDS = {
+    "sí", "si", "sií", "síí", "adelante", "vale", "ok", "okey", "oké",
+    "confirmo", "confirmar", "ejecutar", "hazlo", "dále", "dale", "vamos",
+    "sí adelante", "si adelante", "confirmado", "acepto", "autorizo",
+}
+# Palabras que cuentan como denegación explícita desde Telegram.
+DENY_WORDS = {
+    "no", "no quiero", "no gracias", "cancela", "cancelar", "stop",
+    "detener", "parar", "olvídalo", "olvidalo", "déjalo", "dejalo",
+    "no ejecutes", "no hacerlo", "deniego", "rechazo",
+}
+
 EDITABLE_DEFAULT = "Exámenes,Celebraciones,Horario,Deberes"
 
 # Catálogo de herramientas (ver docs/tools.md). El riesgo decide si la
@@ -693,11 +706,14 @@ class Brain:
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,
-                         tool_id: str, args: dict) -> str | None:
+                         tool_id: str, args: dict,
+                         chat_id: int | None = None) -> str | None:
         """Emite la petición y espera. Devuelve la decisión o None (timeout)."""
         summary, risk = self._confirm_summary(tool_id, args)
         entry = {"tool": tool_id, "args": args, "event": threading.Event(),
-                 "decision": None, "expires": time.time() + CONFIRM_TIMEOUT_S}
+                 "decision": None, "expires": time.time() + CONFIRM_TIMEOUT_S,
+                 "chat_id": chat_id,
+                 "session_id": session_id}
         with self.lock:
             self.confirmations[request_id] = entry
             self._push_event({
@@ -712,6 +728,15 @@ class Brain:
         with self.lock:
             self.confirmations.pop(request_id, None)
         return entry["decision"]
+
+    def find_pending_confirmation_for_chat(self, chat_id: int) -> str | None:
+        """Busca una confirmación pendiente asociada a un chat de Telegram."""
+        now = time.time()
+        with self.lock:
+            for request_id, entry in self.confirmations.items():
+                if entry.get("chat_id") == chat_id and now < entry["expires"]:
+                    return request_id
+        return None
 
     def confirm(self, request_id: str, decision: str) -> bool:
         """Registra la decisión del usuario. False si caducó o no existe."""
@@ -851,7 +876,7 @@ class Brain:
             # El tiempo del usuario no consume el plazo de la operación.
             job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
             decision = self.ask_confirmation(job["request_id"], job["session_id"],
-                                             name, args)
+                                             name, args, chat_id=job.get("chat_id"))
             if decision != "allow_once":
                 return ("denegada por el usuario"
                         if decision == "deny" else "caducada sin respuesta")
@@ -963,6 +988,37 @@ class Brain:
                 text = (message.get("text") or message.get("caption") or "").strip()
                 if not text or sender not in self.cfg["allowed"] or chat_id is None:
                     continue
+                text_lower = text.lower().strip()
+                # 1. ¿Es una confirmación por texto para una operación pendiente?
+                pending = self.find_pending_confirmation_for_chat(chat_id)
+                if pending is not None:
+                    if text_lower in CONFIRM_WORDS:
+                        if self.confirm(pending, "allow_once"):
+                            self._send_telegram(
+                                chat_id,
+                                "✅ Confirmado. Ejecutando la acción…")
+                        else:
+                            self._send_telegram(
+                                chat_id,
+                                "❌ La confirmación ya caducó. Pide de nuevo la acción.")
+                        continue
+                    if text_lower in DENY_WORDS:
+                        if self.confirm(pending, "deny"):
+                            self._send_telegram(
+                                chat_id,
+                                "❌ Denegado. Acción cancelada.")
+                        else:
+                            self._send_telegram(
+                                chat_id,
+                                "⚠️ No había confirmación pendiente para denegar.")
+                        continue
+                    # Texto no reconocido: pedir claridad sin crear nueva petición
+                    self._send_telegram(
+                        chat_id,
+                        "Hay una acción pendiente esperando tu confirmación. "
+                        "Responde «sí» / «adelante» para aceptar o «no» para denegar.")
+                    continue
+                # 2. No hay confirmación pendiente: procesar como petición nueva.
                 try:
                     self.receive(text, "telegram", chat_id)
                 except ValueError:
