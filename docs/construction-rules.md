@@ -67,3 +67,4 @@ Estas reglas definen cómo se debe ampliar Atlas. Se aplican al frontend, Rust, 
 - No dejes un commit autorizado únicamente en el repositorio local.
 - Antes de publicar, verifica la URL del remoto, la rama de destino y el estado del árbol de trabajo.
 - No hagas push, reescribas el historial ni cambies de rama sin permiso explícito del usuario.
+- El relay corre en `homelab` como servicio de usuario (`atlas-relay.service`): cuando el cambio afecte a `server/`, despliega con `./scripts/deploy-relay.sh` (commitea, sube, baja los cambios en `homelab`, reinicia el servicio y comprueba `/v1/health`).

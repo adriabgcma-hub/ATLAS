@@ -56,5 +56,13 @@ Si el cambio afecta Tauri o el bundle, añade:
 npm run tauri build -- --debug
 ```
 
+Si el cambio afecta a `server/` (el relay), despliégalo y verifica su salud:
+
+```bash
+./scripts/deploy-relay.sh
+```
+
+El script reinicia el servicio `atlas-relay` en `homelab` y comprueba `/v1/health`; si falla, revisa `journalctl --user -u atlas-relay -n 20` (desde `homelab`).
+
 Documenta los fallos conocidos, el alcance de las pruebas y cualquier dependencia externa necesaria para reproducirlas.
 
