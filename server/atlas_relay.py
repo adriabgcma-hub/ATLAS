@@ -1244,10 +1244,6 @@ def load_dotenv(path: str = ".env") -> None:
         value = value.strip()
         if not key or key in os.environ:
             continue
-        # Quitar comentarios en línea (todo lo que va tras #, salvo que esté
-        # entre comillas). Formato estándar de .env.
-        if "#" in value and not (len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]):
-            value = value.split("#", 1)[0].strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         os.environ[key] = value
