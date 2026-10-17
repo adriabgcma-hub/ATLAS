@@ -27,6 +27,9 @@ import type {
 import './App.css'
 
 const LETTER_CADENCE_MS = 26
+/** URL del relay. En dev (navegador) se sondea directo; en Tauri el núcleo
+ *  drena el relay vía ATLAS_RELAY_URL y el frontend usa IPC. */
+const RELAY_URL = import.meta.env.VITE_RELAY_URL || 'http://192.168.100.26:8765'
 /** Cada cuánto se drena el relay (el cursor evita reprocesar). */
 const RELAY_DRAIN_MS = 4000
 
@@ -217,7 +220,7 @@ export default function App() {
   // vuelan para mensajes de usuario: la respuesta del LLM vive en el panel
   // y en el brillo del orbe, no en la barra de input.
   const pollDevRelay = useCallback(() => {
-    fetch(`http://127.0.0.1:8765/v1/events?since=${devRelayCursorRef.current}`)
+    fetch(`${RELAY_URL}/v1/events?since=${devRelayCursorRef.current}`)
       .then((response) => {
         if (!response.ok) throw new Error('relay_http')
         return response.json() as Promise<{ events?: RelayEventRow[] }>
@@ -415,7 +418,7 @@ export default function App() {
     } else {
       // DEV (navegador, sin Tauri ni núcleo): hidrata el historial y sondea
       // eventos nuevos con los mismos visuales. Vía canónica: IPC.
-      fetch('http://127.0.0.1:8765/v1/session')
+      fetch(`${RELAY_URL}/v1/session`)
         .then((response) => {
           if (!response.ok) throw new Error('relay_http')
           return response.json() as Promise<{ session: ActiveSession | null }>
@@ -456,7 +459,7 @@ export default function App() {
         }
       }
       if (!inTauri()) {
-        fetch('http://127.0.0.1:8765/v1/confirm', {
+        fetch(`${RELAY_URL}/v1/confirm`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ requestId, decision }),
@@ -496,7 +499,7 @@ export default function App() {
         return
       }
       if (!inTauri()) {
-        fetch('http://127.0.0.1:8765/v1/send', {
+        fetch(`${RELAY_URL}/v1/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content, source: 'local' }),
