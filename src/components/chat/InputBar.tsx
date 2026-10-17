@@ -15,6 +15,7 @@ interface InputBarProps {
   pending: boolean
   thinking: boolean
   expanded: boolean
+  hasConfirmations: boolean
   placeholder?: string
 }
 
@@ -25,6 +26,7 @@ export function InputBar({
   pending,
   thinking,
   expanded,
+  hasConfirmations = false,
   placeholder = 'Transmite a Atlas…',
 }: InputBarProps) {
   const [value, setValue] = useState('')
@@ -39,7 +41,7 @@ export function InputBar({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (pending) {
+    if (pending && !hasConfirmations) {
       onCancel()
       return
     }
@@ -97,19 +99,30 @@ export function InputBar({
         type="text"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder={pending ? 'Petición en curso — Enter para cancelar' : placeholder}
+        placeholder={hasConfirmations
+          ? 'Escribe «sí» o «no» para responder'
+          : pending
+            ? 'Petición en curso — Enter para cancelar'
+            : placeholder}
         enterKeyHint="send"
         autoComplete="off"
         spellCheck={false}
         aria-label="Escribe un mensaje para Atlas"
+        disabled={pending && !hasConfirmations}
       />
       <button
         type="submit"
         className="chat-send-btn"
-        disabled={!canSubmit && !pending}
-        aria-label={pending ? 'Cancelar petición' : 'Enviar mensaje'}
+        disabled={(!canSubmit && !pending && !hasConfirmations) || (pending && !hasConfirmations)}
+        aria-label={
+          hasConfirmations
+            ? 'Enviar respuesta de confirmación'
+            : pending
+              ? 'Cancelar petición'
+              : 'Enviar mensaje'
+        }
       >
-        {pending ? (
+        {pending && !hasConfirmations ? (
           <svg
             viewBox="0 0 24 24"
             width="14"

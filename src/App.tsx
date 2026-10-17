@@ -133,6 +133,19 @@ function pumpQueue(pump: LetterPump): void {
   }
 }
 
+// Palabras que cuentan como confirmación explícita (mismo conjunto que el relay).
+const CONFIRM_WORDS = new Set([
+  'sí', 'si', 'sií', 'síí', 'adelante', 'vale', 'ok', 'okey', 'oké',
+  'confirmo', 'confirmar', 'ejecutar', 'hazlo', 'dále', 'dale', 'vamos',
+  'sí adelante', 'si adelante', 'confirmado', 'acepto', 'autorizo',
+])
+// Palabras que cuentan como denegación explícita.
+const DENY_WORDS = new Set([
+  'no', 'no quiero', 'no gracias', 'cancela', 'cancelar', 'stop',
+  'detener', 'parar', 'olvídalo', 'olvidalo', 'déjalo', 'dejalo',
+  'no ejecutes', 'no hacerlo', 'deniego', 'rechazo',
+])
+
 export default function App() {
   const levelRef = useRef(0)
   const scenePortRef = useRef<ScenePort | null>(null)
@@ -427,37 +440,6 @@ export default function App() {
   }, [enqueueLetters, pollDevRelay, rememberMessage, seedSeen])
 
   // Envío local: en Tauri va al cerebro por IPC; en dev va al cerebro por
-  // HTTP directo (mismo bucle de eventos). Sin relay, eco visual.
-  const handleSubmit = useCallback(
-    (content: string) => {
-      if (!inTauri()) {
-        fetch('http://127.0.0.1:8765/v1/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, source: 'local' }),
-        })
-          .then((response) => {
-            if (!response.ok) throw new Error('relay_http')
-            pollDevRelay()
-          })
-          .catch(() => enqueueLetters(content))
-        return
-      }
-      invoke<SendResult>('conversation_send', { content, source: 'local' }).catch((error: unknown) => {
-        dispatch({ type: 'conversation.error', message: errorCode(error) })
-      })
-    },
-    [enqueueLetters, pollDevRelay],
-  )
-
-  const handleCancel = useCallback(() => {
-    if (!inTauri()) return
-    const requestId = conversation.pendingRequestIds[0]
-    if (!requestId) return
-    invoke('conversation_cancel', { requestId }).catch((error: unknown) => {
-      dispatch({ type: 'conversation.error', message: errorCode(error) })
-    })
-  }, [conversation.pendingRequestIds])
 
   const handlePermissionRespond = useCallback(
     (requestId: string, decision: ConfirmationDecision) => {
@@ -482,6 +464,59 @@ export default function App() {
     },
     [],
   )
+
+  // Cuando hay confirmaciones pendientes, el texto del input se interpreta
+  // como decisión (sí/no) en lugar de un mensaje nuevo para el LLM.
+  const handleSubmit = useCallback(
+    (content: string) => {
+      const lower = content.trim().toLowerCase()
+      // Si hay confirmaciones pendientes, intentar responder a la primera.
+      if (conversation.confirmations.length > 0) {
+        const firstConfirm = conversation.confirmations[0]
+        if (CONFIRM_WORDS.has(lower)) {
+          handlePermissionRespond(firstConfirm.requestId, 'allow_once')
+          return
+        }
+        if (DENY_WORDS.has(lower)) {
+          handlePermissionRespond(firstConfirm.requestId, 'deny')
+          return
+        }
+        // Texto no reconocido: ignorar (o se podría avisar)
+        return
+      }
+      if (!inTauri()) {
+        fetch('http://127.0.0.1:8765/v1/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, source: 'local' }),
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error('relay_http')
+            pollDevRelay()
+          })
+          .catch(() => enqueueLetters(content))
+        return
+      }
+      invoke<SendResult>('conversation_send', { content, source: 'local' }).catch((error: unknown) => {
+        dispatch({ type: 'conversation.error', message: errorCode(error) })
+      })
+    },
+    [conversation.confirmations, handlePermissionRespond, enqueueLetters, pollDevRelay],
+  )
+
+  const handleCancel = useCallback(() => {
+    // Si hay confirmaciones pendientes, cancelar = denegar la primera.
+    if (conversation.confirmations.length > 0) {
+      handlePermissionRespond(conversation.confirmations[0].requestId, 'deny')
+      return
+    }
+    if (!inTauri()) return
+    const requestId = conversation.pendingRequestIds[0]
+    if (!requestId) return
+    invoke('conversation_cancel', { requestId }).catch((error: unknown) => {
+      dispatch({ type: 'conversation.error', message: errorCode(error) })
+    })
+  }, [conversation.confirmations, conversation.pendingRequestIds, handlePermissionRespond])
 
   const orbState = deriveOrbState(
     sessionStateToOrbInput(conversation.sessionState, conversation.messages.length > 0),
@@ -520,6 +555,7 @@ export default function App() {
         pending={conversation.pendingRequestIds.length > 0}
         thinking={thinking}
         expanded={chatExpanded}
+        hasConfirmations={conversation.confirmations.length > 0}
       />
     </main>
   )
