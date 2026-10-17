@@ -505,7 +505,8 @@ def build_vevent(uid: str, summary: str, start: str, end: str | None = None,
                  description: str = "", location: str = "",
                  timezone: str = "Europe/Madrid") -> str:
     """Construye un VEVENT. `start`/`end`: `YYYY-MM-DD` (todo el día) o
-    `YYYY-MM-DDTHH:MM` (se interpreta en `timezone` y se guarda en UTC)."""
+    `YYYY-MM-DDTHH:MM` (se interpreta en `timezone` y se guarda en UTC).
+    Si no se indica `end`, se asume una duración de 1 hora."""
     import datetime as dt
     import zoneinfo
     all_day = "T" not in start
@@ -514,6 +515,12 @@ def build_vevent(uid: str, summary: str, start: str, end: str | None = None,
         dtend = ""
         if end:
             dtend = f"\r\nDTEND;VALUE=DATE:{end.replace('-', '')}"
+        else:
+            # Todo el día sin end: añadir un día
+            parts = start.split("-")
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            next_day = dt.date(y, m, d) + dt.timedelta(days=1)
+            dtend = f"\r\nDTEND;VALUE=DATE:{next_day.strftime('%Y%m%d')}"
     else:
         zone = zoneinfo.ZoneInfo(timezone)
         start_dt = dt.datetime.strptime(start[:16], "%Y-%m-%dT%H:%M").replace(tzinfo=zone)
@@ -522,6 +529,10 @@ def build_vevent(uid: str, summary: str, start: str, end: str | None = None,
         dtend = ""
         if end and "T" in end:
             end_dt = dt.datetime.strptime(end[:16], "%Y-%m-%dT%H:%M").replace(tzinfo=zone)
+            dtend = "\r\nDTEND:" + end_dt.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        else:
+            # Sin end: asumir 1 hora de duración
+            end_dt = start_dt + dt.timedelta(hours=1)
             dtend = "\r\nDTEND:" + end_dt.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
