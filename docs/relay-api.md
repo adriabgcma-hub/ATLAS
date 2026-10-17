@@ -61,6 +61,9 @@ Consumo acumulado de tokens (Groq).
   "calls": 5, "by_model": {"openai/gpt-oss-120b": {"prompt": …, "completion": …, "total": …, "calls": …}}}}
 ```
 
+El log detallado se escribe en `temp/atlas-relay/relay.log` (categorías:
+RECEIVE, PROCESS, LLM, TOOL, COMPLETE, CANCEL, CONFIRM, TELEGRAM, LOCAL_REPLY).
+
 ### `POST /v1/send`
 
 Body: `{"content": "…", "source": "local"|"telegram"}` (defecto `local`).

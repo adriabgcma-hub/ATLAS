@@ -6,6 +6,16 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Logging: log detallado + endpoints /v1/logs y /v1/stats
+
+- **Commit:** `Logging: log detallado (respuestas, tokens, tools, interacciones) + endpoints /v1/logs y /v1/stats`
+- **Fecha:** `2026-10-17`
+- **Descripción:** log detallado a archivo (`temp/atlas-relay/relay.log`) con
+  categorías RECEIVE, PROCESS, LLM, TOOL, COMPLETE, CANCEL, CONFIRM, TELEGRAM,
+  LOCAL_REPLY. Tracking de tokens por modelo (prompt/completion/total/calls).
+  Endpoints `GET /v1/logs?tail=N` y `GET /v1/stats`. Verificado live.
+- **Documentación relacionada:** `docs/relay-api.md`.
+
 ### Fix CalDAV: evitar throttle de Apple
 
 - **Commit:** `Fix CalDAV: evitar throttle de Apple (PROPFIND+GET en vez de REPORT) + ampliar barras de chat/input`
