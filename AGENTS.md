@@ -5,15 +5,21 @@
 ## Servidores de desarrollo (mantener levantados mientras se trabaja)
 
 - Frontend: `npm run dev` → http://localhost:5173 (recarga sola con HMR).
-- Relay Python (desde la raíz del repo): `python3 server/atlas_relay.py`
-  → http://127.0.0.1:8765 (núcleo lo drena vía `ATLAS_RELAY_URL`; el frontal
-  web en dev lo sondea directo con CORS solo para ese origen). El `.env` se
-  carga automáticamente al iniciar (`RELAY_CORS_ORIGIN`, claves, etc.).
-- El relay **no** recarga solo: reinícialo (`pkill -f "server/atlas_relay.py"` y
-  arrancar de nuevo) cada vez que cambies algo en `server/`.
+- Relay Python: **corre en el servidor remoto** `homelab` (`adria@192.168.100.26`,
+  Debian 13), no en local. Dirección: `http://192.168.100.26:8765` (núcleo lo
+  drena vía `ATLAS_RELAY_URL`; el frontal web en dev lo sondea directo con CORS
+  solo para ese origen). El `.env` se carga automáticamente al iniciar.
+- **Sincronizar y desplegar el relay** (desde la raíz del repo del Mac):
+  `./scripts/deploy-relay.sh` → commitea cambios pendientes, hace `git push`,
+  baja los cambios en `homelab`, reinicia el relay y comprueba `/v1/health`.
+  El relay **no** recarga solo: cada despliegue lo reinicia el script.
+- El relay solo escucha en la IP LAN de `homelab` (`192.168.100.26:8765`, no en
+  `127.0.0.1`); el firewall `ufw` de Debian debe dejar pasar el 8765/tcp.
+- Acceso SSH al servidor: clave `~/.ssh/atlas_linux` del Mac (usuario `adria`).
 - Nunca commitees `.env` (ignorado por Git): lleva tokens y API keys reales.
+  Para pasarlo a `homelab`: `scp -i ~/.ssh/atlas_linux .env adria@192.168.100.26:ATLAS/.env`.
 - Tauri no lee `.env` solo: para `tauri dev`/`build` con claves,
-  `set -a; . ./.env; set +a` antes (el relay y las pruebas Rust igual).
+  `set -a; . ./.env; set +a` antes (las pruebas Rust igual).
 - iCloud CalDAV: prohibido martillear. Cada prueba contra iCloud (una sola
   petición de lectura o más) requiere permiso explícito del usuario, con pausa
   entre intentos. Apple limita (throttle 403) ante ráfagas.
