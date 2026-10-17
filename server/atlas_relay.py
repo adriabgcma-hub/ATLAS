@@ -465,9 +465,15 @@ class Brain:
                     with open(self.log_path, encoding="utf-8") as fh:
                         lines = fh.readlines()
                     last3 = [ln.rstrip("\\n") for ln in lines[-3:]]
-                    content = "Últimos 3 registros del log:\n" + "\n".join(last3) if last3 else "Log vacío."
+                    log_part = "\n".join(last3) if last3 else "Log vacío."
                 except OSError:
-                    content = "No se pudo leer el log."
+                    log_part = "No se pudo leer el log."
+                # Unificar con consumo de tokens (lectura sin lock para evitar
+                # deadlock: ya estamos dentro de self.lock).
+                u = self.token_usage
+                stats_part = (f"Tokens: prompt={u['prompt']} completion={u['completion']} "
+                              f"total={u['total']} llamadas={u['calls']}")
+                content = "Últimos 3 registros del log:\n" + log_part + "\n\n" + stats_part
                 session["messages"].append({
                     "requestId": request_id, "sessionId": session["id"],
                     "role": "user", "content": text, "source": source,
