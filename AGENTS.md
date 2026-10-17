@@ -13,9 +13,11 @@
   (con linger activo: arranca con el sistema y sobrevive a cierres de sesión).
   Logs: `journalctl --user -u atlas-relay -f` (desde `homelab`).
 - **Sincronizar y desplegar el relay** (desde la raíz del repo del Mac):
-  `./scripts/deploy-relay.sh` → commitea cambios pendientes, hace `git push`,
-  baja los cambios en `homelab`, reinicia el servicio y comprueba `/v1/health`.
-  El relay **no** recarga solo: cada despliegue lo reinicia el script.
+  `./scripts/deploy-relay.sh` → sube cambios commiteados, baja en `homelab`,
+  reinicia el servicio y comprueba `/v1/health`. El relay **no** recarga solo:
+  cada despliegue lo reinicia el script.
+  **Importante:** el script NO commitea automáticamente. Commitea manualmente
+  antes de desplegar. Si hay cambios sin commitear, el script aborta.
 - El relay solo escucha en la IP LAN de `homelab` (`192.168.100.26:8765`, no en
   `127.0.0.1`); el firewall `ufw` de Debian debe dejar pasar el 8765/tcp.
 - Acceso SSH al servidor: clave `~/.ssh/atlas_linux` del Mac (usuario `adria`).

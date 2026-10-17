@@ -29,9 +29,13 @@ ssh_cmd() {
 # 1) Cambios locales pendientes
 if [ "${1:-}" != "--pull" ]; then
   if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "→ Hay cambios sin commitear; creando commit..."
-    git add -A
-    git commit -m "deploy: sincronización $(date '+%Y-%m-%d %H:%M')"
+    echo "⚠️  Hay cambios sin commitear. Commitea manualmente antes de desplegar."
+    echo "   Archivos modificados:"
+    git status --short
+    echo ""
+    echo "   Usa 'git add -A && git commit -m \"...\"' para commitear."
+    echo "   O usa --push para subir sin commitear (si ya están commiteados)."
+    exit 1
   fi
   echo "→ Subiendo cambios a origin/main..."
   git push origin main
