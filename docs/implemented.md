@@ -8,7 +8,7 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ### Comando /log: últimos 3 registros en pantalla
 
-- **Commit:** pendiente
+- **Commit:** `Comando /log: muestra ultimos 3 registros del log sin llamar al LLM`
 - **Fecha:** `2026-10-17`
 - **Descripción:** comando `/log` que muestra los últimos 3 registros del log
   en el panel de chat sin llamar al LLM. Útil para debugging rápido.
