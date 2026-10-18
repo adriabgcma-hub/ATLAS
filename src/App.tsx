@@ -485,6 +485,24 @@ export default function App() {
           /* relay no disponible */
         })
       }, RELAY_DRAIN_MS)
+      // Re-hidratación periódica del historial: recupera mensajes de Telegram
+      // que llegaron mientras el frontend estaba cerrado y reintenta si la
+      // sesión_get inicial falló (relay aún no disponible al montar). El
+      // cursor del drenador ya avanza con session_get, así no se replaya.
+      const hydrateTauri = () => {
+        invoke<ActiveSession | null>('session_get')
+          .then((session) => {
+            if (!cancelled && session) {
+              seedSeen(session.messages)
+              dispatch({ type: 'conversation.hydrate', session })
+            }
+          })
+          .catch(() => {
+            /* relay no disponible: se reintenta en el siguiente ciclo */
+          })
+      }
+      hydrateTauri()
+      hydrateTimer = window.setInterval(hydrateTauri, 30_000)
     } else {
       // DEV (navegador, sin Tauri ni núcleo): hidrata el historial y sondea
       // eventos nuevos con los mismos visuales. Vía canónica: IPC.
