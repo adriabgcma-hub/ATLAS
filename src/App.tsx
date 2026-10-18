@@ -69,6 +69,7 @@ interface RelayEventRow {
   source?: Source
   state?: SessionState
   message?: string
+  decision?: string
   toolId?: string
   summary?: string
   risk?: string
@@ -259,6 +260,22 @@ export default function App() {
               enqueueLetters(row.content)
             }
           } else if (
+            row.kind === 'confirmation_resolved' &&
+            typeof row.requestId === 'string'
+          ) {
+            // La confirmación fue resuelta (por botón o por texto en Telegram).
+            dispatch({
+              type: 'permission.resolved',
+              requestId: row.requestId,
+            })
+            const port = orbitPortRef.current
+            const orbitId = confirmOrbitIdRef.current.get(row.requestId)
+            if (port && orbitId !== undefined) {
+              port.retireOrbit(orbitId)
+              confirmOrbitIdRef.current.delete(row.requestId)
+              orbitedConfirmsRef.current.delete(row.requestId)
+            }
+          } else if (
             row.kind === 'state' &&
             typeof row.state === 'string' &&
             (
@@ -347,6 +364,16 @@ export default function App() {
       orbitedRequestsRef.current.clear()
       orbitedConfirmsRef.current.clear()
     }
+    // Retirar órbitas de confirmaciones que ya se resolvieron (por botón o texto).
+    const currentConfirmIds = new Set(confirmations.map((c) => c.requestId))
+    for (const [requestId, orbitId] of confirmOrbitIdRef.current) {
+      if (!currentConfirmIds.has(requestId)) {
+        port.retireOrbit(orbitId)
+        confirmOrbitIdRef.current.delete(requestId)
+        orbitedConfirmsRef.current.delete(requestId)
+      }
+    }
+    // Crear órbitas para confirmaciones nuevas.
     for (const confirmation of confirmations) {
       if (!orbitedConfirmsRef.current.has(confirmation.requestId)) {
         orbitedConfirmsRef.current.add(confirmation.requestId)
@@ -365,6 +392,7 @@ export default function App() {
     const unsubs: Array<() => void> = []
     let cancelled = false
     let drainTimer = 0
+    let hydrateTimer = 0
 
     if (inTauri()) {
       invoke<ActiveSession | null>('session_get')
@@ -418,29 +446,37 @@ export default function App() {
     } else {
       // DEV (navegador, sin Tauri ni núcleo): hidrata el historial y sondea
       // eventos nuevos con los mismos visuales. Vía canónica: IPC.
-      fetch(`${RELAY_URL}/v1/session`)
-        .then((response) => {
-          if (!response.ok) throw new Error('relay_http')
-          return response.json() as Promise<{ session: ActiveSession | null }>
-        })
-        .then((data) => {
-          if (cancelled) return
-          if (data.session) {
-            seedSeen(data.session.messages)
-            dispatch({ type: 'conversation.hydrate', session: data.session })
-          }
-        })
-        .catch(() => {
-          /* relay no disponible */
-        })
+      // Hidratar historial (incluye mensajes de Telegram que llegaron mientras
+      // el frontend estaba cerrado). Se re-hidrata cada 30s para no perder
+      // mensajes que el sondeo no capture.
+      const hydrate = () => {
+        fetch(`${RELAY_URL}/v1/session`)
+          .then((response) => {
+            if (!response.ok) throw new Error('relay_http')
+            return response.json() as Promise<{ session: ActiveSession | null }>
+          })
+          .then((data) => {
+            if (cancelled) return
+            if (data.session) {
+              seedSeen(data.session.messages)
+              dispatch({ type: 'conversation.hydrate', session: data.session })
+            }
+          })
+          .catch(() => {
+            /* relay no disponible */
+          })
+      }
+      hydrate()
       pollDevRelay()
       drainTimer = window.setInterval(pollDevRelay, RELAY_DRAIN_MS)
+      hydrateTimer = window.setInterval(hydrate, 30_000)
     }
 
     return () => {
       cancelled = true
       for (const unsub of unsubs) unsub()
       window.clearInterval(drainTimer)
+      window.clearInterval(hydrateTimer)
       for (const timer of timers) clearTimeout(timer)
     }
   }, [enqueueLetters, pollDevRelay, rememberMessage, seedSeen])

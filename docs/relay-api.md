@@ -101,6 +101,14 @@ En `/v1/events` con `kind: "confirmation"`:
  "risk": "write", "expiresAt": "…"}
 ```
 
+En `/v1/events` con `kind: "confirmation_resolved"` (cuando el usuario
+confirma o deniega, por botón o por texto):
+```json
+{"seq": 9, "kind": "confirmation_resolved", "type": "permission.resolved",
+  "requestId": "req-…", "sessionId": "ses-…", "timestamp": "…",
+  "decision": "allow_once"|"deny"}
+```
+
 ## Herramientas (function calling)
 
 El cerebro ofrece el catálogo de `docs/tools.md` al modelo en cada turno

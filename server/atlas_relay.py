@@ -726,11 +726,14 @@ class Brain:
             })
         # Avisar por Telegram si hay chat asociado (fuera del lock por red).
         if chat_id is not None:
+            dlog(self, "CONFIRM", f"enviando aviso a Telegram chat_id={chat_id} summary={summary[:100]}")
             self._send_telegram(
                 chat_id,
                 f"⏳ Atlas necesita tu confirmación:\n{summary}\n\n"
                 "Responde «sí» / «adelante» para aceptar, o «no» para denegar.\n"
                 "Tienes 5 minutos para responder.")
+        else:
+            dlog(self, "CONFIRM", f"sin chat_id (local), no se envía aviso Telegram request={request_id}")
         entry["event"].wait(CONFIRM_TIMEOUT_S)
         with self.lock:
             self.confirmations.pop(request_id, None)
@@ -753,8 +756,24 @@ class Brain:
             if entry is None or time.time() > entry["expires"]:
                 self.confirmations.pop(request_id, None)
                 return False
+            session_id = entry.get("session_id", "")
+            chat_id = entry.get("chat_id")
             entry["decision"] = decision
             entry["event"].set()
+            # Empujar evento para que el frontend sepa que se resolvió.
+            self._push_event({
+                "kind": "confirmation_resolved",
+                "type": "permission.resolved",
+                "requestId": request_id,
+                "sessionId": session_id,
+                "timestamp": utc_now(),
+                "decision": decision,
+            })
+            # Avisar por Telegram si hay chat asociado.
+            if chat_id is not None:
+                icon = "✅" if decision == "allow_once" else "❌"
+                verb = "aceptada" if decision == "allow_once" else "denegada"
+                self._send_telegram(chat_id, f"{icon} Acción {verb}.")
             return True
 
     def groq_completion(self, messages: list[dict]
