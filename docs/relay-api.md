@@ -22,8 +22,12 @@ En `/v1/events` cada evento lleva además `seq` (cursor monótono) y `kind`
 ### `GET /v1/health`
 
 ```json
-{"ok": true, "telegram": "enabled|disabled", "llm": "groq|stub", "events": 5}
+{"ok": true, "telegram": "enabled|disabled", "llm": "groq|stub", "events": 5,
+ "queue": 0, "inflight": 0, "bot": {"id": 123, "username": "atlas_bot", "first_name": "Atlas"}}
 ```
+
+`queue` e `inflight` son peticiones en cola/en vuelo; `bot` solo aparece con
+`TELEGRAM_BOT_TOKEN` configurado (identidad `getMe`, se captura al arrancar).
 
 ### `GET /v1/session`
 
@@ -62,7 +66,76 @@ Consumo acumulado de tokens (Groq).
 ```
 
 El log detallado se escribe en `temp/atlas-relay/relay.log` (categorías:
-RECEIVE, PROCESS, LLM, TOOL, COMPLETE, CANCEL, CONFIRM, TELEGRAM, LOCAL_REPLY).
+RECEIVE, PROCESS, LLM, TOOL, COMPLETE, CANCEL, CONFIRM, TELEGRAM, LOCAL_REPLY,
+PANEL).
+
+### `GET /v1/system`
+
+Snapshot best-effort del host homelab (con caché de 10 s), fuente del panel:
+
+```json
+{"generated_at": "…",
+ "units": [{"unit": "docker.service", "scope": "system", "description": "…",
+            "load": "loaded", "active": "active", "sub": "running",
+            "since": "Fri 2026-…", "pid": 123, "mem_bytes": 143000000,
+            "actionable": true}, {"unit": "atlas-relay.service", "scope": "user", …}],
+ "ports": [{"port": 8765, "address": "192.168.100.26", "service": "atlas-relay"}],
+ "docker": {"available": true, "containers": [{"name": "nextcloud-app-1",
+            "image": "nextcloud:apache", "state": "running", "status": "Up 2 hours",
+            "compose_service": "app", "compose_project": "nextcloud"}]},
+ "cloud": {"compose_project": "nextcloud", "containers": [see above],
+           "nextcloud": {"status": "ok", "version": "35.0.2.2"},
+           "tailscale_serve": {"url": "https://macbook-nube.tail…ts.net"}},
+ "resources": {"mem_used_pct": 37, "disk_root": {"total": 111654973440, "free": 94074470400},
+               "uptime_s": 16271, "load_1": 2.7, "temp_c": 70.0,
+               "battery": {"cap_pct": 42, "status": "Full"}, "ac_connected": true},
+ "actions": {"verbs": ["start", "stop", "restart"],
+             "system_units": ["avahi-daemon.service", …], "user_units": ["atlas-relay.service"],
+             "compose_targets": ["app", "db"]}}
+```
+
+Nada de esto es de la conversación: es observación del host (subprocesos con
+timeout; un fallo de fuente degrada a `null`/vacío sin matar el endpoint).
+
+### `POST /v1/system/asks`
+
+Pide una **acción** y devuelve su op-id (doble confirmación del panel). Body:
+
+```json
+{"kind": "service", "unit": "docker.service", "verb": "restart"}
+```
+
+- `kind: "service"`: unidad systemd en la lista blanca (`PANEL_ACTION_UNITS`
+  para sistema, `PANEL_USER_UNITS` para usuario, ej. `atlas-relay.service`);
+  verb ∈ `start|stop|restart`. Fuera de lista → `403 action_not_allowed`.
+- `kind: "compose"`: `target ∈ app|db`, `verb ∈ start|stop|restart`
+  (compose de `/home/adria/nextcloud/docker-compose.yml`, vía sudo -n del
+  ayudante).
+- `kind: "cancel_all"`: cancela TODAS las peticiones en vuelo del cerebro.
+
+Respuesta: `{"ok": true, "op": "op-…", "kind": "…", "summary": "systemctl restart docker.service"}`
+El op-id caduca en 30 s y vale una sola vez.
+
+### `POST /v1/system/resolve`
+
+Body: `{"op": "op-…", "decision": "allow_once"|"deny"}`.
+
+- `deny` → `{"ok": true, "executed": false, "denied": true}`.
+- `allow_once` → `{"ok": true, "executed": true, "result": {"ok": true, "rc": 0, …}}`.
+- op inexistente/caducada → `404 expired_or_unknown` (se consume al resolver).
+
+Todo queda en `relay.log` con categoría `PANEL` (asks/deny/execute).
+
+### `POST /v1/system/cancel_all`
+
+Atajo sin doble confirmación (es lógica interna del cerebro):
+`{"ok": true, "cancelled": N}`. El panel prefieres el flujo asks/resolve con
+`kind: "cancel_all"` para que salga la tarjeta ámbar.
+
+### `GET /panel/*`
+
+Estáticos del panel (build Vite de `apps/panel/dist`; base `/panel/`).
+`GET /panel/` sirve `index.html`. 404 JSON si no hay build. Solo LAN.
 
 ### `POST /v1/send`
 
@@ -143,7 +216,12 @@ calendarios) y se cachean 120 s en el relay.
   `GROQ_TEMPERATURE` (defecto `0.7`, rango `0..2`)
 - `RELAY_HOST` (defecto IP LAN), `RELAY_PORT` (defecto `8765`),
   `RELAY_DATA_DIR` (defecto `temp/atlas-relay`, dentro del repo),
-  `RELAY_CORS_ORIGIN` (vacío = sin CORS; solo dev web)
+  `RELAY_CORS_ORIGIN` (vacío = sin CORS; en dev admite lista de orígenes
+  separada por comas: sólo se devuelve el Origin que pide si está en la lista)
+- `PANEL_*` (panel, ver `server/system_monitor.py`): `PANEL_SYSTEM_UNITS`,
+  `PANEL_ACTION_UNITS` (lista blanca de acciones systemd), `PANEL_USER_UNITS`,
+  `PANEL_CLOUD_COMPOSE`, `PANEL_CLOUD_URL`, `PANEL_DIST_DIR`
+  (build del panel `apps/panel/dist`)
 - `CALDAV_USERNAME` (tu Apple ID), `CALDAV_APP_PASSWORD` (contraseña de app)
 - `RELAY_TIMEZONE` (defecto `Europe/Madrid`; la hora del contexto sale de aquí,
   nunca de APIs del Mac, para poder correr el servidor donde sea)
