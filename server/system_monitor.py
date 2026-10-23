@@ -214,11 +214,13 @@ class SystemMonitor:
             line = line.strip()
             if not line:
                 continue
-            try:
-                raw = json.loads(line)
-            except ValueError:
+            raw = json.loads(line) if isinstance(line, str) else line
+            if not isinstance(raw, dict):
                 continue
             labels = raw.get("Labels") or {}
+            if isinstance(labels, str):  # docker CLI: "k1=v1,k2=v2"
+                labels = dict(part.split("=", 1) for part in labels.split(",")
+                              if "=" in part)
             containers.append({
                 "id": (raw.get("ID") or "")[:12],
                 "name": raw.get("Names"),

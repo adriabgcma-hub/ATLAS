@@ -1372,6 +1372,8 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                 return
             self._json(404, {"ok": False, "error": "not_found"})
 
+    return Handler
+
 
 def load_dotenv(path: str = ".env") -> None:
     """Carga `.env` en os.environ si existe. No pisa variables ya definidas.
@@ -1445,7 +1447,6 @@ def main() -> int:
                                  make_handler(brain, network, status, sysmon))
     log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
     log(f"panel estático en /panel/ ({sysmon.panel_dist}).")
-    log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
