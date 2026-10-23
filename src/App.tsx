@@ -228,55 +228,7 @@ export default function App() {
       })
       .then((data) => {
         const rows = data.events ?? []
-        if (!devSyncedRef.current) {
-          // Primera sincronización: marcar todos los eventos como vistos,
-          // pero procesar confirmaciones pendientes (que no están en /v1/session).
-          for (const row of rows) {
-            devRelayCursorRef.current = Math.max(devRelayCursorRef.current, row.seq)
-            if (
-              row.kind === 'confirmation' &&
-              typeof row.toolId === 'string' &&
-              typeof row.summary === 'string' &&
-              (row.risk === 'read' ||
-                row.risk === 'write' ||
-                row.risk === 'external' ||
-                row.risk === 'destructive') &&
-              typeof row.expiresAt === 'string'
-            ) {
-              dispatch({
-                type: 'permission.confirmation_required',
-                event: {
-                  type: 'permission.confirmation_required',
-                  requestId: row.requestId,
-                  sessionId: row.sessionId,
-                  timestamp: row.timestamp,
-                  toolId: row.toolId,
-                  summary: row.summary,
-                  risk: row.risk,
-                  expiresAt: row.expiresAt,
-                },
-              })
-              setChatExpanded(true)
-            } else if (
-              row.kind === 'confirmation_resolved' &&
-              typeof row.requestId === 'string'
-            ) {
-              dispatch({
-                type: 'permission.resolved',
-                requestId: row.requestId,
-              })
-              const port = orbitPortRef.current
-              const orbitId = confirmOrbitIdRef.current.get(row.requestId)
-              if (port && orbitId !== undefined) {
-                port.retireOrbit(orbitId)
-                confirmOrbitIdRef.current.delete(row.requestId)
-                orbitedConfirmsRef.current.delete(row.requestId)
-              }
-            }
-          }
-          devSyncedRef.current = true
-          return
-        }
+        const isFirstSync = !devSyncedRef.current
         for (const row of rows) {
           devRelayCursorRef.current = Math.max(devRelayCursorRef.current, row.seq)
           if (
@@ -298,14 +250,40 @@ export default function App() {
                 source: row.source,
               },
             })
-            if (row.role === 'user' && rememberMessage(row.requestId, row.role)) {
+            // En la primera sync, los mensajes son del historial: sin animación.
+            if (!isFirstSync && row.role === 'user' && rememberMessage(row.requestId, row.role)) {
               enqueueLetters(row.content)
             }
+          } else if (
+            row.kind === 'confirmation' &&
+            typeof row.toolId === 'string' &&
+            typeof row.summary === 'string' &&
+            (row.risk === 'read' ||
+              row.risk === 'write' ||
+              row.risk === 'external' ||
+              row.risk === 'destructive') &&
+            typeof row.expiresAt === 'string'
+          ) {
+            // Primera sincronización: procesar confirmaciones pendientes
+            // (que no están en /v1/session).
+            dispatch({
+              type: 'permission.confirmation_required',
+              event: {
+                type: 'permission.confirmation_required',
+                requestId: row.requestId,
+                sessionId: row.sessionId,
+                timestamp: row.timestamp,
+                toolId: row.toolId,
+                summary: row.summary,
+                risk: row.risk,
+                expiresAt: row.expiresAt,
+              },
+            })
+            setChatExpanded(true)
           } else if (
             row.kind === 'confirmation_resolved' &&
             typeof row.requestId === 'string'
           ) {
-            // La confirmación fue resuelta (por botón o por texto en Telegram).
             dispatch({
               type: 'permission.resolved',
               requestId: row.requestId,
@@ -342,32 +320,9 @@ export default function App() {
                 ...(typeof row.message === 'string' ? { message: row.message } : {}),
               },
             })
-          } else if (
-            row.kind === 'confirmation' &&
-            typeof row.toolId === 'string' &&
-            typeof row.summary === 'string' &&
-            (row.risk === 'read' ||
-              row.risk === 'write' ||
-              row.risk === 'external' ||
-              row.risk === 'destructive') &&
-            typeof row.expiresAt === 'string'
-          ) {
-            dispatch({
-              type: 'permission.confirmation_required',
-              event: {
-                type: 'permission.confirmation_required',
-                requestId: row.requestId,
-                sessionId: row.sessionId,
-                timestamp: row.timestamp,
-                toolId: row.toolId,
-                summary: row.summary,
-                risk: row.risk,
-                expiresAt: row.expiresAt,
-              },
-            })
-            setChatExpanded(true)
           }
         }
+        devSyncedRef.current = true
       })
       .catch(() => {
         /* relay no disponible */

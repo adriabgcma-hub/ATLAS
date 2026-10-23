@@ -6,6 +6,19 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Fix: mensajes de Telegram no aparecían al abrir el frontend (modo dev)
+
+- **Commit:** `Fix dev: procesar mensajes del historial en la primera sincronización con el relay`
+- **Fecha:** `2026-10-18`
+- **Descripción:** en modo dev, cuando se enviaban mensajes por Telegram
+  sin el frontend activo y luego se abría la app, los mensajes de usuario no
+  aparecían — solo las respuestas del LLM. Causa: la primera sincronización
+  de `pollDevRelay()` marcaba todos los eventos como vistos (incluidos los
+  mensajes del historial) sin procesarlos. Fix: la primera sync ahora también
+  procesa mensajes (sin animar letras), confirmaciones y estados. Verificado:
+  `npm run build`, `npm run lint`, `cargo check --workspace`.
+- **Documentación relacionada:** `docs/relay-api.md`.
+
 ### Comando /log: últimos 3 registros en pantalla
 
 - **Commit:** `Comando /log: muestra ultimos 3 registros del log sin llamar al LLM`

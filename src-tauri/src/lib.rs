@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 /// URL del cerebro en la red local. No es un secreto.
 fn default_relay_url() -> String {
-    std::env::var("ATLAS_RELAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8765".to_string())
+    std::env::var("ATLAS_RELAY_URL").unwrap_or_else(|_| "http://192.168.100.26:8765".to_string())
 }
 
 struct CoreState {
