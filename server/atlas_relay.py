@@ -57,6 +57,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NoReturn
 
 import atlas_caldav
+import system_monitor
 
 MAX_CONTENT_LEN = 4000
 MAX_BODY_BYTES = 64 * 1024
@@ -292,6 +293,9 @@ class Brain:
         self._caldav: atlas_caldav.CalDAVClient | None = None
         self.confirmations: dict = {}
         self._cal_cache: dict = {}
+        # Panel: identidad del bot (getMe) y peticiones en vuelo (cola+activo).
+        self.bot_info: dict | None = None
+        self.inflight: set[str] = set()
         # Logging detallado + consumo de tokens (Groq).
         self.log_path = os.path.join(cfg["data_dir"], "relay.log")
         self.token_usage = {"prompt": 0, "completion": 0, "total": 0,
@@ -536,6 +540,7 @@ class Brain:
             self.jobs.put({"request_id": request_id, "session_id": session["id"],
                            "source": source, "chat_id": chat_id,
                            "deadline": time.monotonic() + OP_TIMEOUT_S})
+            self.inflight.add(request_id)
             return {"requestId": request_id, "sessionId": session["id"]}
 
     def cancel(self, request_id: str) -> bool:
@@ -565,6 +570,15 @@ class Brain:
                 entry["decision"] = "deny"
                 entry["event"].set()
             return found
+
+    def cancel_all(self) -> int:
+        """Cancela todas las peticiones en vuelo (cola + activa + confirmaciones)."""
+        with self.lock:
+            ids = list(self.inflight)
+        for request_id in ids:
+            self.cancel(request_id)  # cancel() toma su propio lock
+        dlog(self, "CANCEL", f"cancel_all count={len(ids)}")
+        return len(ids)
 
     # -- Groq ------------------------------------------------------------
     def _context_block(self, channel: str) -> str:
@@ -854,6 +868,7 @@ class Brain:
         """Cierra la operación (vía común de stub, LLM y tools)."""
         dlog(self, "COMPLETE", f"request={request_id} error={error} text_len={len(text or '')}")
         with self.lock:
+            self.inflight.discard(request_id)
             session = self.sessions.get(job["session_id"])
             if session is None:
                 return
@@ -979,7 +994,13 @@ class Brain:
     def telegram_loop(self) -> None:
         token = self.cfg["token"]
         try:
-            self._telegram_call("getMe", {}, 20)
+            me = self._telegram_call("getMe", {}, 20)
+            result = me.get("result") or {}
+            if result.get("username"):
+                with self.lock:
+                    self.bot_info = {"id": result.get("id"),
+                                     "username": result.get("username"),
+                                     "first_name": result.get("first_name")}
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 404):
                 # SystemExit en un hilo no detiene el proceso: salida dura.
@@ -1052,11 +1073,27 @@ class Brain:
             self._save_offset()
 
 
-def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
-    cors_origin = brain.cfg["cors_origin"]
+def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
+                 sysmon: system_monitor.SystemMonitor):
+    # RELAY_CORS_ORIGIN Puede llevar varios orígenes separados por comas
+    # (dev 5173 del app + dev 5174 del panel): se devuelve SOLO el Origin que
+    # hace petición si está en la lista (formato válido de CORS multi-origen).
+    allowed_origins = [o.strip() for o in brain.cfg["cors_origin"].split(",")
+                       if o.strip()]
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "AtlasRelay/3"
+
+        def _cors(self) -> None:
+            origin = self.headers.get("Origin", "")
+            if origin and origin in allowed_origins:
+                self.send_header("Access-Control-Allow-Origin", origin)
+
+        _CONTENT_TYPES = {".html": "text/html", ".js": "text/javascript",
+                          ".css": "text/css", ".svg": "image/svg+xml",
+                          ".png": "image/png", ".ico": "image/x-icon",
+                          ".json": "application/json", ".map": "application/json",
+                          ".woff2": "font/woff2", ".txt": "text/plain"}
 
         def log_message(self, *args: object) -> None:
             pass  # Los accesos no se registran (menos ruido, sin IPs en logs).
@@ -1075,8 +1112,36 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
             self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            if cors_origin:
-                self.send_header("Access-Control-Allow-Origin", cors_origin)
+            self._cors()
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _panel_file(self, relpath: str) -> None:
+            """Sirve los estáticos del panel (ruta dentro de PANEL_DIST_DIR)."""
+            relpath = relpath.split("?", 1)[0].split("#", 1)[0]
+            target = os.path.realpath(os.path.join(sysmon.panel_dist, relpath))
+            if target == sysmon.panel_dist or not os.path.isdir(sysmon.panel_dist):
+                # /panel/ (raíz) o ruta fuera de la raíz → index.html o 404.
+                if relpath != "":
+                    self._json(404, {"ok": False, "error": "not_found"})
+                    return
+                target = os.path.join(sysmon.panel_dist, "index.html")
+            if not os.path.isfile(target):
+                self._json(404, {"ok": False, "error": "not_found"})
+                return
+            try:
+                with open(target, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                self._json(500, {"ok": False, "error": "panel_read_failed"})
+                return
+            ext = os.path.splitext(target)[1].lower()
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             self._CONTENT_TYPES.get(ext, "application/octet-stream"))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self._cors()
             self.end_headers()
             self.wfile.write(body)
 
@@ -1097,8 +1162,8 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
                 self._json(403, {"ok": False, "error": "same_network_only"})
                 return
             self.send_response(204)
-            if cors_origin:
-                self.send_header("Access-Control-Allow-Origin", cors_origin)
+            self._cors()
+            if self.headers.get("Origin", "") in allowed_origins:
                 self.send_header("Access-Control-Allow-Methods", "GET, POST")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
@@ -1108,12 +1173,21 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
                 self._json(403, {"ok": False, "error": "same_network_only"})
                 return
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/panel" or parsed.path.startswith("/panel/"):
+                self._panel_file(parsed.path[len("/panel/"):])
+                return
             if parsed.path == "/v1/health":
                 with brain.lock:
                     queued = len(brain.events)
+                    inflight = len(brain.inflight)
+                bot = dict(brain.bot_info) if brain.bot_info else {}
                 self._json(200, {"ok": True, "telegram": status["telegram"],
                                  "llm": status["llm"], "calendar": status["calendar"],
-                                 "events": queued})
+                                 "events": queued, "queue": brain.jobs.qsize(),
+                                 "inflight": inflight, "bot": bot})
+                return
+            if parsed.path == "/v1/system":
+                self._json(200, sysmon.snapshot())
                 return
             if parsed.path == "/v1/session":
                 self._json(200, {"session": brain.get_snapshot(),
@@ -1231,9 +1305,72 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict):
                 accepted = brain.confirm(request_id, decision)
                 self._json(200, {"ok": True, "accepted": accepted})
                 return
+            if path == "/v1/system/asks":
+                kind = payload.get("kind", "")
+                if kind == "service":
+                    unit = str(payload.get("unit", ""))
+                    verb = str(payload.get("verb", ""))
+                    allowed, scope = sysmon.can_act(unit, verb)
+                    if not allowed:
+                        self._json(403, {"ok": False, "error": "action_not_allowed"})
+                        return
+                    detail = {"kind": "service", "unit": unit, "verb": verb,
+                              "scope": scope}
+                    summary = f"systemctl {verb} {unit}"
+                elif kind == "compose":
+                    target = str(payload.get("target", ""))
+                    verb = str(payload.get("verb", ""))
+                    if (target not in system_monitor.COMPOSE_TARGETS
+                            or verb not in system_monitor.ACTION_VERBS):
+                        self._json(403, {"ok": False, "error": "action_not_allowed"})
+                        return
+                    detail = {"kind": "compose", "target": target, "verb": verb}
+                    summary = f"docker compose {verb} {target} (nextcloud)"
+                elif kind == "cancel_all":
+                    detail = {"kind": "cancel_all"}
+                    summary = "Cancelar TODAS las peticiones en vuelo"
+                else:
+                    self._json(400, {"ok": False, "error": "bad_kind"})
+                    return
+                op_id = sysmon.ops.create(kind, summary, detail)
+                dlog(brain, "PANEL", f"asks kind={kind} summary={summary}")
+                self._json(200, {"ok": True, "op": op_id, "kind": kind,
+                                 "summary": summary})
+                return
+            if path == "/v1/system/resolve":
+                op_id = payload.get("op", "")
+                decision = payload.get("decision", "")
+                if not isinstance(op_id, str) or not op_id:
+                    self._json(400, {"ok": False, "error": "bad_request"})
+                    return
+                if decision not in ("allow_once", "deny"):
+                    self._json(400, {"ok": False, "error": "bad_decision"})
+                    return
+                entry = sysmon.ops.consume(op_id)
+                if entry is None:
+                    self._json(404, {"ok": False, "error": "expired_or_unknown"})
+                    return
+                if decision == "deny":
+                    dlog(brain, "PANEL", f"deny op={op_id} summary={entry['summary'][:120]}")
+                    self._json(200, {"ok": True, "executed": False, "denied": True})
+                    return
+                detail = entry["detail"]
+                if detail["kind"] == "service":
+                    result = sysmon.run_service_action(detail["unit"], detail["verb"])
+                elif detail["kind"] == "compose":
+                    result = sysmon.run_compose_action(detail["target"],
+                                                       detail["verb"])
+                else:  # cancel_all
+                    result = {"ok": True, "cancelled": brain.cancel_all()}
+                dlog(brain, "PANEL",
+                     f"execute kind={detail['kind']} ok={result.get('ok')}")
+                self._json(200, {"ok": True, "executed": True, "result": result})
+                return
+            if path == "/v1/system/cancel_all":
+                count = brain.cancel_all()
+                self._json(200, {"ok": True, "cancelled": count})
+                return
             self._json(404, {"ok": False, "error": "not_found"})
-
-    return Handler
 
 
 def load_dotenv(path: str = ".env") -> None:
@@ -1296,13 +1433,18 @@ def main() -> int:
         log("sin TELEGRAM_BOT_TOKEN: Telegram desactivado (canal local + API).")
     log(f"llm: {status['llm']} ({len(cfg['groq_keys'])} claves).")
 
+    sysmon = system_monitor.SystemMonitor(
+        log_panel=lambda _kind, message: dlog(brain, "PANEL", message))
+
     threading.Thread(target=brain.worker, daemon=True, name="brain-worker").start()
     if cfg["token"]:
         threading.Thread(target=brain.telegram_loop, daemon=True,
                          name="telegram-poll").start()
 
     server = ThreadingHTTPServer((host, cfg["port"]),
-                                 make_handler(brain, network, status))
+                                 make_handler(brain, network, status, sysmon))
+    log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
+    log(f"panel estático en /panel/ ({sysmon.panel_dist}).")
     log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
     try:
         server.serve_forever()
