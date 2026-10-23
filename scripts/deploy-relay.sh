@@ -12,10 +12,10 @@
 #   ./scripts/deploy-relay.sh --pull   # solo baja cambios del remoto y reinicia el relay (sin commitear)
 set -euo pipefail
 
-RELAY_HOST="${RELAY_SSH_HOST:-192.168.100.26}"
+RELAY_HOST="${RELAY_SSH_HOST:-127.0.0.1}"
 RELAY_USER="${RELAY_SSH_USER:-adria}"
 RELAY_DIR="${RELAY_SSH_DIR:-ATLAS}"
-SSH_KEY="$HOME/.ssh/atlas_linux"
+SSH_KEY="$HOME/.ssh/id_ed25519"
 REMOTE="$RELAY_USER@$RELAY_HOST"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
