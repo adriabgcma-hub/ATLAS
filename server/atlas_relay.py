@@ -1310,22 +1310,13 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                 if kind == "service":
                     unit = str(payload.get("unit", ""))
                     verb = str(payload.get("verb", ""))
-                    allowed, scope = sysmon.can_act(unit, verb)
+                    allowed, _scope = sysmon.can_act(unit, verb)
                     if not allowed:
                         self._json(403, {"ok": False, "error": "action_not_allowed"})
                         return
                     detail = {"kind": "service", "unit": unit, "verb": verb,
-                              "scope": scope}
+                              "scope": "system"}
                     summary = f"systemctl {verb} {unit}"
-                elif kind == "compose":
-                    target = str(payload.get("target", ""))
-                    verb = str(payload.get("verb", ""))
-                    if (target not in system_monitor.COMPOSE_TARGETS
-                            or verb not in system_monitor.ACTION_VERBS):
-                        self._json(403, {"ok": False, "error": "action_not_allowed"})
-                        return
-                    detail = {"kind": "compose", "target": target, "verb": verb}
-                    summary = f"docker compose {verb} {target} (nextcloud)"
                 elif kind == "cancel_all":
                     detail = {"kind": "cancel_all"}
                     summary = "Cancelar TODAS las peticiones en vuelo"
@@ -1356,9 +1347,7 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                     return
                 detail = entry["detail"]
                 if detail["kind"] == "service":
-                    result = sysmon.run_service_action(detail["unit"], detail["verb"])
-                elif detail["kind"] == "compose":
-                    result = sysmon.run_compose_action(detail["target"],
+                    result = sysmon.run_service_action(detail["unit"],
                                                        detail["verb"])
                 else:  # cancel_all
                     result = {"ok": True, "cancelled": brain.cancel_all()}

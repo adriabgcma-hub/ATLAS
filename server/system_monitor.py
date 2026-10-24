@@ -1,59 +1,52 @@
 #!/usr/bin/env python3
-"""Observador del sistema para el panel ATLAS (solo-homelab).
+"""Observador del sistema para el panel ATLAS (atlas-hub).
 
-- Recopila el estado de las unidades systemd relevantes, puertos a la escucha,
-  contenedores Docker, la nube (Nextcloud + MariaDB desplegada con compose),
-  Tailscale y los recursos del equipo. Todo best-effort: si una fuente no
-  responde, el campo queda `null` y el resto del snapshot sigue en pie.
+- Recopila el estado de las unidades systemd de sistema relevantes, los
+  puertos a la escucha y los recursos del equipo. Todo best-effort: si una
+  fuente no responde, el campo queda `null` y el resto del snapshot sigue
+  en pie.
 - Guarda la lógica de acciones del panel (start/stop/restart) tras la doble
   confirmación: prohíbe verbos y unidades fuera de la lista blanca inyectada
-  por entorno, y las ejecuta vía `systemctl` (polkit limita las de sistema) y
-  `sudo -n` sobre un ayudante con raíz fija (`/usr/local/lib/atlas/panel-docker.sh`).
+  por entorno, y las ejecuta vía `systemctl` (polkit limita las de sistema).
+  Por ahora la lista blanca está VACÍA en atlas-hub (sin reglas polkit para
+  `atlas`): se rellena por entorno a medida que se integren unidades.
+- Docker / Nextcloud / Tailscale NO se observan: no existen aún en
+  atlas-hub; volverán al panel cuando se integren de verdad.
 - Solo stdlib, sin dependencias. Python >= 3.11.
 
-Variables de entorno (valores por defecto pensados en homelab):
+Variables de entorno:
   PANEL_SYSTEM_UNITS  unidades systemd de nivel de sistema para mostrar.
-  PANEL_ACTION_UNITS  unidades de sistema ACCIONABLES (lista blanca).
-  PANEL_USER_UNITS    unidades systemd ACCIONABLES de usuario.
-  PANEL_CLOUD_COMPOSE ruta del docker-compose.yml de la nube.
-  PANEL_CLOUD_URL     probe local de Nextcloud (status.php).
+  PANEL_ACTION_UNITS  unidades de sistema ACCIONABLES (lista blanca; vacía
+                      por defecto hasta instalar reglas polkit en atlas-hub).
   PANEL_DIST_DIR      raíz estática del panel (apps/panel/dist).
 """
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
 import subprocess
 import threading
 import time
-import urllib.error
-import urllib.request
 
 SNAPSHOT_TTL_S = 10
 SUBPROC_TIMEOUT_S = 6
-CLOUD_PROBE_TIMEOUT_S = 5
 OP_TTL_S = 30
 ACTION_VERBS = ("start", "stop", "restart")
 UNIT_RE = re.compile(r"^[A-Za-z0-9@._~-]+\.service$")
 COMPOSE_TARGETS = ("app", "db")
 HELPER = "/usr/local/lib/atlas/panel-docker.sh"
 
-DEFAULT_SYSTEM_UNITS = (
-    "docker.service,ssh.service,tailscaled.service,cups.service,"
-    "avahi-daemon.service,macfan.service,lid-monitor.service,"
-    "smartmontools.service,NetworkManager.service"
-)
-DEFAULT_ACTION_UNITS = (
-    "docker.service,cups.service,avahi-daemon.service,macfan.service,"
-    "lid-monitor.service,smartmontools.service"
-)
-DEFAULT_USER_UNITS = "atlas-relay.service"
+DEFAULT_SYSTEM_UNITS = ("ssh.service,avahi-daemon.service,ufw.service,"
+                        "atlas-relay.service")
+# Lista blanca de acciones VACÍA en atlas-hub: sin reglas polkit para el
+# usuario `atlas`, ninguna acción `systemctl` del relay puede prosperar.
+# Se rellena por entorno (PANEL_ACTION_UNITS) a medida que se integren
+# unidades + permisos.
+DEFAULT_ACTION_UNITS = ""
 
-KNOWN_PORTS = {"22": "ssh", "631": "cups", "8765": "atlas-relay",
-               "8080": "nextcloud (compose)", "443": "tailscale serve"}
+KNOWN_PORTS = {"22": "ssh", "8765": "atlas-relay"}
 
 
 def _env_list(name: str, default: str) -> list[str]:
@@ -119,11 +112,6 @@ class SystemMonitor:
     def __init__(self, log_panel=None) -> None:
         self.system_units = _env_list("PANEL_SYSTEM_UNITS", DEFAULT_SYSTEM_UNITS)
         self.action_units = set(_env_list("PANEL_ACTION_UNITS", DEFAULT_ACTION_UNITS))
-        self.user_units = set(_env_list("PANEL_USER_UNITS", DEFAULT_USER_UNITS))
-        self.compose = os.environ.get("PANEL_CLOUD_COMPOSE",
-                                      "/home/adria/nextcloud/docker-compose.yml")
-        self.cloud_url = os.environ.get("PANEL_CLOUD_URL",
-                                        "http://127.0.0.1:8080/status.php")
         self.panel_dist = os.path.realpath(os.environ.get(
             "PANEL_DIST_DIR", os.path.join("apps", "panel", "dist")))
         self.log_panel = log_panel  # callable(kind, message)
@@ -140,8 +128,6 @@ class SystemMonitor:
         """(permitido, alcance) para una acción de unidad systemd."""
         if verb not in ACTION_VERBS or not UNIT_RE.match(unit):
             return (False, "")
-        if unit in self.user_units:
-            return (True, "user")
         if unit in self.action_units:
             return (True, "system")
         return (False, "")
@@ -150,13 +136,12 @@ class SystemMonitor:
     _UNIT_KEYS = ("Description", "LoadState", "ActiveState", "SubState",
                   "ActiveEnterTimestamp", "MainPID", "MemoryCurrent")
 
-    def _unit_info(self, unit: str, scope: str) -> dict:
-        base = ["systemctl", "--user"] if scope == "user" else ["systemctl"]
+    def _unit_info(self, unit: str) -> dict:
         props = [f"-p{k}" for k in self._UNIT_KEYS]
-        result = _run(base + ["show", unit, "--no-pager", *props])
+        result = _run(["systemctl", "show", unit, "--no-pager", *props])
         info: dict = {k: "" for k in self._UNIT_KEYS}
         if result is None:
-            return {"unit": unit, "scope": scope, "error": "no_responde"}
+            return {"unit": unit, "error": "no_responde"}
         current = None
         for line in result[1].splitlines():
             key, sep, value = line.partition("=")
@@ -170,20 +155,17 @@ class SystemMonitor:
             info["SubState"], info["ActiveEnterTimestamp"],
             info["MainPID"], info["MemoryCurrent"])
         return {
-            "unit": unit, "scope": scope,
+            "unit": unit,
             "description": desc or None,
             "load": load or None, "active": active or None,
             "sub": sub or None, "since": _parse_since(since) or None,
             "pid": int(pid) if pid.isdigit() else None,
             "mem_bytes": int(mem) if mem.isdigit() else None,
-            "actionable": (scope == "user" and unit in self.user_units)
-                          or unit in self.action_units,
+            "actionable": unit in self.action_units,
         }
 
     def _units(self) -> list[dict]:
-        out = [self._unit_info(u, "system") for u in self.system_units]
-        out.extend(self._unit_info(u, "user") for u in self.user_units)
-        return out
+        return [self._unit_info(u) for u in self.system_units]
 
     # -- snapshot: puertos ---------------------------------------------------
     def _ports(self) -> list[dict]:
@@ -203,58 +185,6 @@ class SystemMonitor:
                                     "address": local.rpartition(":")[0],
                                     "service": KNOWN_PORTS.get(port)})
         return [found[p] for p in sorted(found, key=int)]
-
-    # -- snapshot: docker ----------------------------------------------------
-    def _docker(self) -> dict:
-        result = _run(["sudo", "-n", HELPER, "ps"])
-        if result is None or result[0] != 0:
-            return {"available": False, "containers": []}
-        containers = []
-        for line in result[1].splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            raw = json.loads(line) if isinstance(line, str) else line
-            if not isinstance(raw, dict):
-                continue
-            labels = raw.get("Labels") or {}
-            if isinstance(labels, str):  # docker CLI: "k1=v1,k2=v2"
-                labels = dict(part.split("=", 1) for part in labels.split(",")
-                              if "=" in part)
-            containers.append({
-                "id": (raw.get("ID") or "")[:12],
-                "name": raw.get("Names"),
-                "image": raw.get("Image"),
-                "state": raw.get("State"),
-                "status": raw.get("Status"),
-                "compose_service": labels.get("com.docker.compose.service"),
-                "compose_project": labels.get("com.docker.compose.project"),
-            })
-        return {"available": True, "containers": containers}
-
-    # -- snapshot: nube (nextcloud) ------------------------------------------
-    def _nextcloud(self) -> dict:
-        info: dict = {"status": None, "version": None, "error": None}
-        try:
-            with urllib.request.urlopen(self.cloud_url,
-                                        timeout=CLOUD_PROBE_TIMEOUT_S) as resp:
-                body = json.loads(resp.read().decode("utf-8", "replace"))
-            info["status"] = "ok" if body.get("installed") else "ok?" 
-            info["version"] = body.get("version")
-            info["maintainer_mode"] = body.get("maintenance", False)
-        except (urllib.error.URLError, ValueError, OSError) as exc:
-            info["status"] = "down"
-            info["error"] = type(exc).__name__
-        return info
-
-    def _tailscale_serve(self) -> dict:
-        result = _run(["tailscale", "serve", "status"], timeout=4)
-        if result is None:
-            return {"url": None, "raw": None}
-        _rc, out, _err = result
-        url = next((ln.strip().rstrip(":") for ln in out.splitlines()
-                    if ln.strip().startswith("https://")), None)
-        return {"url": url, "raw": out.strip() or None}
 
     # -- snapshot: recursos ---------------------------------------------------
     def _resources(self) -> dict:
@@ -346,28 +276,13 @@ class SystemMonitor:
         return None
 
     # -- actions ------------------------------------------------------------
-    def _helper(self, op: str) -> tuple[int, str, str] | None:
-        if not os.access(HELPER, os.X_OK):
-            return None
-        return _run(["sudo", "-n", HELPER, op], timeout=90)
-
     def run_service_action(self, unit: str, verb: str) -> dict:
-        ok, scope = self.can_act(unit, verb)
+        ok, _scope = self.can_act(unit, verb)
         if not ok:
-            return {"ok": False, "error": "unidad/verbo no permitido", "scope": ""}
-        base = ["systemctl", "--user"] if scope == "user" else ["systemctl"]
-        result = _run(base + [verb, unit], timeout=90)
+            return {"ok": False, "error": "unidad/verbo no permitido"}
+        result = _run(["systemctl", verb, unit], timeout=90)
         if result is None:
-            return {"ok": False, "error": "systemctl no disponible", "scope": scope}
-        return {"ok": result[0] == 0, "rc": result[0], "scope": scope,
-                "output": (result[2].strip() or result[1].strip())[:300]}
-
-    def run_compose_action(self, target: str, verb: str) -> dict:
-        if target not in COMPOSE_TARGETS or verb not in ACTION_VERBS:
-            return {"ok": False, "error": "target/verbo no permitido"}
-        result = self._helper(f"compose_{verb}_{target}")
-        if result is None:
-            return {"ok": False, "error": "ayudante sudo no instalado"}
+            return {"ok": False, "error": "systemctl no disponible"}
         return {"ok": result[0] == 0, "rc": result[0],
                 "output": (result[2].strip() or result[1].strip())[:300]}
 
@@ -377,26 +292,14 @@ class SystemMonitor:
             cached = self._cache
             if cached is not None and not force and time.time() - cached[0] < SNAPSHOT_TTL_S:
                 return cached[1]
-        units = self._units()
-        docker = self._docker()
-        cloud_containers = [c for c in docker.get("containers", [])
-                            if (c.get("compose_project") or "") == "nextcloud"]
-        cloud = {"compose_project": "nextcloud",
-                 "containers": cloud_containers,
-                 "nextcloud": self._nextcloud(),
-                 "tailscale_serve": self._tailscale_serve()}
         data = {
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "units": units,
+            "units": self._units(),
             "ports": self._ports(),
-            "docker": docker,
-            "cloud": cloud,
             "resources": self._resources(),
             "actions": {
                 "verbs": list(ACTION_VERBS),
                 "system_units": sorted(self.action_units),
-                "user_units": sorted(self.user_units),
-                "compose_targets": list(COMPOSE_TARGETS),
             },
         }
         with self._cache_lock:

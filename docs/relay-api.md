@@ -75,23 +75,17 @@ Snapshot best-effort del host atlas-hub (con caché de 10 s), fuente del panel:
 
 ```json
 {"generated_at": "…",
- "units": [{"unit": "docker.service", "scope": "system", "description": "…",
+ "units": [{"unit": "ssh.service", "description": "OpenBSD Secure Shell server",
             "load": "loaded", "active": "active", "sub": "running",
             "since": "Fri 2026-…", "pid": 123, "mem_bytes": 143000000,
-            "actionable": true}, {"unit": "atlas-relay.service", "scope": "user", …}],
+            "actionable": false},
+           {"unit": "atlas-relay.service", …}],
  "ports": [{"port": 8765, "address": "192.168.100.26", "service": "atlas-relay"}],
- "docker": {"available": true, "containers": [{"name": "nextcloud-app-1",
-            "image": "nextcloud:apache", "state": "running", "status": "Up 2 hours",
-            "compose_service": "app", "compose_project": "nextcloud"}]},
- "cloud": {"compose_project": "nextcloud", "containers": [see above],
-           "nextcloud": {"status": "ok", "version": "35.0.2.2"},
-           "tailscale_serve": {"url": "https://macbook-nube.tail…ts.net"}},
  "resources": {"mem_used_pct": 37, "disk_root": {"total": 111654973440, "free": 94074470400},
                "uptime_s": 16271, "load_1": 2.7, "temp_c": 70.0,
                "battery": {"cap_pct": 42, "status": "Full"}, "ac_connected": true},
  "actions": {"verbs": ["start", "stop", "restart"],
-             "system_units": ["avahi-daemon.service", …], "user_units": ["atlas-relay.service"],
-             "compose_targets": ["app", "db"]}}
+             "system_units": ["avahi-daemon.service", …]}}
 ```
 
 Nada de esto es de la conversación: es observación del host (subprocesos con
@@ -104,15 +98,13 @@ siempre el nombre, `atlas-hub.local`.
 Pide una **acción** y devuelve su op-id (doble confirmación del panel). Body:
 
 ```json
-{"kind": "service", "unit": "docker.service", "verb": "restart"}
+{"kind": "service", "unit": "avahi-daemon.service", "verb": "restart"}
 ```
 
-- `kind: "service"`: unidad systemd en la lista blanca (`PANEL_ACTION_UNITS`
-  para sistema, `PANEL_USER_UNITS` para usuario, ej. `atlas-relay.service`);
-  verb ∈ `start|stop|restart`. Fuera de lista → `403 action_not_allowed`.
-- `kind: "compose"`: `target ∈ app|db`, `verb ∈ start|stop|restart`
-  (compose de `/home/adria/nextcloud/docker-compose.yml`, vía sudo -n del
-  ayudante; pendiente de migrar a atlas-hub, ver §7 de `relay.md`).
+- `kind: "service"`: unidad systemd de sistema en la lista blanca
+  (`PANEL_ACTION_UNITS`, p. ej. `atlas-relay.service` algún día, cuando haya
+  reglas polkit para `atlas` en atlas-hub); verb ∈ `start|stop|restart`.
+  Fuera de lista → `403 action_not_allowed`.
 - `kind: "cancel_all"`: cancela TODAS las peticiones en vuelo del cerebro.
 
 Respuesta: `{"ok": true, "op": "op-…", "kind": "…", "summary": "systemctl restart docker.service"}`
@@ -221,8 +213,8 @@ calendarios) y se cachean 120 s en el relay.
   `RELAY_CORS_ORIGIN` (vacío = sin CORS; en dev admite lista de orígenes
   separada por comas: sólo se devuelve el Origin que pide si está en la lista)
 - `PANEL_*` (panel, ver `server/system_monitor.py`): `PANEL_SYSTEM_UNITS`,
-  `PANEL_ACTION_UNITS` (lista blanca de acciones systemd), `PANEL_USER_UNITS`,
-  `PANEL_CLOUD_COMPOSE`, `PANEL_CLOUD_URL`, `PANEL_DIST_DIR`
+  `PANEL_ACTION_UNITS` (lista blanca de acciones systemd; vacía por defecto
+  en atlas-hub hasta instalar reglas polkit para `atlas`), `PANEL_DIST_DIR`
   (build del panel `apps/panel/dist`)
 - `CALDAV_USERNAME` (tu Apple ID), `CALDAV_APP_PASSWORD` (contraseña de app)
 - `RELAY_TIMEZONE` (defecto `Europe/Madrid`; la hora del contexto sale de aquí,

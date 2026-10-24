@@ -26,7 +26,6 @@ export const post = <T>(path: string, body: unknown) =>
 
 export interface Unit {
   unit: string
-  scope: 'system' | 'user'
   description?: string | null
   load?: string | null
   active?: string | null
@@ -38,27 +37,10 @@ export interface Unit {
   error?: string
 }
 
-export interface ContainerInfo {
-  id?: string
-  name?: string
-  image?: string
-  state?: string
-  status?: string
-  compose_service?: string | null
-  compose_project?: string | null
-}
-
 export interface Snapshot {
   generated_at: string
   units: Unit[]
   ports: { port: number; address: string; service?: string | null }[]
-  docker: { available: boolean; containers: ContainerInfo[] }
-  cloud: {
-    compose_project: string
-    containers: ContainerInfo[]
-    nextcloud: { status: string | null; version: string | null; error?: string | null; maintenance?: boolean }
-    tailscale_serve: { url: string | null; raw?: string | null }
-  }
   resources: {
     mem_total_kb?: number
     mem_available_kb?: number
@@ -71,7 +53,7 @@ export interface Snapshot {
     battery?: { cap_pct: number; status: string } | null
     ac_connected?: boolean | null
   }
-  actions: { verbs: string[]; system_units: string[]; user_units: string[]; compose_targets: string[] }
+  actions: { verbs: string[]; system_units: string[] }
 }
 
 export interface Health {

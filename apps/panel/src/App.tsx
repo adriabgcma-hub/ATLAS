@@ -4,7 +4,7 @@ import {
   type Health, type LogsResp, type OpResp, type SessionResp, type Snapshot, type Stats,
 } from './api'
 import {
-  Card, CloudCard, ConfirmCard, DockerCard, LogsCard, MacCard, PeticionesCard,
+  Card, ConfirmCard, LogsCard, MacCard, PeticionesCard,
   PortsCard, RelayCard, UnitsCard,
 } from './components/Cards'
 
@@ -35,7 +35,7 @@ export default function App() {
     return () => clearTimeout(id)
   }, [toast])
 
-  const ask = useCallback(async (kind: 'service' | 'compose' | 'cancel_all',
+  const ask = useCallback(async (kind: 'service' | 'cancel_all',
                                  fields: Record<string, string>) => {
     try {
       const op = await post<OpResp>('/v1/system/asks', { kind, ...fields })
@@ -77,9 +77,6 @@ export default function App() {
       <>
         <UnitsCard snap={snap} onAct={(unit, verb) => ask('service', { unit, verb })} />
         <PortsCard snap={snap} />
-        <DockerCard snap={snap} />
-        <CloudCard snap={snap}
-                   onCompose={(target, verb) => ask('compose', { target, verb })} />
         <MacCard snap={snap} />
         <RelayCard health={health} stats={stats} relayUnit={relayUnit} />
         <PeticionesCard health={health} session={session}
@@ -93,7 +90,7 @@ export default function App() {
     <div style={{ opacity: fadeOut ? 0.65 : 1, transition: 'opacity 1.2s ease' }}>
       <div className="app-label">
         ATLAS · PANEL
-        <small>homelab · {snap?.generated_at?.slice(11, 19) ?? '—'} UTC</small>
+        <small>atlas-hub · {snap?.generated_at?.slice(11, 19) ?? '—'} UTC</small>
       </div>
       <main className="grid">{viewer}</main>
       {pending && (

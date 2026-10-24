@@ -3,11 +3,10 @@
 # antiguo: se instala en /etc/systemd/system/atlas-relay.service y se gestiona
 # con `sudo systemctl ...`, sin `--user` y sin linger.)
 #
-# ⚠️ NoNewPrivileges=true impide que el proceso del relay use `sudo`: las
-#    acciones docker/compose del panel (ayudante /usr/local/lib/atlas/
-#    panel-docker.sh con `sudo -n`) quedarán inoperativas con esta unidad.
-#    Cuando se migre el panel a atlas-hub habrá que revisar el endurecimiento
-#    y el ayudante.
+# ⚠️ El panel observa unidades/puertos/recursos y solo ejecuta acciones
+#    `systemctl` sobre PANEL_ACTION_UNITS (vacía por defecto en atlas-hub:
+#    faltan reglas polkit para el usuario `atlas`; se rellena por .env a
+#    medida que se integren unidades + permisos). No hay ayudante sudo.
 #
 # Estado en disco: /opt/atlas/repo/temp (git-ignored). Con
 # ProtectSystem=strict es la única ruta escribible y DEBE existir antes del

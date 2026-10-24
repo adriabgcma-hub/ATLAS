@@ -1,4 +1,4 @@
-import { fmtDuration, gb, type ContainerInfo, type Health, type Snapshot, type Stats, type Unit } from '../api'
+import { fmtDuration, gb, type Health, type Snapshot, type Stats, type Unit } from '../api'
 
 /* Léxico visual: tarjetas sueltas; nada de framework (tokens en panel.css). */
 
@@ -63,57 +63,6 @@ export function PortsCard({ snap }: { snap: Snapshot }) {
         {snap.ports.map(p => (
           <span key={p.port} className="chip">{p.port}<small>{p.service ?? p.address}</small></span>
         ))}
-      </div>
-    </Card>
-  )
-}
-
-const containerRow = (c: ContainerInfo, key: string) => (
-  <div className="row" key={key}>
-    <span className={`dot ${c.state === 'running' ? 'ok' : 'err'}`}></span>
-    <div className="grow">
-      <div className="name">{c.name ?? c.compose_service ?? c.id}</div>
-      <div className="sub">{c.image}{c.status ? ` · ${c.status}` : ''}</div>
-    </div>
-  </div>
-)
-
-export function DockerCard({ snap }: { snap: Snapshot }) {
-  const { available, containers } = snap.docker
-  return (
-    <Card title="Contenedores (docker)" badge={available ? String(containers.length) : 'sin acceso'}>
-      {available
-        ? containers.map(c => containerRow(c, c.name ?? c.id ?? Math.random().toString()))
-        : <div className="empty">El ayudante sudo de Docker no está instalado en este host.</div>}
-    </Card>
-  )
-}
-
-export function CloudCard({ snap, onCompose }: {
-  snap: Snapshot; onCompose: (target: string, verb: string) => void
-}) {
-  const nc = snap.cloud.nextcloud
-  const serve = snap.cloud.tailscale_serve
-  return (
-    <Card title="Nube · Nextcloud" badge={nc.version ?? '—'}>
-      <div className="row">
-        <span className={`dot ${nc.status === 'ok' ? 'ok' : 'err'}`}></span>
-        <div className="grow">
-  <div className="name">{nc.status === 'ok' ? 'Respondiendo' : ('Sin respuesta (' + (nc.error ?? '?') + ')')}</div>
-          <div className="sub">MySQL/MariaDB · {serve.url ?? 'tailscale serve: no activo'}</div>
-        </div>
-        {serve.url && <a className="chip" href={`${serve.url.replace(/:$/, '')}`} target="_blank" rel="noreferrer">abrir ↗</a>}
-      </div>
-      {snap.cloud.containers.map(c => containerRow(c, c.name ?? c.id ?? 'c'))}
-      <div className="actions" style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-        {(['app', 'db'] as const).map(target =>
-          (['restart', 'stop', 'start'] as const).map(verb => (
-            <button key={target + verb} className="btn"
-                    onClick={() => onCompose(target, verb)}>
-              {verb} {target}
-            </button>
-          )),
-        )}
       </div>
     </Card>
   )
