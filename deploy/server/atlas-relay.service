@@ -1,0 +1,39 @@
+# Unidad systemd de SISTEMA para el relay ATLAS en atlas-hub.
+# (Sustituye a la unidad de usuario que vivía en el hogar del servidor
+# antiguo: se instala en /etc/systemd/system/atlas-relay.service y se gestiona
+# con `sudo systemctl ...`, sin `--user` y sin linger.)
+#
+# ⚠️ NoNewPrivileges=true impide que el proceso del relay use `sudo`: las
+#    acciones docker/compose del panel (ayudante /usr/local/lib/atlas/
+#    panel-docker.sh con `sudo -n`) quedarán inoperativas con esta unidad.
+#    Cuando se migre el panel a atlas-hub habrá que revisar el endurecimiento
+#    y el ayudante.
+#
+# Estado en disco: /opt/atlas/repo/temp (git-ignored). Con
+# ProtectSystem=strict es la única ruta escribible y DEBE existir antes del
+# primer arranque:
+#   sudo install -d -o atlas -g atlas /opt/atlas/repo/temp
+# Secretos: /opt/atlas/repo/.env (dueño atlas, modo 600, NUNCA en Git).
+
+[Unit]
+Description=ATLAS relay (cerebro HTTP + Telegram, solo stdlib)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=atlas
+WorkingDirectory=/opt/atlas/repo
+# La unidad antigua de usuario no está versionada en el repo, así que se usa
+# la línea de arranque pactada. Si en el servidor antiguo era otra, copiarla.
+ExecStart=/usr/bin/python3 /opt/atlas/repo/server/atlas_relay.py
+Restart=on-failure
+
+# Endurecimiento (todo el FS en solo-lectura salvo el estado del relay).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/atlas/repo/temp
+
+[Install]
+WantedBy=multi-user.target

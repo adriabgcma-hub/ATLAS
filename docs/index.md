@@ -12,4 +12,4 @@ Documentación del proyecto Atlas.
 - [Release](./release.md): describe las comprobaciones y comandos para generar y publicar bundles.
 - [Tools](./tools.md): reservado para el catálogo de herramientas de Atlas.
 - [API del cerebro](./relay-api.md): documenta la API HTTP del relay Python (eventos, sesiones, límites y entorno).
-- [Relay: manual de operaciones](./relay.md): qué es el relay, dónde corre (homelab), la nube y el panel — para colaboradores y otras IAs.
+- [Relay: manual de operaciones](./relay.md): qué es el relay, dónde corre (atlas-hub), la nube y el panel — para colaboradores y otras IAs.

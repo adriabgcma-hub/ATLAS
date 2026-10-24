@@ -5,24 +5,36 @@
 ## Servidores de desarrollo (mantener levantados mientras se trabaja)
 
 - Frontend: `npm run dev` → http://localhost:5173 (recarga sola con HMR).
-- Relay Python: **corre en el servidor remoto** `homelab` (`adria@192.168.100.26`,
-  Debian 13), no en local. Dirección: `http://192.168.100.26:8765` (núcleo lo
-  drena vía `ATLAS_RELAY_URL`; el frontal web en dev lo sondea directo con CORS
-  solo para ese origen). El `.env` se carga automáticamente al iniciar.
-- En `homelab` el relay es el servicio systemd de usuario `atlas-relay.service`
-  (con linger activo: arranca con el sistema y sobrevive a cierres de sesión).
-  Logs: `journalctl --user -u atlas-relay -f` (desde `homelab`).
+- Relay Python: **corre en el servidor remoto** `atlas-hub` (`atlas-hub.local`,
+  Debian 13; la IP puede cambiar: usa SIEMPRE el nombre, no la IP), no en
+  local. Dirección: `http://atlas-hub.local:8765` (núcleo lo drena vía
+  `ATLAS_RELAY_URL`; el frontal web en dev lo sondea directo con CORS solo
+  para ese origen). El `.env` se carga automáticamente al iniciar.
+- En `atlas-hub` el relay es el servicio systemd **de sistema**
+  `atlas-relay.service` (`/etc/systemd/system/`, fuente versionada en
+  `deploy/server/atlas-relay.service`): usuario de sistema `atlas` (home
+  `/opt/atlas`, sin login ni sudo), repo en `/opt/atlas/repo`. Logs:
+  `journalctl -u atlas-relay -f` (en `atlas-hub`).
 - **Sincronizar y desplegar el relay** (desde la raíz del repo del Mac):
-  `./scripts/deploy-relay.sh` → sube cambios commiteados, baja en `homelab`,
-  reinicia el servicio y comprueba `/v1/health`. El relay **no** recarga solo:
-  cada despliegue lo reinicia el script.
+  `./scripts/deploy-relay.sh` → sube cambios commiteados, hace pull en
+  `/opt/atlas/repo` como `atlas` (`sudo -u atlas`), reinicia el servicio
+  (`sudo systemctl restart`) y comprueba `/v1/health`. El relay **no** recarga
+  solo: cada despliegue lo reinicia el script.
   **Importante:** el script NO commitea automáticamente. Commitea manualmente
   antes de desplegar. Si hay cambios sin commitear, el script aborta.
-- El relay solo escucha en la IP LAN de `homelab` (`192.168.100.26:8765`, no en
-  `127.0.0.1`); el firewall `ufw` de Debian debe dejar pasar el 8765/tcp.
-- Acceso SSH al servidor: clave `~/.ssh/atlas_linux` del Mac (usuario `adria`).
+- El relay solo escucha en la IP LAN de `atlas-hub` (8765, autodetectada, no
+  en `127.0.0.1`); el firewall `ufw` de `atlas-hub` debe dejar pasar
+  `8765/tcp` SOLO desde `192.168.100.0/24`.
+- Acceso SSH al servidor: alias `atlas-hub` del Mac (usuario administrador
+  `adria_admin`, solo clave, `~/.ssh/id_ed25519`). El usuario del relay
+  (`atlas`) no tiene login: el deploy usa el sudo sin contraseña mínimo de
+  `deploy/server/atlas-deploy.sudoers` (pull como `atlas` + restart/is-active/
+  status del servicio; ningún otro comando).
 - Nunca commitees `.env` (ignorado por Git): lleva tokens y API keys reales.
-  Para pasarlo a `homelab`: `scp -i ~/.ssh/atlas_linux .env adria@192.168.100.26:ATLAS/.env`.
+  Para pasarlo a `atlas-hub` (queda en `/opt/atlas/repo/.env`, dueño `atlas`,
+  modo 600): `scp .env adria_admin@atlas-hub:/tmp/atlas-env && ssh -t
+  adria_admin@atlas-hub 'sudo install -m 600 -o atlas -g atlas /tmp/atlas-env
+  /opt/atlas/repo/.env && rm -f /tmp/atlas-env'`.
 - Tauri no lee `.env` solo: para `tauri dev`/`build` con claves,
   `set -a; . ./.env; set +a` antes (las pruebas Rust igual).
 - iCloud CalDAV: prohibido martillear. Cada prueba contra iCloud (una sola

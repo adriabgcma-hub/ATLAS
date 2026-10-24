@@ -71,7 +71,7 @@ PANEL).
 
 ### `GET /v1/system`
 
-Snapshot best-effort del host homelab (con caché de 10 s), fuente del panel:
+Snapshot best-effort del host atlas-hub (con caché de 10 s), fuente del panel:
 
 ```json
 {"generated_at": "…",
@@ -95,7 +95,9 @@ Snapshot best-effort del host homelab (con caché de 10 s), fuente del panel:
 ```
 
 Nada de esto es de la conversación: es observación del host (subprocesos con
-timeout; un fallo de fuente degrada a `null`/vacío sin matar el endpoint).
+timeout; un fallo de fuente degrada a `null`/vacío sin matar el endpoint). La
+IP LAN del ejemplo es ilustrativa (puede cambiar): en URLs y clientes se usa
+siempre el nombre, `atlas-hub.local`.
 
 ### `POST /v1/system/asks`
 
@@ -110,7 +112,7 @@ Pide una **acción** y devuelve su op-id (doble confirmación del panel). Body:
   verb ∈ `start|stop|restart`. Fuera de lista → `403 action_not_allowed`.
 - `kind: "compose"`: `target ∈ app|db`, `verb ∈ start|stop|restart`
   (compose de `/home/adria/nextcloud/docker-compose.yml`, vía sudo -n del
-  ayudante).
+  ayudante; pendiente de migrar a atlas-hub, ver §7 de `relay.md`).
 - `kind: "cancel_all"`: cancela TODAS las peticiones en vuelo del cerebro.
 
 Respuesta: `{"ok": true, "op": "op-…", "kind": "…", "summary": "systemctl restart docker.service"}`

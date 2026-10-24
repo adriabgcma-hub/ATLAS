@@ -1,0 +1,17 @@
+# Sudoers mínimo para desplegar el relay ATLAS en atlas-hub.
+#
+# Instalar en /etc/sudoers.d/atlas-deploy (owner root:root, modo 0440),
+# después de validar el archivo del repo:
+#   sudo visudo -cf /opt/atlas/repo/deploy/server/atlas-deploy.sudoers
+#
+# Permite a adria_admin (SSH desde el Mac de desarrollo, batch/sin TTY)
+# EXACTAMENTE estos comandos, sin contraseña y SIN NINGÚN OTRO:
+#   1. ejecutar el pull del repo como usuario `atlas` (dueño de /opt/atlas/repo),
+#   2. reiniciar el servicio del relay como root,
+#   3. consultar el estado del servicio como root (is-active / status).
+# Son los tres únicos usos que hace scripts/deploy-relay.sh. Nada de shell
+# envolvente ni comandos adicionales: cada comando y su lista de argumentos
+# están clavados.
+
+adria_admin ALL=(atlas) NOPASSWD: /usr/bin/git -C /opt/atlas/repo pull --ff-only
+adria_admin ALL=(root) NOPASSWD: /usr/bin/systemctl restart atlas-relay, /usr/bin/systemctl is-active atlas-relay, /usr/bin/systemctl status atlas-relay
