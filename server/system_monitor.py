@@ -140,12 +140,19 @@ class SystemMonitor:
         # Caso especial: ufw status es la única fuente de verdad, el servicio es solo un loader
         if unit == "ufw.service":
             res = _run(["sudo", "-n", "/usr/sbin/ufw", "status"])
-            # Si falla el sudo, el resultado será None o el rc != 0
-            if res is None or res[0] != 0:
+            if res is None:
                 return {"unit": unit, "description": "Uncomplicated Firewall",
                         "load": "not-found", "active": "inactive", "sub": "dead",
                         "since": None, "pid": None, "mem_bytes": None, "actionable": False}
             
+            if res[0] != 0:
+                # Logueamos el error exacto para debuguear por qué falla el sudo en el relay
+                if self.log_panel:
+                    self.log_panel("DEBUG", f"UFW SUDO FAIL: rc={res[0]} err={res[2]}")
+                return {"unit": unit, "description": "Uncomplicated Firewall",
+                        "load": "not-found", "active": "inactive", "sub": "dead",
+                        "since": None, "pid": None, "mem_bytes": None, "actionable": False}
+
             is_active = "Status: active" in res[1]
             return {
                 "unit": unit,
