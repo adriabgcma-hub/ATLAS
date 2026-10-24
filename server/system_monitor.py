@@ -137,6 +137,23 @@ class SystemMonitor:
                   "ActiveEnterTimestamp", "MainPID", "MemoryCurrent")
 
     def _unit_info(self, unit: str) -> dict:
+        # Caso especial: ufw status es la única fuente de verdad, el servicio es solo un loader
+        if unit == "ufw.service":
+            res = _run(["sudo", "-n", "ufw", "status"])
+            is_active = (res and "Status: active" in res[1])
+            # Simulamos el resto de datos para que la UI no rompa
+            return {
+                "unit": unit,
+                "description": "Uncomplicated Firewall",
+                "load": "loaded" if is_active else "not-found",
+                "active": "active" if is_active else "inactive",
+                "sub": "running" if is_active else "dead",
+                "since": None,
+                "pid": None,
+                "mem_bytes": None,
+                "actionable": False,
+            }
+
         props = [f"-p{k}" for k in self._UNIT_KEYS]
         result = _run(["systemctl", "show", unit, "--no-pager", *props])
         info: dict = {k: "" for k in self._UNIT_KEYS}
