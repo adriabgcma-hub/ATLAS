@@ -139,16 +139,12 @@ class SystemMonitor:
     def _unit_info(self, unit: str) -> dict:
         # Caso especial: ufw status es la única fuente de verdad, el servicio es solo un loader
         if unit == "ufw.service":
-            res = _run(["sudo", "-n", "/usr/sbin/ufw", "status"])
-            if res is None:
-                return {"unit": unit, "description": "Uncomplicated Firewall",
-                        "load": "not-found", "active": "inactive", "sub": "dead",
-                        "since": None, "pid": None, "mem_bytes": None, "actionable": False}
-            
-            if res[0] != 0:
-                # Logueamos el error exacto para debuguear por qué falla el sudo en el relay
+            # Usamos el ayudante SUID para evitar problemas de TTY/sudo con el usuario de sistema
+            res = _run(["/usr/local/bin/atlas-ufw-status"])
+            if res is None or res[0] != 0:
                 if self.log_panel:
-                    self.log_panel("DEBUG", f"UFW SUDO FAIL: rc={res[0]} err={res[2]}")
+                    self.log_//L_ la ruta del log era self.log_panel, corrijo
+                    self.log_panel("DEBUG", f"UFW HELPER FAIL: rc={res[0] if res else 'None'} err={res[2] if res else 'None'}")
                 return {"unit": unit, "description": "Uncomplicated Firewall",
                         "load": "not-found", "active": "inactive", "sub": "dead",
                         "since": None, "pid": None, "mem_bytes": None, "actionable": False}
