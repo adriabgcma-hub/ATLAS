@@ -139,13 +139,14 @@ class SystemMonitor:
     def _unit_info(self, unit: str) -> dict:
         # Caso especial: ufw status es la única fuente de verdad, el servicio es solo un loader
         if unit == "ufw.service":
-            # Intentamos con sudo -n para no bloquear el relay
-            res = _run(["sudo", "-n", "ufw", "status"])
+            res = _run(["sudo", "-n", "/usr/sbin/ufw", "status"])
+            # Si falla el sudo, el resultado será None o el rc != 0
             if res is None or res[0] != 0:
-                # Fallback: intentar ruta absoluta común en Debian
-                res = _run(["sudo", "-n", "/usr/sbin/ufw", "status"])
+                return {"unit": unit, "description": "Uncomplicated Firewall",
+                        "load": "not-found", "active": "inactive", "sub": "dead",
+                        "since": None, "pid": None, "mem_bytes": None, "actionable": False}
             
-            is_active = (res and "Status: active" in res[1])
+            is_active = "Status: active" in res[1]
             return {
                 "unit": unit,
                 "description": "Uncomplicated Firewall",
