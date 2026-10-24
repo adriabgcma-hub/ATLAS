@@ -28,7 +28,7 @@ ExecStart=/usr/bin/python3 /opt/atlas/repo/server/atlas_relay.py
 Restart=on-failure
 
 # Endurecimiento (todo el FS en solo-lectura salvo el estado del relay).
-# NoNewPrivileges=true # Desactivado para permitir ufw status via sudo
+# NoNewPrivileges=false # Permitimos ganar privilegios para ejecutar ufw status via sudo
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
