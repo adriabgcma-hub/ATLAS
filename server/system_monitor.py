@@ -139,8 +139,8 @@ class SystemMonitor:
     def _unit_info(self, unit: str) -> dict:
         # Caso especial: ufw status es la única fuente de verdad, el servicio es solo un loader
         if unit == "ufw.service":
-            # Usamos el binario SUID compilado para evitar problemas de TTY/sudo con el usuario de sistema
-            res = _run(["/usr/local/bin/atlas-ufw-check"])
+            # Probamos en la ruta de temp para evitar posibles restricciones de nosuid en /usr/local/bin
+            res = _run(["/opt/atlas/repo/temp/atlas-ufw-check"])
             if res is None or res[0] != 0:
                 if self.log_panel:
                     self.log_panel("DEBUG", f"UFW BINARY FAIL: rc={res[0] if res else 'None'} err={res[2] if res else 'None'}")
