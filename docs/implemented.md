@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Panel ATLAS recortado a atlas-hub: fuera docker/nube/unidades fantasma y unidades de usuario
+
+- **Commit:** `feat(panel): recortar panel a atlas-hub (sin docker/nube/unidades fantasma)`
+- **Fecha:** `2026-10-24`
+- **Descripción:** auditoría de servicios en `atlas-hub` contra la docu: solo están instalados y operativos `ssh.service`, `avahi-daemon.service` y `atlas-relay.service` (unidad de sistema idéntica al repo); `ufw` está instalado y `enabled` pero **INACTIVA** (pendiente de activar con sudo interactivo). NO existen en atlas-hub: docker (sin binario/socket), tailscale, cups, macfan, lid-monitor, smartmontools, NetworkManager (la red la gestiona ifupdown), el compose de Nextcloud (`/home/adria/nextcloud/…`) ni las piezas de host del panel antiguo (polkit `50-atlas-panel.rules`, sudoers `atlas-panel`, ayudante `panel-docker.sh`). Corte aplicado: en `server/system_monitor.py` desaparecen docker/nube/tailscale del snapshot (`GET /v1/system` sin claves `docker`/`cloud`), el alcance de usuario (sin linger) y el ayudante sudo; `PANEL_ACTION_UNITS` queda **VACÍA** por defecto (solo se reactiva por `.env` al integrar unidades + reglas polkit); unidades por defecto ahora `ssh, avahi-daemon, ufw, atlas-relay`; `KNOWN_PORTS` reduce a 22/8765. En `server/atlas_relay.py` el flujo asks/resolve solo acepta `kind: "service"` y `cancel_all` (fuera compose). Frontend `apps/panel/`: eliminadas tarjetas Contenedores/Docker y Nube·Nextcloud (y sus tipos), rótulo `homelab`→`atlas-hub`; build nuevo desplegado vía Git (assets hash renombrados). Docu actualizada: `docs/relay.md` (§2 estado real ufw, §6 reescrito, §7 nota de nube, §9/§10/§11) y `docs/relay-api.md` (schema `/v1/system`, kinds de asks y variables `PANEL_*`). Nota: el unit systemd del repo cambia solo en un comentario (el instalado sigue funcional hasta un próximo paso con sudo interactivo).
+- **Documentación relacionada:** `docs/relay.md` (§2, §6, §7), `docs/relay-api.md`.
+
 ### Panel ATLAS v1: observador del sistema, acciones con doble confirmación y /panel estático
 
 - **Commit:** `feat(relay): observador /v1/system, acciones con doble confirmación y /panel estático` (`docs:` previo: `docs: manual de operaciones del relay y API del panel`)
