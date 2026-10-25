@@ -67,15 +67,35 @@ esté colgado. Si una app falla, la otra sigue funcionando.
   salir de verdad: menú "Salir" o Cmd+Q.
 - **Semáforo:** sondea `/v1/health` cada 10 s (verde OK, ámbar degradado, rojo
   sin conexión). No hay auto-reinicios silenciosos.
-- **Reinicio del relay (F3+):** solo mediante SSH con clave restringida y
-  doble confirmación; la UI nunca envía comandos arbitrarios.
+- **Reinicio del relay (F3):** solo mediante SSH con clave restringida y doble
+  confirmación. Dos entradas: botón "Reiniciar relay" (arriba a la derecha,
+  solo dentro de la app) y menú de la barra "Reiniciar relay…" (abre la ventana
+  y emite `panel://restart-requested`). La confirmación (Continuar → Sí,
+  reiniciar) vive en React; el comando IPC `restart_relay` no acepta parámetros
+  y ejecuta siempre `ssh -i <clave> atlas-hub panel-restart` (host fijo,
+  timeout 25 s). El comando remoto real está en `authorized_keys`:
+  `command="sudo systemctl restart atlas-relay && sudo systemctl is-active
+  atlas-relay",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding`
+  → la clave no puede abrir shell ni ejecutar otra cosa. El `sudo` sin
+  contraseña lo aporta `deploy/server/atlas-deploy.sudoers` (restart/is-active/
+  status de `atlas-relay`).
+- **Clave del panel:** `~/Library/Application Support/com.atlas.panel/keys/
+  panel_ed25519` (ed25519, sin passphrase, `600`, fuera del repo; huella
+  `SHA256:wExdWnMDtEF/pJCP8+nTbbpjMjFkHgkQ+l/qTZKdcr0`, comentario
+  `atlas-panel`). Instalarla o rotarla en `atlas-hub` requiere **permiso
+  explícito del usuario** (modifica `~adria_admin/.ssh/authorized_keys`). Para
+  rotar: generar clave nueva, añadir su línea con el mismo comando forzado,
+  probar el reinicio y solo entonces borrar la anterior.
 - **URL del relay:** `ATLAS_RELAY_URL` (por defecto
   `http://atlas-hub.local:8765`). No hardcodees IPs.
-- **Secretos:** nada de claves/tokens en el repo. La clave SSH de la app
-  vivirá en `~/Library/Application Support/com.atlas.panel/keys/` (F3).
+- **Secretos:** nada de claves/tokens en el repo. La clave SSH de la app vive
+  en `~/Library/Application Support/com.atlas.panel/keys/` (nunca se commitea).
 - **Verificación:** `cargo check --workspace`, `cargo test -p atlas-panel`,
   `cargo fmt -p atlas-panel -- --check`, `npm run build:ui` y prueba visual con
-  `npm run dev` (comprobar icono de barra, menú y tarjetas).
+  `npm run dev` (comprobar icono de barra, menú y tarjetas). Las pruebas reales
+  (`consulta_health_del_relay_real`, `reinicia_el_relay_real`) están ignoradas
+  por defecto y se lanzan con `cargo test -p atlas-panel -- --ignored`:
+  **reinician el relay de verdad**, así que pide permiso antes.
 - **Bundle obligatorio tras validar en dev:** cuando `npm run dev` funcione y
   el usuario lo confirme, ejecuta `npm run build` dentro de `apps/panel-app`
   (Tauri) con la identidad **Apple Development**

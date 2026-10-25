@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
-  j, post, usePoll,
+  IN_TAURI, j, post, restartRelay, usePoll,
   type Health, type LogsResp, type OpResp, type SessionResp, type Snapshot, type Stats,
 } from './api'
 import {
   Card, ConfirmCard, LogsCard, MacCard, PeticionesCard,
-  PortsCard, RelayCard, UnitsCard,
+  PortsCard, RelayCard, RestartCard, UnitsCard,
 } from './components/Cards'
 
 interface Pending { op: string; kind: string; summary: string }
@@ -34,6 +35,34 @@ export default function App() {
     const id = setTimeout(() => setToast(null), 6000)
     return () => clearTimeout(id)
   }, [toast])
+
+  // Reinicio del relay (solo app macOS). El menú de la barra emite este evento
+  // para abrir la confirmación; la acción real la ejecuta Rust por SSH.
+  const [restartStep, setRestartStep] = useState<0 | 1 | 2>(0)
+  const [restarting, setRestarting] = useState(false)
+  useEffect(() => {
+    if (!IN_TAURI) return
+    let dispose: (() => void) | undefined
+    let cancelled = false
+    listen('panel://restart-requested', () => setRestartStep(1))
+      .then(fn => { if (cancelled) fn(); else dispose = fn })
+      .catch(() => {})
+    return () => { cancelled = true; dispose?.() }
+  }, [])
+
+  const doRestart = useCallback(async () => {
+    setRestarting(true)
+    try {
+      const res = await restartRelay()
+      if (res.ok) flash(`✅ Relay reiniciado (${res.state})`)
+      else flash(`El relay no quedó activo: ${res.state || 'sin estado'}`, true)
+    } catch (exc) {
+      flash(`No se pudo reiniciar: ${(exc as Error).message}`, true)
+    } finally {
+      setRestarting(false)
+      setRestartStep(0)
+    }
+  }, [flash])
 
   const ask = useCallback(async (kind: 'service' | 'cancel_all',
                                  fields: Record<string, string>) => {
@@ -88,6 +117,14 @@ export default function App() {
 
   return (
     <div style={{ opacity: fadeOut ? 0.65 : 1, transition: 'opacity 1.2s ease' }}>
+      {IN_TAURI && (
+        <div className="panel-tools">
+          <button className="btn restart" disabled={restartStep !== 0}
+                  onClick={() => setRestartStep(1)}>
+            Reiniciar relay
+          </button>
+        </div>
+      )}
       <div className="app-label">
         ATLAS · PANEL
         <small>atlas-hub · {snap?.generated_at?.slice(11, 19) ?? '—'} UTC</small>
@@ -95,6 +132,12 @@ export default function App() {
       <main className="grid">{viewer}</main>
       {pending && (
         <ConfirmCard summary={pending.summary} resolving={resolving} onDecide={decide} />
+      )}
+      {restartStep !== 0 && (
+        <RestartCard step={restartStep} busy={restarting}
+                     onCancel={() => setRestartStep(0)}
+                     onNext={() => setRestartStep(2)}
+                     onRestart={doRestart} />
       )}
       {toast && <div className={`toast${toast.err ? ' err' : ''}`}>{toast.text}</div>}
     </div>

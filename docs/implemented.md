@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### ATLAS Panel: reinicio del relay por SSH con clave restringida (F3)
+
+- **Commit:** `feat(panel-app): reinicio del relay por SSH con doble confirmación (F3)`
+- **Fecha:** `2026-10-25`
+- **Descripción:** la app de barra de menús puede reiniciar el relay sin depender de nadie delante del servidor. Clave `ed25519` exclusiva en `~/Library/Application Support/com.atlas.panel/keys/panel_ed25519` (`600`, fuera del repo), instalada en `~adria_admin/.ssh/authorized_keys` de `atlas-hub` con comando forzado `sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-relay` y `no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding`; el `sudo` sin contraseña lo aporta `deploy/server/atlas-deploy.sudoers`. El comando IPC `restart_relay` no acepta parámetros: valida la clave, ejecuta `/usr/bin/ssh` con host fijo `atlas-hub`, `BatchMode`, `IdentitiesOnly`, `StrictHostKeyChecking=yes` y timeout de 25 s, y devuelve `{ ok, state, output }`. En la UI compartida (`apps/panel`) aparece "Reiniciar relay" solo dentro de Tauri, con `RestartCard` de dos pasos; el menú de la barra activa "Reiniciar relay…" (abre la ventana y emite `panel://restart-requested`) y el resultado se muestra como toast. Verificado: prueba directa con la clave (`rc=0`, `active`, relay de nuevo OK en `192.168.100.26:8765`), `cargo test -p atlas-panel -- --ignored` con `consulta_health_del_relay_real` y `reinicia_el_relay_real` en verde (1,42 s), bundle reconstruido con Apple Development, firma profunda válida e instalado en `~/Applications`, panel web regenerado con el nuevo botón, `cargo check --workspace`, `cargo test -p atlas-panel` y `cargo fmt --check` OK. Prueba de caída real con el usuario: `atlas-relay` parado en `atlas-hub` (`inactive`, `/v1/health` sin respuesta) → semáforo rojo y reinicio desde la UI con doble confirmación → `active`, toast `✅ Relay reiniciado (active)`, health OK y relay de nuevo escuchando en `192.168.100.26:8765`.
+- **Documentación relacionada:** `docs/panel-app-plan.md` (§4, §7 F3, §8), `AGENTS.md` (§ App ATLAS Panel: reinicio y clave), `docs/relay.md` (§8 operación de la clave del panel).
+
 ### ATLAS Panel: bandeja con semáforo, autoarranque y bundle firmado (F2)
 
 - **Commit:** `feat(panel-app): bandeja con semáforo, autoarranque y bundle firmado (F2)`

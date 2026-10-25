@@ -185,6 +185,31 @@ Variables del deploy: `ATLAS_DEPLOY_HOST` (defecto `atlas-hub`) y
 `ATLAS_RELAY_URL` (defecto `http://atlas-hub.local:8765/v1/health`). La
 instalación inicial del servidor está detallada en §11.
 
+### app ATLAS Panel: clave de reinicio
+
+La app macOS `ATLAS Panel` (`apps/panel-app`, bundle `com.atlas.panel`) puede
+reiniciar `atlas-relay` sin sesión interactiva. Usa una clave `ed25519`
+exclusiva:
+
+- Local: `~/Library/Application Support/com.atlas.panel/keys/panel_ed25519`
+  (`600`, sin passphrase, fuera del repo). Huella
+  `SHA256:wExdWnMDtEF/pJCP8+nTbbpjMjFkHgkQ+l/qTZKdcr0` (`atlas-panel`).
+- Servidor: una línea en `~adria_admin/.ssh/authorized_keys` con comando
+  forzado:
+
+```
+command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-relay",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIFxB0/h/yGW5mREh35tI4JWCQFlukIjP2dp5CuvLXx0 atlas-panel
+```
+
+- Solo permite reiniciar y consultar `atlas-relay` (sudoers
+  `deploy/server/atlas-deploy.sudoers`, sin contraseña). No abre shell ni
+  acepta comandos del cliente.
+- Probar sin la app:
+  `ssh -i "~/Library/Application Support/com.atlas.panel/keys/panel_ed25519" -o IdentitiesOnly=yes atlas-hub panel-restart`
+  → imprime `active` y **reinicia el relay** (pedir permiso antes).
+- Rotación: generar clave nueva, añadir su línea, probar y borrar la anterior.
+  Si se pierde la clave local, basta con generar otra y sustituir la línea.
+
 ## 9. Checklist de estabilidad (antes y después de cada deploy)
 
 1. `git status --short` vacío (el deploy aborta si hay cambios).

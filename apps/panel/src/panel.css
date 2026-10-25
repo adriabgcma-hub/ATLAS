@@ -35,6 +35,22 @@ body {
   color: rgba(122, 180, 222, 0.55);
 }
 
+/* ------- acciones propias de la app macOS ------- */
+.panel-tools {
+  position: fixed;
+  top: 16px; right: 24px;
+  z-index: 30;
+}
+.btn.restart {
+  border-color: rgba(255, 201, 83, 0.5);
+  color: #f2e7c9;
+  background: rgba(30, 24, 8, 0.6);
+}
+.btn.restart:hover {
+  border-color: rgba(255, 201, 83, 0.85);
+  box-shadow: 0 0 14px rgba(255, 201, 83, 0.3);
+}
+
 /* ------- rejilla del panel ------- */
 .grid {
   display: grid;

@@ -14,6 +14,18 @@ export const RELAY_URL =
 
 const IN_TAURI = isTauri()
 
+/** true cuando la UI corre dentro de la app macOS (apps/panel-app). */
+export { IN_TAURI }
+
+export interface RestartResp {
+  ok: boolean
+  state: string
+  output: string
+}
+
+/** Reinicia el relay por SSH (solo app Tauri; comando fijo en authorized_keys). */
+export const restartRelay = () => invoke<RestartResp>('restart_relay')
+
 async function tauriRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase()
   try {
@@ -24,7 +36,7 @@ async function tauriRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const body = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? null)
     return await invoke<T>('api_post', { path, body })
   } catch (exc) {
-    throw new Error(String((exc as Error)?.message ?? exc))
+    throw new Error(String((exc as Error)?.message ?? exc), { cause: exc })
   }
 }
 

@@ -153,6 +153,89 @@ async fn api_post(path: String, body: Value) -> Result<Value, String> {
     request(reqwest::Method::POST, path, Some(body)).await
 }
 
+/// Host SSH fijo del relay. El comando remoto real vive en `authorized_keys`
+/// (comando forzado); aquí no se acepta nada del webview.
+const PANEL_SSH_HOST: &str = "atlas-hub";
+const SSH_TIMEOUT: Duration = Duration::from_secs(25);
+
+#[derive(Debug, serde::Serialize)]
+struct RestartResult {
+    ok: bool,
+    state: String,
+    output: String,
+}
+
+fn ssh_key_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|dir| dir.join("keys").join("panel_ed25519"))
+        .map_err(|err| format!("no se pudo resolver Application Support: {err}"))
+}
+
+/// Reinicia `atlas-relay.service` por SSH con la clave restringida del panel.
+///
+/// La clave instalada en `authorized_keys` tiene un comando forzado que solo
+/// ejecuta `sudo systemctl restart atlas-relay && sudo systemctl is-active
+/// atlas-relay`; este comando no puede pedir otra cosa. Se envía un argumento
+/// inofensivo porque el comando forzado lo ignora, y si la entrada no
+/// estuviera bien configurada, `ssh` falla en vez de abrir una shell.
+#[tauri::command]
+async fn restart_relay(app: AppHandle) -> Result<RestartResult, String> {
+    let key = ssh_key_path(&app)?;
+    run_restart(&key).await
+}
+
+/// Ejecuta el reinicio con la clave indicada. Separado del comando Tauri para
+/// poder probarlo de extremo a extremo con `cargo test -- --ignored`.
+async fn run_restart(key: &std::path::Path) -> Result<RestartResult, String> {
+    if !key.exists() {
+        return Err(format!(
+            "falta la clave SSH del panel en {}; instala la clave restringida (ver docs/panel-app-plan.md)",
+            key.display()
+        ));
+    }
+
+    let mut command = tokio::process::Command::new("/usr/bin/ssh");
+    command
+        .arg("-i")
+        .arg(key)
+        .arg("-o")
+        .arg("IdentitiesOnly=yes")
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-o")
+        .arg("ConnectTimeout=8")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg(PANEL_SSH_HOST)
+        .arg("panel-restart")
+        .kill_on_drop(true);
+
+    let output = tokio::time::timeout(SSH_TIMEOUT, command.output())
+        .await
+        .map_err(|_| "tiempo de espera agotado al reiniciar el relay".to_string())?
+        .map_err(|err| format!("no se pudo ejecutar ssh: {err}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        let detail = if stderr.is_empty() { &stdout } else { &stderr };
+        return Err(format!(
+            "el reinicio falló (código {}): {}",
+            output.status.code().unwrap_or(-1),
+            detail
+        ));
+    }
+
+    let state = stdout.lines().last().unwrap_or("").trim().to_string();
+    let ok = state == "active";
+    Ok(RestartResult {
+        ok,
+        state,
+        output: stdout,
+    })
+}
+
 /// Estado del relay para el semáforo. Un HTTP no-2xx o un JSON sin `ok:true`
 /// cuenta como degradado (el relay responde, pero mal); un fallo de red o de
 /// timeout cuenta como caído.
@@ -186,8 +269,8 @@ async fn fetch_health() -> RelayStatus {
 fn build_menu(app: &AppHandle, status: RelayStatus) -> tauri::Result<Menu<tauri::Wry>> {
     let state = MenuItem::with_id(app, "status", status.menu_label(), false, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Abrir panel", true, None::<&str>)?;
-    // El reinicio real llega en F3 (SSH con clave restringida).
-    let restart = MenuItem::with_id(app, "restart", "Reiniciar relay…", false, None::<&str>)?;
+    // El reinicio real se ejecuta por SSH con la clave restringida (F3).
+    let restart = MenuItem::with_id(app, "restart", "Reiniciar relay…", true, None::<&str>)?;
     let autostart_enabled = !tauri::is_dev() && app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(
         app,
@@ -314,7 +397,7 @@ fn main() {
         .manage(PanelState {
             status: Mutex::new(RelayStatus::Down),
         })
-        .invoke_handler(tauri::generate_handler![api_get, api_post])
+        .invoke_handler(tauri::generate_handler![api_get, api_post, restart_relay])
         .setup(|app| {
             // App de barra de menús: sin icono en el Dock.
             #[cfg(target_os = "macos")]
@@ -331,6 +414,11 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_panel(app),
+                    "restart" => {
+                        // La confirmación doble vive en la UI; el menú solo la abre.
+                        show_panel(app);
+                        let _ = app.emit("panel://restart-requested", ());
+                    }
                     "autostart" => toggle_autostart(app),
                     "quit" => app.exit(0),
                     _ => {}
@@ -417,5 +505,21 @@ mod tests {
             Some(true),
             "respuesta inesperada: {value}"
         );
+    }
+
+    /// Reinicio real del relay con la clave restringida del panel. Requiere
+    /// haber instalado la clave en `authorized_keys` (F3).
+    /// `cargo test -p atlas-panel -- --ignored`
+    #[tokio::test]
+    #[ignore = "reinicia atlas-relay y requiere la clave del panel instalada"]
+    async fn reinicia_el_relay_real() {
+        let home = std::env::var("HOME").expect("HOME");
+        let key = std::path::PathBuf::from(home)
+            .join("Library/Application Support/com.atlas.panel/keys/panel_ed25519");
+        let result = super::run_restart(&key)
+            .await
+            .expect("el reinicio debería funcionar");
+        assert!(result.ok, "el relay no quedó activo: {result:?}");
+        assert_eq!(result.state, "active");
     }
 }

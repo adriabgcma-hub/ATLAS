@@ -193,3 +193,34 @@ export function ConfirmCard({ summary, resolving, onDecide }: {
     </div>
   )
 }
+
+/** Doble confirmación para reiniciar el relay desde la app macOS. */
+export function RestartCard({ step, busy, onCancel, onNext, onRestart }: {
+  step: 1 | 2
+  busy: boolean
+  onCancel: () => void
+  onNext: () => void
+  onRestart: () => void
+}) {
+  const final = step === 2
+  return (
+    <div className="confirm-card">
+      <h3>{final ? 'Confirmación final' : 'Reiniciar el relay'}</h3>
+      <p>
+        {final
+          ? 'Se ejecutará ahora el reinicio por SSH con la clave restringida del panel. ¿Seguro?'
+          : 'Se reiniciará atlas-relay.service en atlas-hub. El panel y el frontal quedarán sin conexión unos segundos.'}
+      </p>
+      <div className="actions">
+        <button className="btn deny" disabled={busy} onClick={onCancel}>Cancelar</button>
+        {final ? (
+          <button className="btn danger" disabled={busy} onClick={onRestart}>
+            {busy ? 'Reiniciando…' : 'Sí, reiniciar'}
+          </button>
+        ) : (
+          <button className="btn allow" disabled={busy} onClick={onNext}>Continuar</button>
+        )}
+      </div>
+    </div>
+  )
+}
