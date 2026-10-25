@@ -41,6 +41,61 @@
   petición de lectura o más) requiere permiso explícito del usuario, con pausa
   entre intentos. Apple limita (throttle 403) ante ráfagas.
 
+## App ATLAS Panel (`apps/panel-app`)
+
+App macOS **independiente** de la principal (barra de menús, bundle
+`com.atlas.panel`): sirve para ver el relay y, más adelante, reiniciarlo aunque
+esté colgado. Si una app falla, la otra sigue funcionando.
+
+- **Una sola UI:** la fuente es `apps/panel`. No dupliques componentes ni
+  estilos en `apps/panel-app`; todo cambio visual debe funcionar en los dos
+  builds (web `/panel/` y app).
+- **Lanzar en desarrollo:** `cd apps/panel-app && npm run dev` → levanta el
+  Vite del panel en **5174** y abre la ventana Tauri. No ejecutes a la vez
+  `cd apps/panel && npm run dev` (mismo puerto 5174); el frontal principal usa
+  5173 y sí puede convivir.
+- **Refresco:** los cambios en React (`apps/panel/src`) recargan solos (HMR).
+  Los cambios en Rust (`apps/panel-app/src-tauri`) hacen que `tauri dev`
+  recompile y reinicie la app. Si cambias `vite.config.ts`, `package.json` o
+  dependencias, para y vuelve a lanzar `npm run dev`.
+- **Builds separados:** la app usa `npm run build:ui` (base `./` y salida en
+  `apps/panel-app/dist`, **ignorado por Git**; no lo commitees). El panel web
+  del relay usa `cd apps/panel && npm run build` (base `/panel/`, salida
+  `apps/panel/dist`, **sí** se commitea y se despliega con el relay).
+- **Ventana:** cerrarla (Cmd+W) solo la oculta; la app sigue en la barra de
+  menús. Se reabre con clic izquierdo en el icono o con "Abrir panel". Para
+  salir de verdad: menú "Salir" o Cmd+Q.
+- **Semáforo:** sondea `/v1/health` cada 10 s (verde OK, ámbar degradado, rojo
+  sin conexión). No hay auto-reinicios silenciosos.
+- **Reinicio del relay (F3+):** solo mediante SSH con clave restringida y
+  doble confirmación; la UI nunca envía comandos arbitrarios.
+- **URL del relay:** `ATLAS_RELAY_URL` (por defecto
+  `http://atlas-hub.local:8765`). No hardcodees IPs.
+- **Secretos:** nada de claves/tokens en el repo. La clave SSH de la app
+  vivirá en `~/Library/Application Support/com.atlas.panel/keys/` (F3).
+- **Verificación:** `cargo check --workspace`, `cargo test -p atlas-panel`,
+  `cargo fmt -p atlas-panel -- --check`, `npm run build:ui` y prueba visual con
+  `npm run dev` (comprobar icono de barra, menú y tarjetas).
+- **Bundle obligatorio tras validar en dev:** cuando `npm run dev` funcione y
+  el usuario lo confirme, ejecuta `npm run build` dentro de `apps/panel-app`
+  (Tauri) con la identidad **Apple Development**
+  (`APPLE_SIGNING_IDENTITY="Apple Development: …" npm run build`, mirar
+  `security find-identity -v -p codesigning`), abre el `.app` generado
+  (`target/release/bundle/macos/ATLAS Panel.app`) y pruébalo. Verifica la
+  firma profunda (`codesign --verify --deep --strict --verbose=2`) antes de
+  dar la fase por terminada. No basta con que funcione en dev.
+- **Instalación local:** para uso real y para probar el autoarranque, copia el
+  bundle con `ditto "target/release/bundle/macos/ATLAS Panel.app"
+  "$HOME/Applications/ATLAS Panel.app"` y lánzalo desde `~/Applications`. No
+  dejes el autoarranque apuntando a `target/release` (se puede limpiar).
+- **Autoarranque al login:** plugin `tauri-plugin-autostart` con LaunchAgent
+  (`~/Library/LaunchAgents/ATLAS Panel.plist`, apunta a la ruta del `.app`).
+  Se activa en el primer arranque del bundle y se marca con
+  `autostart-initialized` en `~/Library/Application Support/com.atlas.panel/`;
+  el menú de la barra permite desactivarlo y **no** se vuelve a activar solo.
+  En dev está deshabilitado a propósito (no registra `target/debug`). Si mueves
+  la app de carpeta, desactiva y reactiva el autoarranque desde el menú.
+
 ## Reglas de construcción y pruebas
 
 ### Antes de cambiar código

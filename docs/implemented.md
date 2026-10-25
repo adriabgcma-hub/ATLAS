@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### ATLAS Panel: bandeja con semáforo, autoarranque y bundle firmado (F2)
+
+- **Commit:** `feat(panel-app): bandeja con semáforo, autoarranque y bundle firmado (F2)`
+- **Fecha:** `2026-10-25`
+- **Descripción:** la app independiente `apps/panel-app` pasa a ser una app de barra de menús. Añade `TrayIconBuilder` con id `main`, iconos de semáforo embebidos (`icons/tray-ok|warn|down.png`), tooltip y menú (estado, "Abrir panel", "Reiniciar relay…" deshabilitado hasta F3, "Abrir al iniciar sesión" y "Salir" con ⌘Q). Un bucle async sondea `/v1/health` cada 10 s: verde si `ok:true`, ámbar si el relay responde mal (HTTP no-2xx o JSON sin `ok:true`), rojo si no hay red/timeout; solo actualiza icono/menú al cambiar de estado y emite `panel://relay-status`. Cerrar la ventana (Cmd+W) ahora la oculta en vez de terminar la app; se reabre con clic izquierdo en el icono o "Abrir panel". En macOS usa `ActivationPolicy::Accessory` (sin Dock). Autoarranque con `tauri-plugin-autostart` (LaunchAgent `~/Library/LaunchAgents/ATLAS Panel.plist`, activado en el primer arranque del bundle y desactivable desde el menú, con marcador para no reactivarse solo; deshabilitado en dev). Bundle `ATLAS Panel.app` 0.1.0 firmado con Apple Development (`codesign --verify --deep --strict` válido) e instalado en `~/Applications`. Verificado en dev con relay real (`relay OK` + UI por IPC) y con `ATLAS_RELAY_URL=http://127.0.0.1:9` (`relay sin conexión`, app viva); arranque del bundle instalado, LaunchAgent creado con la ruta correcta y probado con `launchctl bootstrap` (launchd arrancó la app: `state = running`, `runs = 1`), y login real confirmado por el usuario; `cargo check --workspace`, `cargo test -p atlas-panel` y `cargo fmt --check` OK. Reglas de uso/refresco/lanzamiento/bundle/autoarranque añadidas a `AGENTS.md`.
+- **Documentación relacionada:** `docs/panel-app-plan.md` (§7 F2 y F2 extra), `AGENTS.md` (§ App ATLAS Panel).
+
 ### ATLAS Panel: scaffold de la app macOS independiente (F1)
 
 - **Commit:** `feat(panel-app): scaffold Tauri v2 con UI compartida y comandos HTTP`

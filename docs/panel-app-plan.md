@@ -1,8 +1,9 @@
 # ATLAS Panel — app macOS independiente (plan v1)
 
-Estado: **F1 implementada** (2026-10-25; pendiente de commit). Sustituye al
-panel web servido por el relay como *herramienta de control*, sin retirar
-`/panel/` (sigue disponible para otros clientes de la LAN).
+Estado: **F1, F2 y autoarranque (parte de F4) implementados**; bundle firmado
+y probado (2026-10-25; pendiente de commit). Sustituye al panel web servido por
+el relay como *herramienta de control*, sin retirar `/panel/` (sigue disponible
+para otros clientes de la LAN).
 
 Objetivo: una app de escritorio **independiente de la app principal de ATLAS**
 que permita ver el relay y **recuperarlo** (reinicio) aunque esté colgado, y
@@ -94,11 +95,11 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 |---|---|
 | F0 | Este plan + docs |
 | F1 | Scaffold Tauri, build de UI con `PANEL_BASE=./`, comandos HTTP — **hecha** |
-| F2 | Tray + polling de salud + ventana |
+| F2 | Tray + polling de salud + ventana — **hecha** |
 | F3 | Clave restringida + reinicio con doble confirmación (comandos de instalación para `atlas-hub`) |
-| F4 | Notificaciones + autoarranque |
+| F4 | Notificaciones + autoarranque — **autoarranque hecho**; notificaciones pendientes |
 | F5 | Watchdog systemd + despliegue |
-| F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real |
+| F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real — **bundle firmado**; prueba de caída pendiente |
 
 ### F1: qué hay ya
 
@@ -123,10 +124,56 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   `tauri dev` con la UI sondeando el relay por IPC (`/v1/system`, `/v1/health`,
   `/v1/session`, `/v1/stats`, `/v1/logs`).
 
+### F2: qué hay ya
+
+- **Barra de menús:** `TrayIconBuilder` con id `main`, icono de semáforo
+  embebido en el binario (`icons/tray-ok|warn|down.png`, 44×44) y tooltip
+  `ATLAS Panel · relay <estado>`.
+- **Sondeo de salud:** cada 10 s a `/v1/health`. `ok:true` → verde; respuesta
+  HTTP no-2xx o JSON sin `ok:true` → ámbar (degradado); error de red/timeout →
+  rojo (sin conexión). Solo se actualiza el icono/menú cuando cambia el
+  estado, y se emite el evento `panel://relay-status` para fases siguientes.
+- **Menú:** estado actual (deshabilitado), separador, "Abrir panel",
+  "Reiniciar relay…" (deshabilitado hasta F3) y "Salir" (⌘Q).
+- **Ventana:** cerrarla (Cmd+W) la oculta y la app sigue en la barra; clic
+  izquierdo en el icono o "Abrir panel" la vuelve a mostrar. `Cmd+Q` o
+  "Salir" terminan la app.
+- **macOS:** política de activación `Accessory` (sin icono en el Dock).
+- Verificado en dev: arranque real con relay accesible → `relay OK` y la UI
+  sondeando por IPC; arranque con `ATLAS_RELAY_URL=http://127.0.0.1:9` →
+  `relay sin conexión` sin que la app muera; `cargo test -p atlas-panel`,
+  `cargo fmt --check` y `cargo check -p atlas-panel`.
+- **Reglas de uso/refresco:** documentadas en `AGENTS.md` § "App ATLAS Panel".
+
+### F2 extra: autoarranque, instalación y bundle firmado
+
+- **Autoarranque:** `tauri-plugin-autostart` con `MacosLauncher::LaunchAgent`.
+  En el primer arranque del bundle (no en dev) se activa y se escribe el
+  marcador `autostart-initialized` en
+  `~/Library/Application Support/com.atlas.panel/`. Genera
+  `~/Library/LaunchAgents/ATLAS Panel.plist` con `RunAtLoad=true` y la ruta del
+  `.app`. El menú incluye "Abrir al iniciar sesión" (checkbox); si el usuario lo
+  desactiva, el marcador evita que se reactive solo.
+- **Instalación local:** el bundle se copia con `ditto` a
+  `~/Applications/ATLAS Panel.app` y se lanza desde ahí, para que el
+  LaunchAgent no apunte a `target/release` (se puede limpiar).
+- **Build firmado:** `APPLE_SIGNING_IDENTITY="Apple Development: …" npm run
+  build` (identidad del llavero, `security find-identity -v -p codesigning`).
+  Resultado: `target/release/bundle/macos/ATLAS Panel.app` (13,5 MiB),
+  `codesign --verify --deep --strict` válido y `com.atlas.panel` / `0.1.0` en
+  `Info.plist`. La notarización se omite a propósito (uso local).
+- **Verificado:** arranque del `.app` instalado, proceso
+  `~/Applications/ATLAS Panel.app/Contents/MacOS/atlas-panel` activo y
+  LaunchAgent creado con la ruta correcta; además se cargó con
+  `launchctl bootstrap gui/$(id -u) "~/Library/LaunchAgents/ATLAS Panel.plist"`
+  y launchd arrancó la app (`state = running`, `runs = 1`). **Login real
+  confirmado por el usuario (2026-10-25).** Queda pendiente la notificación de
+  caída (F4).
+
 ## 8. Pruebas
 
-- Dev: `npm run tauri dev`; verificación visual con el usuario.
-- Producción: `npm run tauri build` y prueba de la app generada.
+- Dev: `cd apps/panel-app && npm run dev`; verificación visual con el usuario.
+- Producción: `npm run build` (Tauri) y prueba de la app generada.
 - **Simulación de fallo**: `sudo systemctl stop atlas-relay` en `atlas-hub` →
   la app debe mostrarlo y recuperarlo desde la UI.
 - Independencia: cerrar/eliminar una app y comprobar que la otra sigue.
