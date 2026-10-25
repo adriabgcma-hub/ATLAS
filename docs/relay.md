@@ -217,7 +217,8 @@ instalación inicial del servidor está detallada en §11.
 | deploy aborta en `sudo -u atlas git …` | falta el sudoers mínimo | instalar `deploy/server/atlas-deploy.sudoers` (ver §11) |
 | deploy aborta en `sudo systemctl restart` | unidad no instalada o unit rota | revisar `/etc/systemd/system/atlas-relay.service` (ver §11) |
 | health falla sin resolver `atlas-hub.local` | avahi caído u otra subred | revisar avahi o usar la IP del momento con `ATLAS_RELAY_URL` |
-| sin respuesta en `127.0.0.1:8765` en el servidor | el relay NO escucha en loopback | consultar por la IP LAN o `atlas-hub.local` |
+| sin respuesta en `127.0.0.1:8765` en el servidor | el relay NO escucha en loopback (correcto) | consultar por la IP LAN o `atlas-hub.local` |
+| relay "activo" pero panel/frontal no conectan | arrancó sin red y quedó atado a `127.0.0.1` | `ss -ltn \| grep 8765`; reiniciar cuando haya red (el reintento de 60 s ya lo evita) |
 | panel 404 en `/panel/` | falta `apps/panel/dist` (no build) | `cd apps/panel && npm run build` y copia `dist/` al repo del servidor (no va en Git) |
 | tarjeta Servicios sin botones de acción | `PANEL_ACTION_UNITS` vacía (por defecto en atlas-hub; faltan reglas polkit) | consciente: instalar reglas polkit para `atlas` y añadir unidades al `.env` |
 | acción del panel `action_not_allowed` | unidad fuera de lista blanca | añadir a `PANEL_ACTION_UNITS` (solo con polkit listo y siendo consciente) |
@@ -281,7 +282,10 @@ Notas de la instalación:
   `TELEGRAM_ALLOWED_USER_IDS`), el relay muere con exit 2 en el arranque:
   verlo con `journalctl -u atlas-relay -n 50`.
 - `Wants/After=network-online.target` es best-effort: si la red tarda y el
-  relay no halla la IP LAN, `Restart=on-failure` lo reintenta.
+  relay no halla la IP LAN al arrancar, **reintenta la autodetección hasta
+  60 s** (2 s entre intentos); si sigue en loopback, sale con error de
+  config (exit 2) para que `Restart=on-failure` lo reintente. Así nunca se
+  queda escuchando en `127.0.0.1` (panel/frontal inalcanzables).
 - El endurecimiento incluye `NoNewPrivileges=true`: correcto porque el panel
   ya no usa sudo (no hay ayudante docker). Ver §6 para cómo se reintroducirán
   acciones cuando se integren unidades.

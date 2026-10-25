@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Fix: el relay ya no puede quedar escuchando en loopback si arranca sin red
+
+- **Commit:** `fix(relay): reintentar autodetección de IP LAN al arrancar sin red`
+- **Fecha:** `2026-10-25`
+- **Descripción:** tras el reinicio de `atlas-hub` a las 11:07 el relay arrancó 5 s después, antes de que el Wi-Fi/DHCP tuviera IP; `lan_ip()` cayó al fallback `127.0.0.1` y el relay quedó activo pero inalcanzable desde la LAN (panel y frontal sin interactuar). Como el socket de loopback se abre sin error, `Restart=on-failure` no se disparaba. Ahora, cuando `RELAY_HOST` está vacío y la autodetección devuelve loopback, el relay reintenta cada 2 s hasta 60 s y, si sigue sin IP LAN, sale con error de config (exit 2) para que systemd lo reinicie. Verificado en `atlas-hub`: tras reiniciar quedó escuchando en `192.168.100.26:8765`, `/v1/health` OK y `/panel/` 200.
+- **Documentación relacionada:** `docs/relay.md` (§10 troubleshooting, §11 notas de instalación).
+
 ### Panel ATLAS recortado a atlas-hub: fuera docker/nube/unidades fantasma y unidades de usuario
 
 - **Commit:** `feat(panel): recortar panel a atlas-hub (sin docker/nube/unidades fantasma)`
