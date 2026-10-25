@@ -1,4 +1,4 @@
-# ATLAS Panel — app macOS independiente (plan v1)
+# Hub Panel — app macOS independiente (plan v1)
 
 Estado: **F1–F5 implementadas** (barra de menús, autoarranque, reinicio del
 relay por SSH con clave restringida, aviso macOS al caer el relay y watchdog
@@ -20,7 +20,7 @@ viceversa: si esta app falla, la principal sigue funcionando.
 | Canal de reinicio | **SSH con clave restringida** (comando forzado) |
 | Red de seguridad | **Watchdog systemd en `atlas-hub`** (independiente del Mac) |
 | Distribución | Local, firma **Apple Development**, sin App Store |
-| Nombre / bundle | `ATLAS Panel` · `com.atlas.panel` |
+| Nombre / bundle | `Hub Panel` · `com.atlas.panel` |
 | Avisos | **Notificación macOS** al caer el relay |
 | Autoarranque | Al login, **off por defecto** |
 
@@ -87,7 +87,8 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   panel", "Reiniciar relay…", "Abrir al iniciar sesión" y "Salir".
 - **Ventana**: mismas tarjetas del panel (servicios, puertos, Mac, relay,
   peticiones, logs) + botón "Reiniciar relay" (solo en la app) con doble
-  confirmación.
+  confirmación. Con la ventana abierta la app es normal (Dock, Cmd+Tab, menú
+  superior); al cerrarla queda solo el icono de barra.
 - **Notificaciones**: una por caída (sin spam), con enlace a la ventana.
 - **Autoarranque**: toggle con `tauri-plugin-autostart`, apagado por defecto.
 
@@ -130,7 +131,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 
 - **Barra de menús:** `TrayIconBuilder` con id `main`, icono de semáforo
   embebido en el binario (`icons/tray-ok|warn|down.png`, 44×44) y tooltip
-  `ATLAS Panel · relay <estado>`.
+  `Hub Panel · relay <estado>`.
 - **Sondeo de salud:** cada 10 s a `/v1/health`. `ok:true` → verde; respuesta
   HTTP no-2xx o JSON sin `ok:true` → ámbar (degradado); error de red/timeout →
   rojo (sin conexión). Solo se actualiza el icono/menú cuando cambia el
@@ -145,7 +146,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   sondeando por IPC; arranque con `ATLAS_RELAY_URL=http://127.0.0.1:9` →
   `relay sin conexión` sin que la app muera; `cargo test -p atlas-panel`,
   `cargo fmt --check` y `cargo check -p atlas-panel`.
-- **Reglas de uso/refresco:** documentadas en `AGENTS.md` § "App ATLAS Panel".
+- **Reglas de uso/refresco:** documentadas en `AGENTS.md` § "App Hub Panel".
 
 ### F2 extra: autoarranque, instalación y bundle firmado
 
@@ -153,21 +154,21 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   En el primer arranque del bundle (no en dev) se activa y se escribe el
   marcador `autostart-initialized` en
   `~/Library/Application Support/com.atlas.panel/`. Genera
-  `~/Library/LaunchAgents/ATLAS Panel.plist` con `RunAtLoad=true` y la ruta del
+  `~/Library/LaunchAgents/Hub Panel.plist` con `RunAtLoad=true` y la ruta del
   `.app`. El menú incluye "Abrir al iniciar sesión" (checkbox); si el usuario lo
   desactiva, el marcador evita que se reactive solo.
 - **Instalación local:** el bundle se copia con `ditto` a
-  `~/Applications/ATLAS Panel.app` y se lanza desde ahí, para que el
+  `~/Applications/Hub Panel.app` y se lanza desde ahí, para que el
   LaunchAgent no apunte a `target/release` (se puede limpiar).
 - **Build firmado:** `APPLE_SIGNING_IDENTITY="Apple Development: …" npm run
   build` (identidad del llavero, `security find-identity -v -p codesigning`).
-  Resultado: `target/release/bundle/macos/ATLAS Panel.app` (13,5 MiB),
+  Resultado: `target/release/bundle/macos/Hub Panel.app` (13,5 MiB),
   `codesign --verify --deep --strict` válido y `com.atlas.panel` / `0.1.0` en
   `Info.plist`. La notarización se omite a propósito (uso local).
 - **Verificado:** arranque del `.app` instalado, proceso
-  `~/Applications/ATLAS Panel.app/Contents/MacOS/atlas-panel` activo y
+  `~/Applications/Hub Panel.app/Contents/MacOS/atlas-panel` activo y
   LaunchAgent creado con la ruta correcta; además se cargó con
-  `launchctl bootstrap gui/$(id -u) "~/Library/LaunchAgents/ATLAS Panel.plist"`
+  `launchctl bootstrap gui/$(id -u) "~/Library/LaunchAgents/Hub Panel.plist"`
   y launchd arrancó la app (`state = running`, `runs = 1`). **Login real
   confirmado por el usuario (2026-10-25).** La notificación de caída se
   implementó en F4 (ver más abajo).
@@ -243,7 +244,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   - En dev con `ATLAS_PANEL_NOTIFY=1 ATLAS_RELAY_URL=http://127.0.0.1:9`:
     estado `relay sin conexión` y aviso emitido sin error.
   - En el bundle instalado, lanzado con
-    `open -n -a "$HOME/Applications/ATLAS Panel.app" --env
+    `open -n -a "$HOME/Applications/Hub Panel.app" --env
     ATLAS_RELAY_URL=http://127.0.0.1:9`: aparece la notificación y **al
     pulsarla se abre la ventana del panel** (confirmado por el usuario).
   - Vuelta a la normalidad sin la variable: proceso con el relay real y
@@ -294,6 +295,31 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   systemd no cuenta los reinicios manuales (`systemctl restart`), solo los de
   su política `Restart=`.
 
+### Renombrado a Hub Panel y política de ventana (2026-10-25)
+
+- **Nombre:** `productName` pasa de `ATLAS Panel` a **`Hub Panel`** (bundle
+  `Hub Panel.app`, título de ventana, tooltip del icono, notificaciones y logs).
+  El **identificador sigue siendo `com.atlas.panel`**: de él cuelgan
+  `~/Library/Application Support/com.atlas.panel/` (clave SSH del reinicio y
+  marcador de autoarranque) y el binario interno `Contents/MacOS/atlas-panel`.
+- **Migración del autoarranque:** se descargó el LaunchAgent antiguo
+  (`launchctl bootout "gui/$(id -u)/ATLAS Panel"` + borrar
+  `~/Library/LaunchAgents/ATLAS Panel.plist`), se borró el marcador
+  `autostart-initialized` para que el bundle nuevo lo registrara otra vez y se
+  sustituyó `~/Applications/ATLAS Panel.app` por `~/Applications/Hub Panel.app`
+  (`ditto`). Resultado: `~/Library/LaunchAgents/Hub Panel.plist` con
+  `RunAtLoad=true` y la ruta nueva; marcador recreado.
+- **Política de activación híbrida:** `set_window_policy()` alterna
+  `Regular` (ventana visible → Dock, Cmd+Tab y menú superior) y `Accessory`
+  (ventana oculta → solo icono de barra). Se aplica en `setup` (ventana
+  abierta al arrancar), en `show_panel()` y en `CloseRequested`. Antes era
+  `Accessory` fijo, de ahí que no saliera en Cmd+Tab ni tuviera menú; en
+  `tauri dev` sí aparecía porque el binario sin bundle no aplica la política.
+- **Verificado:** firma profunda válida, `CFBundleName = Hub Panel`,
+  `CFBundleExecutable = atlas-panel`, app corriendo desde `~/Applications/Hub
+  Panel.app`, `lsappinfo` con `type="Foreground"`, relay en verde y el usuario
+  confirmó Dock + Cmd+Tab + menú con la ventana y solo icono al cerrarla.
+
 ## 8. Pruebas
 
 - Dev: `cd apps/panel-app && npm run dev`; verificación visual con el usuario.
@@ -304,7 +330,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   vuelve a verde. Equivalente por consola:
   `cargo test -p atlas-panel -- --ignored` (incluye `reinicia_el_relay_real`).
 - **Notificaciones (F4):** lanzar el bundle con
-  `open -n -a "$HOME/Applications/ATLAS Panel.app" --env
+  `open -n -a "$HOME/Applications/Hub Panel.app" --env
   ATLAS_RELAY_URL=http://127.0.0.1:9` (o `ATLAS_PANEL_NOTIFY=1` en dev):
   comprobar que el aviso aparece **una vez**, que el clic abre la ventana y que
   no se repite mientras el relay siga caído.

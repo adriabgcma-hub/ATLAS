@@ -50,11 +50,11 @@
   petición de lectura o más) requiere permiso explícito del usuario, con pausa
   entre intentos. Apple limita (throttle 403) ante ráfagas.
 
-## App ATLAS Panel (`apps/panel-app`)
+## App Hub Panel (`apps/panel-app`)
 
 App macOS **independiente** de la principal (barra de menús, bundle
-`com.atlas.panel`): sirve para ver el relay y, más adelante, reiniciarlo aunque
-esté colgado. Si una app falla, la otra sigue funcionando.
+`com.atlas.panel`): sirve para ver el relay y reiniciarlo aunque esté colgado.
+Si una app falla, la otra sigue funcionando.
 
 - **Una sola UI:** la fuente es `apps/panel`. No dupliques componentes ni
   estilos en `apps/panel-app`; todo cambio visual debe funcionar en los dos
@@ -74,8 +74,23 @@ esté colgado. Si una app falla, la otra sigue funcionando.
 - **Ventana:** cerrarla (Cmd+W) solo la oculta; la app sigue en la barra de
   menús. Se reabre con clic izquierdo en el icono o con "Abrir panel". Para
   salir de verdad: menú "Salir" o Cmd+Q.
+- **Dock, Cmd+Tab y menú superior:** dependen de la política de activación.
+  Con la **ventana visible** la app usa `ActivationPolicy::Regular` (sale en
+  Dock, Cmd+Tab y menú superior, como una app normal); al cerrarla pasa a
+  `Accessory` y queda solo el icono de la barra. Ese cambio lo hacen
+  `set_window_policy()` en `show_panel()` y en `CloseRequested`: no lo
+  sustituyas por un `Accessory` fijo o se pierden Cmd+Tab y el menú.
+- **Nombre:** el bundle es **Hub Panel** (`Hub Panel.app`,
+  `~/Applications/Hub Panel.app`, LaunchAgent `Hub Panel.plist`), pero el
+  identificador sigue siendo **`com.atlas.panel`** a propósito: de él cuelgan
+  `~/Library/Application Support/com.atlas.panel/` (clave SSH del reinicio,
+  marcador de autoarranque) y el binario interno (`Contents/MacOS/atlas-panel`,
+  nombre del crate). No cambies el identificador sin mover la clave y el
+  marcador, o el reinicio deja de funcionar.
 - **Semáforo:** sondea `/v1/health` cada 10 s (verde OK, ámbar degradado, rojo
-  sin conexión). No hay auto-reinicios silenciosos.
+  sin conexión). La app **no** reinicia sola: el reinicio es siempre manual y
+  confirmado; en el servidor sí hay watchdog automático (`atlas-health.timer`,
+  ver la sección del relay).
 - **Reinicio del relay (F3):** solo mediante SSH con clave restringida y doble
   confirmación. Dos entradas: botón "Reiniciar relay" (arriba a la derecha,
   solo dentro de la app) y menú de la barra "Reiniciar relay…" (abre la ventana
@@ -99,7 +114,7 @@ esté colgado. Si una app falla, la otra sigue funcionando.
   caída** (solo al pasar a rojo, con enfriamiento de 5 min) y el clic abre la
   ventana; no reinicia nada solo. En dev está silenciado: para probarlo, lanza
   `ATLAS_PANEL_NOTIFY=1` (dev) o el bundle con
-  `open -n -a "$HOME/Applications/ATLAS Panel.app" --env
+  `open -n -a "$HOME/Applications/Hub Panel.app" --env
   ATLAS_RELAY_URL=http://127.0.0.1:9`. Como el aviso se emite desde Rust, no
   necesita permisos nuevos en `capabilities/default.json`.
 - **URL del relay:** `ATLAS_RELAY_URL` (por defecto
@@ -117,15 +132,15 @@ esté colgado. Si una app falla, la otra sigue funcionando.
   (Tauri) con la identidad **Apple Development**
   (`APPLE_SIGNING_IDENTITY="Apple Development: …" npm run build`, mirar
   `security find-identity -v -p codesigning`), abre el `.app` generado
-  (`target/release/bundle/macos/ATLAS Panel.app`) y pruébalo. Verifica la
+  (`target/release/bundle/macos/Hub Panel.app`) y pruébalo. Verifica la
   firma profunda (`codesign --verify --deep --strict --verbose=2`) antes de
   dar la fase por terminada. No basta con que funcione en dev.
 - **Instalación local:** para uso real y para probar el autoarranque, copia el
-  bundle con `ditto "target/release/bundle/macos/ATLAS Panel.app"
-  "$HOME/Applications/ATLAS Panel.app"` y lánzalo desde `~/Applications`. No
+  bundle con `ditto "target/release/bundle/macos/Hub Panel.app"
+  "$HOME/Applications/Hub Panel.app"` y lánzalo desde `~/Applications`. No
   dejes el autoarranque apuntando a `target/release` (se puede limpiar).
 - **Autoarranque al login:** plugin `tauri-plugin-autostart` con LaunchAgent
-  (`~/Library/LaunchAgents/ATLAS Panel.plist`, apunta a la ruta del `.app`).
+  (`~/Library/LaunchAgents/Hub Panel.plist`, apunta a la ruta del `.app`).
   Se activa en el primer arranque del bundle y se marca con
   `autostart-initialized` en `~/Library/Application Support/com.atlas.panel/`;
   el menú de la barra permite desactivarlo y **no** se vuelve a activar solo.

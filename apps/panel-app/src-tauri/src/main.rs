@@ -1,4 +1,4 @@
-//! ATLAS Panel: app macOS independiente de la app principal.
+//! Hub Panel: app macOS independiente de la app principal.
 //!
 //! F1: transporte HTTP hacia el relay. La UI (React compartida con
 //! `apps/panel`) llama a `api_get`/`api_post` mediante `invoke`, así que no
@@ -119,7 +119,7 @@ async fn request(
 ) -> Result<Value, String> {
     let path = validate_path(&path)?;
     #[cfg(debug_assertions)]
-    eprintln!("ATLAS Panel → {method} {path}");
+    eprintln!("Hub Panel → {method} {path}");
     let url = format!("{}{}", relay_url(), path);
     let mut req = client()?
         .request(method, &url)
@@ -301,10 +301,28 @@ fn build_menu(app: &AppHandle, status: RelayStatus) -> tauri::Result<Menu<tauri:
 }
 
 fn show_panel(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    set_window_policy(app, true);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+/// Con la ventana visible la app se comporta como una app normal (menú
+/// superior y Cmd+Tab); al ocultarla vuelve a ser solo icono de barra, sin
+/// Dock. `Accessory` solo no tiene menú ni aparece en Cmd+Tab: por eso se
+/// alterna según haya ventana o no.
+#[cfg(target_os = "macos")]
+fn set_window_policy(app: &AppHandle, visible: bool) {
+    let policy = if visible {
+        ActivationPolicy::Regular
+    } else {
+        ActivationPolicy::Accessory
+    };
+    if let Err(err) = app.set_activation_policy(policy) {
+        eprintln!("Hub Panel · política de activación: {err}");
     }
 }
 
@@ -338,7 +356,7 @@ fn init_autostart(app: &AppHandle) {
             let _ = std::fs::create_dir_all(&dir);
             let _ = std::fs::write(&marker, b"1");
         }
-        Err(err) => eprintln!("ATLAS Panel · no se pudo activar el autoarranque: {err}"),
+        Err(err) => eprintln!("Hub Panel · no se pudo activar el autoarranque: {err}"),
     }
 }
 
@@ -354,7 +372,7 @@ fn toggle_autostart(app: &AppHandle) {
         manager.enable()
     };
     if let Err(err) = result {
-        eprintln!("ATLAS Panel · autoarranque: {err}");
+        eprintln!("Hub Panel · autoarranque: {err}");
     }
     apply_status(app, current_status(app));
 }
@@ -366,10 +384,10 @@ fn apply_status(app: &AppHandle, status: RelayStatus) {
         }
     }
     #[cfg(debug_assertions)]
-    eprintln!("ATLAS Panel · relay {}", status.label());
+    eprintln!("Hub Panel · relay {}", status.label());
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_icon(Some(status.icon()));
-        let _ = tray.set_tooltip(Some(format!("ATLAS Panel · relay {}", status.label())));
+        let _ = tray.set_tooltip(Some(format!("Hub Panel · relay {}", status.label())));
         if let Ok(menu) = build_menu(app, status) {
             let _ = tray.set_menu(Some(menu));
         }
@@ -418,11 +436,11 @@ fn notify_relay_down(app: &AppHandle) {
     let result = app
         .notification()
         .builder()
-        .title("ATLAS · relay sin conexión")
+        .title("Hub Panel · relay sin conexión")
         .body(body)
         .show();
     if let Err(err) = result {
-        eprintln!("ATLAS Panel · no se pudo mostrar la notificación: {err}");
+        eprintln!("Hub Panel · no se pudo mostrar la notificación: {err}");
     }
 }
 
@@ -433,7 +451,7 @@ fn init_notifications(app: &AppHandle) {
             show_panel(&handle);
         }
     }) {
-        eprintln!("ATLAS Panel · notificaciones: {err}");
+        eprintln!("Hub Panel · notificaciones: {err}");
     }
 }
 
@@ -449,9 +467,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![api_get, api_post, restart_relay])
         .setup(|app| {
-            // App de barra de menús: sin icono en el Dock.
+            // Con la ventana abierta al arrancar: app normal (Dock, Cmd+Tab y
+            // menú superior); al cerrarla pasará a solo icono de barra.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(ActivationPolicy::Accessory);
+            set_window_policy(app.handle(), true);
 
             // Primer arranque del bundle: activar el autoarranque al login.
             init_autostart(app.handle());
@@ -463,7 +482,7 @@ fn main() {
             let menu = build_menu(app.handle(), RelayStatus::Down)?;
             TrayIconBuilder::with_id("main")
                 .icon(RelayStatus::Down.icon())
-                .tooltip("ATLAS Panel · relay sin conexión")
+                .tooltip("Hub Panel · relay sin conexión")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -493,17 +512,20 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Cerrar la ventana no cierra la app: queda en la barra de menús.
+            // Cerrar la ventana no cierra la app: queda en la barra de menús
+            // (y deja de aparecer en Dock/Cmd+Tab hasta que se reabra).
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                #[cfg(target_os = "macos")]
+                set_window_policy(window.app_handle(), false);
             }
         })
         .run(tauri::generate_context!())
     {
         Ok(()) => 0,
         Err(err) => {
-            eprintln!("ATLAS Panel no pudo arrancar: {err}");
+            eprintln!("Hub Panel no pudo arrancar: {err}");
             1
         }
     };

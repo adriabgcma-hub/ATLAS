@@ -185,9 +185,9 @@ Variables del deploy: `ATLAS_DEPLOY_HOST` (defecto `atlas-hub`) y
 `ATLAS_RELAY_URL` (defecto `http://atlas-hub.local:8765/v1/health`). La
 instalación inicial del servidor está detallada en §11.
 
-### app ATLAS Panel: clave de reinicio
+### app Hub Panel: clave de reinicio
 
-La app macOS `ATLAS Panel` (`apps/panel-app`, bundle `com.atlas.panel`) puede
+La app macOS `Hub Panel` (`apps/panel-app`, bundle `com.atlas.panel`) puede
 reiniciar `atlas-relay` sin sesión interactiva. Usa una clave `ed25519`
 exclusiva:
 

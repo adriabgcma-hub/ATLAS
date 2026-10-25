@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Hub Panel: renombrado del bundle y ventana con Dock/Cmd+Tab
+
+- **Commit:** `feat(panel-app): renombrar el bundle a Hub Panel y ventana con Dock/Cmd+Tab`
+- **Fecha:** `2026-10-25`
+- **Descripción:** la app pasa a llamarse **Hub Panel** en todo lo visible (`productName` → bundle `Hub Panel.app`, título de ventana, tooltip del icono, notificaciones y logs), manteniendo a propósito el identificador `com.atlas.panel` porque de él cuelgan `~/Library/Application Support/com.atlas.panel/` (clave SSH del reinicio y marcador de autoarranque) y el binario interno `Contents/MacOS/atlas-panel`. Se corrige además el comportamiento de ventana: con `ActivationPolicy::Accessory` fijo la app no salía en Cmd+Tab ni tenía menú superior; ahora `set_window_policy()` alterna `Regular` con la ventana visible (Dock, Cmd+Tab y menú) y `Accessory` al cerrarla (solo icono de barra), aplicado en `setup`, `show_panel()` y `CloseRequested`. Migración local: `launchctl bootout` del LaunchAgent antiguo, borrado de `~/Library/LaunchAgents/ATLAS Panel.plist`, borrado del marcador `autostart-initialized`, sustitución de `~/Applications/ATLAS Panel.app` por `Hub Panel.app` con `ditto` y primer arranque para que el plugin registre `Hub Panel.plist` (`RunAtLoad=true`, ruta nueva). Verificado: firma profunda válida, `CFBundleName = Hub Panel`, `CFBundleExecutable = atlas-panel`, app corriendo desde `~/Applications/Hub Panel.app`, `lsappinfo` con `type="Foreground"`, relay en verde, y confirmación del usuario de Dock + Cmd+Tab + menú superior con la ventana abierta y solo icono de barra al cerrarla. `cargo check -p atlas-panel` y `cargo fmt --check` OK.
+- **Documentación relacionada:** `AGENTS.md` (§ App Hub Panel: ventana, Dock/Cmd+Tab y nombre), `docs/panel-app-plan.md` (§6, §7 "Renombrado a Hub Panel").
+
 ### Watchdog del relay: reinicio automático en atlas-hub (F5)
 
 - **Commit:** `feat(health): watchdog systemd que reinicia el relay si no responde (F5)`

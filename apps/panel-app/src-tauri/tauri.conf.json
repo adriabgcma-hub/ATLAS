@@ -1,6 +1,6 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "ATLAS Panel",
+  "productName": "Hub Panel",
   "version": "0.1.0",
   "identifier": "com.atlas.panel",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ATLAS Panel",
+        "title": "Hub Panel",
         "width": 1100,
         "height": 820,
         "minWidth": 720,
