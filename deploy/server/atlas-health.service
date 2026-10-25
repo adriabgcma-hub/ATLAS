@@ -1,0 +1,21 @@
+[Unit]
+Description=ATLAS relay healthcheck (reinicia atlas-relay si no responde)
+Documentation=file:/opt/atlas/repo/docs/relay.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+# El script vive en el repo desplegado (se actualiza con el git pull del relay).
+ExecStart=/usr/bin/python3 /opt/atlas/repo/deploy/server/atlas-healthcheck.py
+# Contador de fallos consecutivos: systemd crea /var/lib/atlas-health.
+StateDirectory=atlas-health
+StateDirectoryMode=0755
+TimeoutStartSec=45
+Nice=10
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes

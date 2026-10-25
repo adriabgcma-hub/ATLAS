@@ -21,7 +21,16 @@
   (`sudo systemctl restart`) y comprueba `/v1/health`. El relay **no** recarga
   solo: cada despliegue lo reinicia el script.
   **Importante:** el script NO commitea automáticamente. Commitea manualmente
-  antes de desplegar. Si hay cambios sin commitear, el script aborta.
+  antes de desplegar. Si hay cambios sin commitear, el script aborta (salvo
+  `--pull`, que solo baja el remoto, o `--push`, que sube lo ya commiteado sin
+  exigir árbol limpio).
+- **Watchdog del relay** (`atlas-health.timer` en `atlas-hub`): instalación
+  única con `./scripts/deploy-healthcheck.sh` (necesita la contraseña de
+  `adria_admin`; el script del chequeo debe estar ya en `/opt/atlas/repo`, o
+  sea: despliega el relay antes). Comprueba `/v1/health` en la IP LAN cada
+  60 s y reinicia `atlas-relay` tras 2 fallos seguidos. Para parar el relay a
+  mano, antes `sudo systemctl stop atlas-health.timer` y después `start`; si
+  no, el watchdog lo levanta en 1-2 min. Detalle en `docs/relay.md` §9.
 - El relay solo escucha en la IP LAN de `atlas-hub` (8765, autodetectada, no
   en `127.0.0.1`); el firewall `ufw` de `atlas-hub` debe dejar pasar
   `8765/tcp` SOLO desde `192.168.100.0/24`.

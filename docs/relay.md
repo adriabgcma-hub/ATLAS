@@ -219,6 +219,27 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 4. Si tocaste `PANEL_*`: re-probar el panel en red local (sin polkit/sudoers
    de momento en atlas-hub, las acciones siguen sin habilitarse).
 
+### Watchdog del relay (`atlas-health.timer`)
+
+- Instalación (una vez, tras desplegar el relay para que el script esté en
+  `/opt/atlas/repo`): `./scripts/deploy-healthcheck.sh` → pide la contraseña de
+  `adria_admin`. Deja `atlas-health.service` (oneshot, root) y
+  `atlas-health.timer` (90 s tras el arranque, luego cada 60 s).
+- Comprueba `/v1/health` en la IP LAN (nunca loopback), timeout 3 s, y reinicia
+  `atlas-relay` tras **2 fallos consecutivos**. Contador en
+  `/var/lib/atlas-health/failures`; se pone a cero tras cada intento.
+- Ver: `systemctl list-timers atlas-health.timer` y
+  `journalctl -u atlas-health -n 30`.
+- **Mantenimiento:** antes de parar el relay a mano,
+  `sudo systemctl stop atlas-health.timer`; después,
+  `sudo systemctl start atlas-health.timer`. Si no, el watchdog lo levanta en
+  1-2 min.
+- Prueba en seco sin tocar el servicio (desde el Mac o el servidor):
+  `ATLAS_HEALTH_URL=http://127.0.0.1:9 ATLAS_HEALTH_DRY_RUN=1
+  ATLAS_HEALTH_STATE_DIR=/tmp/atlas-health python3
+  deploy/server/atlas-healthcheck.py` dos veces → `1/2` y luego
+  `DRY RUN: reiniciaría atlas-relay`.
+
 ### Prohibiciones explícitas
 
 - NO martillear iCloud CalDAV: cada prueba real contra iCloud requiere el

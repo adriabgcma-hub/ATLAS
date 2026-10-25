@@ -1,0 +1,14 @@
+[Unit]
+Description=Comprobación periódica del relay ATLAS
+Documentation=file:/opt/atlas/repo/docs/relay.md
+
+[Timer]
+# Deja pasar la red y el arranque del relay antes de la primera pasada.
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Persistent=false
+Unit=atlas-health.service
+
+[Install]
+WantedBy=timers.target

@@ -1,10 +1,10 @@
 # ATLAS Panel — app macOS independiente (plan v1)
 
-Estado: **F1–F4 implementadas** (barra de menús, autoarranque, reinicio del
-relay por SSH con clave restringida y aviso macOS al caer el relay); bundle
-firmado y probado (2026-10-25; F4 pendiente de commit). Sustituye al panel web
-servido por el relay como *herramienta de control*, sin retirar `/panel/` (sigue
-disponible para otros clientes de la LAN).
+Estado: **F1–F5 implementadas** (barra de menús, autoarranque, reinicio del
+relay por SSH con clave restringida, aviso macOS al caer el relay y watchdog
+systemd en el servidor); bundle firmado y probado (2026-10-25; F5 pendiente de
+commit). Sustituye al panel web servido por el relay como *herramienta de
+control*, sin retirar `/panel/` (sigue disponible para otros clientes de la LAN).
 
 Objetivo: una app de escritorio **independiente de la app principal de ATLAS**
 que permita ver el relay y **recuperarlo** (reinicio) aunque esté colgado, y
@@ -100,7 +100,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 | F2 | Tray + polling de salud + ventana — **hecha** |
 | F3 | Clave restringida + reinicio con doble confirmación (comandos de instalación para `atlas-hub`) — **hecha** |
 | F4 | Notificaciones + autoarranque — **hecha** (aviso macOS al caer el relay y autoarranque al login) |
-| F5 | Watchdog systemd + despliegue |
+| F5 | Watchdog systemd + despliegue — **hecha** (healthcheck + timer en `atlas-hub`) |
 | F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real — **bundle firmado**; prueba de caída pendiente |
 
 ### F1: qué hay ya
@@ -250,6 +250,43 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
     `/v1/health` 200.
 - **Autoarranque:** ya cubierto en "F2 extra" (sigue activo; al login abre la
   ventana además del icono, tal como pidió el usuario).
+
+### F5: qué hay ya (watchdog en `atlas-hub`)
+
+- **`deploy/server/atlas-healthcheck.py`** (solo stdlib, `python3` del
+  sistema): comprueba `/v1/health` en `http://<IP LAN>:8765` autodetectando la
+  IP como el relay (connect UDP), timeout 3 s y exige HTTP 200 + `ok: true`.
+  Tras **2 fallos consecutivos** ejecuta `systemctl restart atlas-relay`;
+  guarda el contador en `/var/lib/atlas-health/failures` y lo pone a cero tras
+  el intento (si el servicio no levanta, espera otra tanda en vez de
+  martillear cada minuto). Si el servicio está `activating`/`deactivating`, no
+  lo pisa: espera a la siguiente pasada.
+- **Modo seco y overrides** (para probar sin tocar el servicio):
+  `ATLAS_HEALTH_DRY_RUN=1`, `ATLAS_HEALTH_URL`, `ATLAS_HEALTH_TIMEOUT`,
+  `ATLAS_HEALTH_THRESHOLD`, `ATLAS_HEALTH_STATE_DIR`, `ATLAS_HEALTH_UNIT`.
+  Códigos: 0 normal (sano, fallo aislado o reinicio correcto), 1 error al
+  reiniciar o fallo inesperado (así `systemctl --failed` solo marca lo grave).
+- **`deploy/server/atlas-health.service`**: `Type=oneshot`, `User=root`,
+  `StateDirectory=atlas-health`, `TimeoutStartSec=45`, `Nice=10`,
+  `NoNewPrivileges`, `ProtectHome`, `PrivateTmp`, `ProtectKernelTunables`,
+  `ProtectControlGroups`.
+- **`deploy/server/atlas-health.timer`**: `OnBootSec=90s`,
+  `OnUnitActiveSec=60s`, `AccuracySec=10s`. Funciona con el Mac apagado.
+- **`scripts/deploy-healthcheck.sh`**: copia las unidades a `/tmp`, las instala
+  con `sudo` interactivo en `/etc/systemd/system`, `daemon-reload`, activa el
+  timer y lanza una primera pasada. Aborta si el script del chequeo no está ya
+  en `/opt/atlas/repo` (hay que desplegar el relay antes). El script del
+  chequeo **no se copia**: se actualiza con el `git pull` del relay.
+- **Mantenimiento:** antes de parar el relay a mano,
+  `sudo systemctl stop atlas-health.timer` y volver a arrancarlo después; si
+  no, el watchdog lo levanta en ~1-2 min.
+- **Verificado en local (2026-10-25):** con `ATLAS_HEALTH_URL` al relay real →
+  `OK`; con `http://127.0.0.1:9` y `DRY_RUN=1` → `fallo 1/2`, luego
+  `DRY RUN: reiniciaría atlas-relay` y contador a cero. `python3 -m py_compile`
+  y `bash -n` OK.
+- **Pendiente en `atlas-hub`:** instalar con `scripts/deploy-healthcheck.sh`
+  (pide la contraseña) y probar la caída real (parar el relay → reinicio
+  automático en 1-2 min). Se anotará aquí el resultado.
 
 ## 8. Pruebas
 
