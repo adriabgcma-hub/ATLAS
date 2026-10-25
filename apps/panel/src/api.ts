@@ -1,9 +1,36 @@
-/** API del panel: todo pasa por el relay (misma LAN, sin auth — perímetro de red). */
+/** API del panel: todo pasa por el relay (misma LAN, sin auth — perímetro de red).
+ *
+ *  Hay dos entornos:
+ *  - Web (`/panel/` servido por el relay): `fetch` directo con CORS.
+ *  - App macOS (Tauri, `apps/panel-app`): las peticiones van por los comandos
+ *    IPC `api_get` / `api_post` (reqwest en Rust), sin CORS y sin que el
+ *    webview conozca la URL del relay.
+ */
+
+import { invoke, isTauri } from '@tauri-apps/api/core'
 
 export const RELAY_URL =
   (import.meta.env.VITE_RELAY_URL as string | undefined) ?? window.location.origin
 
+const IN_TAURI = isTauri()
+
+async function tauriRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  try {
+    if (method === 'GET') {
+      return await invoke<T>('api_get', { path })
+    }
+    const raw = init?.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? null)
+    return await invoke<T>('api_post', { path, body })
+  } catch (exc) {
+    throw new Error(String((exc as Error)?.message ?? exc))
+  }
+}
+
 export async function j<T>(path: string, init?: RequestInit): Promise<T> {
+  if (IN_TAURI) return tauriRequest<T>(path, init)
+
   const res = await fetch(RELAY_URL + path, {
     headers: { Accept: 'application/json' },
     ...init,

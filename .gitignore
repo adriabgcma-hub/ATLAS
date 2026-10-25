@@ -20,6 +20,7 @@ coverage/
 *.tsbuildinfo
 src-tauri/gen/schemas/
 src-tauri/generated/
+**/src-tauri/gen/
 
 # Logs and crash reports
 logs/

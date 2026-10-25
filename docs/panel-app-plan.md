@@ -1,8 +1,8 @@
 # ATLAS Panel — app macOS independiente (plan v1)
 
-Estado: **plan aprobado, sin implementar** (2026-10-25). Sustituye al panel
-web servido por el relay como *herramienta de control*, sin retirar `/panel/`
-(sigue disponible para otros clientes de la LAN).
+Estado: **F1 implementada** (2026-10-25; pendiente de commit). Sustituye al
+panel web servido por el relay como *herramienta de control*, sin retirar
+`/panel/` (sigue disponible para otros clientes de la LAN).
 
 Objetivo: una app de escritorio **independiente de la app principal de ATLAS**
 que permita ver el relay y **recuperarlo** (reinicio) aunque esté colgado, y
@@ -93,12 +93,35 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 | Fase | Contenido |
 |---|---|
 | F0 | Este plan + docs |
-| F1 | Scaffold Tauri, build de UI con `PANEL_BASE=./`, comandos HTTP |
+| F1 | Scaffold Tauri, build de UI con `PANEL_BASE=./`, comandos HTTP — **hecha** |
 | F2 | Tray + polling de salud + ventana |
 | F3 | Clave restringida + reinicio con doble confirmación (comandos de instalación para `atlas-hub`) |
 | F4 | Notificaciones + autoarranque |
 | F5 | Watchdog systemd + despliegue |
 | F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real |
+
+### F1: qué hay ya
+
+- `apps/panel-app/` con shell Tauri v2 (`com.atlas.panel`, ventana propia) y
+  `src-tauri/src/main.rs` con los comandos `api_get` / `api_post`
+  (`reqwest`, timeout 8 s). El backend **solo acepta rutas `/v1/...`**; el
+  webview no puede elegir host ni convertir el comando en un proxy.
+- `apps/panel/src/api.ts`: si corre dentro de Tauri usa `invoke`; si corre en
+  el navegador (panel del relay) mantiene `fetch` + CORS. Un solo frontend.
+- `apps/panel/vite.config.ts`: `PANEL_BASE` y `PANEL_OUT_DIR` parametrizables
+  (defecto `/panel/` y `dist` para el relay).
+- Builds:
+  - relay: `cd apps/panel && npm run build` → `apps/panel/dist` (base `/panel/`)
+  - app: `cd apps/panel-app && npm run build:ui` → `apps/panel-app/dist`
+    (base `./`, empaquetado en el bundle)
+- Dev de la app: `cd apps/panel-app && npm run dev` (Vite del panel en 5174 +
+  ventana Tauri; los `invoke` se registran en el log solo en debug).
+- Iconos: de momento copiados de la app principal; el icono propio llega en F6.
+- Verificado: `cargo check --workspace`, `cargo test -p atlas-panel`
+  (2 tests de validación de rutas + prueba real de `/v1/health` con
+  `--include-ignored`), `npm run build` de la app principal y arranque real de
+  `tauri dev` con la UI sondeando el relay por IPC (`/v1/system`, `/v1/health`,
+  `/v1/session`, `/v1/stats`, `/v1/logs`).
 
 ## 8. Pruebas
 

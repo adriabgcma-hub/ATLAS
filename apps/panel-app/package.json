@@ -1,0 +1,16 @@
+{
+  "name": "atlas-panel-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:ui": "cd ../panel && PANEL_BASE=/ npm run dev",
+    "build:ui": "cd ../panel && PANEL_BASE=./ PANEL_OUT_DIR=../panel-app/dist npm run build",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

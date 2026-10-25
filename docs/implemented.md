@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### ATLAS Panel: scaffold de la app macOS independiente (F1)
+
+- **Commit:** `feat(panel-app): scaffold Tauri v2 con UI compartida y comandos HTTP`
+- **Fecha:** `2026-10-25`
+- **Descripción:** nueva app de escritorio independiente de la app principal en `apps/panel-app` (Tauri v2, identifier `com.atlas.panel`, ventana y bundle propios, versión `0.1.0`). Reutiliza el frontend de `apps/panel` con dos builds: el del relay sigue con base `/panel/` en `apps/panel/dist` y el de la app usa base relativa (`PANEL_BASE=./`) y sale a `apps/panel-app/dist` (`PANEL_OUT_DIR`). `apps/panel/src/api.ts` detecta Tauri (`isTauri()`) y envía las peticiones por los comandos IPC `api_get`/`api_post`, implementados en Rust con `reqwest` (timeout 8 s); en navegador sigue usando `fetch` con CORS. El backend valida que la ruta empiece por `/v1/` y rechaza URLs absolutas, `..`, fragmentos y espacios, de modo que el webview no puede usar el comando como proxy. Añadido `apps/panel-app/src-tauri` al workspace de Cargo. Verificado: `cargo check --workspace`, `cargo test -p atlas-panel` (validación de rutas + `/v1/health` real contra `atlas-hub`), `npm run build` de la app principal y arranque real con `tauri dev` (la UI sondea `/v1/system`, `/v1/health`, `/v1/session`, `/v1/stats` y `/v1/logs` por IPC). `npm run lint` mantiene 4 errores previos en `apps/panel` (refs durante render y fast-refresh), ajenos a este cambio.
+- **Documentación relacionada:** `docs/panel-app-plan.md` (§7 F1), `docs/index.md`.
+
 ### Fix: el relay ya no puede quedar escuchando en loopback si arranca sin red
 
 - **Commit:** `fix(relay): reintentar autodetección de IP LAN al arrancar sin red`
