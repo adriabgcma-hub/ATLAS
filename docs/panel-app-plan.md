@@ -214,6 +214,11 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   `✅ Relay reiniciado (active)`, `/v1/health` OK y el relay escuchando otra vez
   en `192.168.100.26:8765`. El caso "relay colgado" se cubrirá con el watchdog
   de F5.
+- **Despliegue:** `./scripts/deploy-relay.sh --pull` (el check de cambios sin
+  commitear aborta también con `--push`, ver nota en `docs/implemented.md`).
+  Verificado en `atlas-hub`: `/v1/health` OK, `/panel/` sirve
+  `index-DaaFBFVS.js` (200, 231 604 B) y `index-CQ9_Qwgq.css` (200), y el asset
+  antiguo devuelve 404.
 
 ## 8. Pruebas
 

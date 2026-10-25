@@ -37,8 +37,11 @@ ssh_cmd() {
 }
 
 # 1) Cambios locales pendientes
-if [ "${1:-}" != "--pull" ]; then
-  if ! git diff --quiet || ! git diff --cached --quiet; then
+MODE="${1:-}"
+if [ "$MODE" != "--pull" ]; then
+  # `--push` sube lo ya commiteado sin exigir árbol limpio (habrá WIP de otros
+  # cambios); el resto de modos sí abortan si hay algo sin commitear.
+  if [ "$MODE" != "--push" ] && { ! git diff --quiet || ! git diff --cached --quiet; }; then
     echo "⚠️  Hay cambios sin commitear. Commitea manualmente antes de desplegar."
     echo "   Archivos modificados:"
     git status --short
