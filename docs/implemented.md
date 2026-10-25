@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### ATLAS Panel: aviso macOS al caer el relay (F4)
+
+- **Commit:** `feat(panel-app): aviso macOS al caer el relay (F4)`
+- **Fecha:** `2026-10-25`
+- **Descripción:** la app de barra de menús avisa cuando el relay deja de responder. Añade `tauri-plugin-notification` (2.7) registrado en Rust (`NotificationExt`); el bucle de salud, al detectar la transición a `RelayStatus::Down`, muestra una notificación `ATLAS · relay sin conexión` con el cuerpo `No se puede alcanzar <ATLAS_RELAY_URL>. Abre el panel para reiniciarlo.` Solo avisa al **entrar** en rojo (nunca en cada sondeo) y con un enfriamiento de 300 s para relays que oscilan; si al arrancar ya está caído avisa una vez. `on_action` del plugin: un clic (`tap`) abre la ventana del panel, sin reiniciar nada por su cuenta (la doble confirmación sigue en la UI). En dev el aviso está silenciado para no llenar el centro de notificaciones en cada recarga, con escape `ATLAS_PANEL_NOTIFY=1`. No requiere permisos nuevos en `capabilities/default.json` porque se emite desde Rust. Verificado: en dev con `ATLAS_PANEL_NOTIFY=1 ATLAS_RELAY_URL=http://127.0.0.1:9` el estado pasa a `relay sin conexión` y el aviso se emite sin error; en el bundle instalado lanzado con `open -n -a "$HOME/Applications/ATLAS Panel.app" --env ATLAS_RELAY_URL=http://127.0.0.1:9` aparece la notificación y el clic abre la ventana (confirmado por el usuario); vuelta a la normalidad con `/v1/health` 200. `cargo check --workspace`, `cargo test -p atlas-panel` y `cargo fmt --check` OK; bundle reconstruido con Apple Development (14,2 MiB), firma profunda válida e instalado en `~/Applications`.
+- **Documentación relacionada:** `docs/panel-app-plan.md` (§7 F4, §8), `AGENTS.md` (§ App ATLAS Panel: notificaciones).
+
 ### ATLAS Panel: reinicio del relay por SSH con clave restringida (F3)
 
 - **Commit:** `feat(panel-app): reinicio del relay por SSH con doble confirmación (F3)`

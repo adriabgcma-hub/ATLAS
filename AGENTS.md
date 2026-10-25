@@ -86,6 +86,13 @@ esté colgado. Si una app falla, la otra sigue funcionando.
   explícito del usuario** (modifica `~adria_admin/.ssh/authorized_keys`). Para
   rotar: generar clave nueva, añadir su línea con el mismo comando forzado,
   probar el reinicio y solo entonces borrar la anterior.
+- **Notificaciones (F4):** `tauri-plugin-notification` avisa **una vez por
+  caída** (solo al pasar a rojo, con enfriamiento de 5 min) y el clic abre la
+  ventana; no reinicia nada solo. En dev está silenciado: para probarlo, lanza
+  `ATLAS_PANEL_NOTIFY=1` (dev) o el bundle con
+  `open -n -a "$HOME/Applications/ATLAS Panel.app" --env
+  ATLAS_RELAY_URL=http://127.0.0.1:9`. Como el aviso se emite desde Rust, no
+  necesita permisos nuevos en `capabilities/default.json`.
 - **URL del relay:** `ATLAS_RELAY_URL` (por defecto
   `http://atlas-hub.local:8765`). No hardcodees IPs.
 - **Secretos:** nada de claves/tokens en el repo. La clave SSH de la app vive

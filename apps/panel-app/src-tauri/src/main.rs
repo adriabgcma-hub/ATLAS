@@ -24,12 +24,16 @@ use tauri::{
     AppHandle, Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_notification::NotificationExt;
 
 /// Base del relay en la LAN. No es un secreto. Por nombre (.local): la IP
 /// del servidor puede cambiar, el nombre no.
 const DEFAULT_RELAY_URL: &str = "http://atlas-hub.local:8765";
 
 const HEALTH_INTERVAL: Duration = Duration::from_secs(10);
+/// Aviso de caída: una notificación por caída, con este margen entre avisos
+/// para que un relay que oscila no genere una ráfaga.
+const NOTIFY_COOLDOWN: Duration = Duration::from_secs(300);
 
 /// Estado compartido mínimo: último estado conocido del relay (para rehacer
 /// el menú al cambiar el autoarranque) y si el autoarranque está disponible.
@@ -377,15 +381,60 @@ fn apply_status(app: &AppHandle, status: RelayStatus) {
 fn spawn_health_loop(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut last: Option<RelayStatus> = None;
+        let mut last_notice: Option<std::time::Instant> = None;
         loop {
             let status = fetch_health().await;
             if last != Some(status) {
                 apply_status(&app, status);
+                // Solo al entrar en "sin conexión" (nunca en cada sondeo) y con
+                // margen entre avisos. En dev se silencia para no molestar en
+                // cada recarga de `tauri dev`; `ATLAS_PANEL_NOTIFY=1` lo fuerza
+                // para poder probar el aviso sin montar el bundle.
+                let due = last_notice.is_none_or(|at| at.elapsed() >= NOTIFY_COOLDOWN);
+                if status == RelayStatus::Down && notifications_enabled() && due {
+                    notify_relay_down(&app);
+                    last_notice = Some(std::time::Instant::now());
+                }
                 last = Some(status);
             }
             tokio::time::sleep(HEALTH_INTERVAL).await;
         }
     });
+}
+
+/// Las notificaciones se silencian en dev (cada recarga de `tauri dev`
+/// dispararía avisos); `ATLAS_PANEL_NOTIFY=1` permite probarlas sin bundle.
+fn notifications_enabled() -> bool {
+    !tauri::is_dev() || std::env::var("ATLAS_PANEL_NOTIFY").is_ok()
+}
+
+/// Notificación macOS al caer el relay. Un clic abre la ventana (la
+/// confirmación del reinicio sigue viviendo en la UI).
+fn notify_relay_down(app: &AppHandle) {
+    let body = format!(
+        "No se puede alcanzar {}. Abre el panel para reiniciarlo.",
+        relay_url()
+    );
+    let result = app
+        .notification()
+        .builder()
+        .title("ATLAS · relay sin conexión")
+        .body(body)
+        .show();
+    if let Err(err) = result {
+        eprintln!("ATLAS Panel · no se pudo mostrar la notificación: {err}");
+    }
+}
+
+fn init_notifications(app: &AppHandle) {
+    let handle = app.clone();
+    if let Err(err) = app.notification().on_action(move |action| {
+        if action.action_id() == "tap" {
+            show_panel(&handle);
+        }
+    }) {
+        eprintln!("ATLAS Panel · notificaciones: {err}");
+    }
 }
 
 fn main() {
@@ -394,6 +443,7 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
         .manage(PanelState {
             status: Mutex::new(RelayStatus::Down),
         })
@@ -405,6 +455,10 @@ fn main() {
 
             // Primer arranque del bundle: activar el autoarranque al login.
             init_autostart(app.handle());
+
+            // Aviso de caída: registrar el clic antes de que el bucle emita el
+            // primero (el plugin descarta acciones anteriores al handler).
+            init_notifications(app.handle());
 
             let menu = build_menu(app.handle(), RelayStatus::Down)?;
             TrayIconBuilder::with_id("main")

@@ -1,10 +1,10 @@
 # ATLAS Panel — app macOS independiente (plan v1)
 
-Estado: **F1, F2 y F3 implementados** (barra de menús, autoarranque y
-reinicio del relay por SSH con clave restringida); bundle firmado y probado
-(2026-10-25; F3 pendiente de commit). Sustituye al panel web servido por el
-relay como *herramienta de control*, sin retirar `/panel/` (sigue disponible
-para otros clientes de la LAN).
+Estado: **F1–F4 implementadas** (barra de menús, autoarranque, reinicio del
+relay por SSH con clave restringida y aviso macOS al caer el relay); bundle
+firmado y probado (2026-10-25; F4 pendiente de commit). Sustituye al panel web
+servido por el relay como *herramienta de control*, sin retirar `/panel/` (sigue
+disponible para otros clientes de la LAN).
 
 Objetivo: una app de escritorio **independiente de la app principal de ATLAS**
 que permita ver el relay y **recuperarlo** (reinicio) aunque esté colgado, y
@@ -99,7 +99,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 | F1 | Scaffold Tauri, build de UI con `PANEL_BASE=./`, comandos HTTP — **hecha** |
 | F2 | Tray + polling de salud + ventana — **hecha** |
 | F3 | Clave restringida + reinicio con doble confirmación (comandos de instalación para `atlas-hub`) — **hecha** |
-| F4 | Notificaciones + autoarranque — **autoarranque hecho**; notificaciones pendientes |
+| F4 | Notificaciones + autoarranque — **hecha** (aviso macOS al caer el relay y autoarranque al login) |
 | F5 | Watchdog systemd + despliegue |
 | F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real — **bundle firmado**; prueba de caída pendiente |
 
@@ -169,8 +169,8 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   LaunchAgent creado con la ruta correcta; además se cargó con
   `launchctl bootstrap gui/$(id -u) "~/Library/LaunchAgents/ATLAS Panel.plist"`
   y launchd arrancó la app (`state = running`, `runs = 1`). **Login real
-  confirmado por el usuario (2026-10-25).** Queda pendiente la notificación de
-  caída (F4).
+  confirmado por el usuario (2026-10-25).** La notificación de caída se
+  implementó en F4 (ver más abajo).
 
 ### F3: qué hay ya
 
@@ -221,6 +221,36 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   `index-DaaFBFVS.js` (200, 231 604 B) y `index-CQ9_Qwgq.css` (200), y el asset
   antiguo devuelve 404.
 
+### F4: qué hay ya
+
+- **Plugin:** `tauri-plugin-notification` (2.x) registrado en el builder;
+  `tauri_plugin_notification::NotificationExt` en Rust. No hace falta permiso
+  en `capabilities/default.json` porque el aviso se emite desde Rust, no desde
+  la webview (`core:default` sigue siendo el único permiso).
+- **Cuándo avisa:** solo al **entrar** en `RelayStatus::Down` (transición
+  verde/ámbar → rojo), nunca en cada sondeo. Además hay un enfriamiento de
+  300 s (`NOTIFY_COOLDOWN`) por si el relay oscila. Si al arrancar ya está
+  caído, avisa una vez.
+- **Contenido:** título `ATLAS · relay sin conexión`, cuerpo
+  `No se puede alcanzar <ATLAS_RELAY_URL>. Abre el panel para reiniciarlo.`
+  Sin rutas privadas ni secretos.
+- **Clic:** `on_action` del plugin; `action_id == "tap"` → `show_panel`
+  (la confirmación del reinicio sigue en la UI, no se reinicia solo).
+- **En dev:** silenciado para no llenar el centro de notificaciones con cada
+  recarga de `tauri dev`; `ATLAS_PANEL_NOTIFY=1` fuerza el aviso para poder
+  probarlo sin montar el bundle.
+- **Verificado (2026-10-25):**
+  - En dev con `ATLAS_PANEL_NOTIFY=1 ATLAS_RELAY_URL=http://127.0.0.1:9`:
+    estado `relay sin conexión` y aviso emitido sin error.
+  - En el bundle instalado, lanzado con
+    `open -n -a "$HOME/Applications/ATLAS Panel.app" --env
+    ATLAS_RELAY_URL=http://127.0.0.1:9`: aparece la notificación y **al
+    pulsarla se abre la ventana del panel** (confirmado por el usuario).
+  - Vuelta a la normalidad sin la variable: proceso con el relay real y
+    `/v1/health` 200.
+- **Autoarranque:** ya cubierto en "F2 extra" (sigue activo; al login abre la
+  ventana además del icono, tal como pidió el usuario).
+
 ## 8. Pruebas
 
 - Dev: `cd apps/panel-app && npm run dev`; verificación visual con el usuario.
@@ -230,8 +260,13 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   segundos. Comprobar el toast `✅ Relay reiniciado (active)` y que el semáforo
   vuelve a verde. Equivalente por consola:
   `cargo test -p atlas-panel -- --ignored` (incluye `reinicia_el_relay_real`).
-- **Simulación de fallo**: `sudo systemctl stop atlas-relay` en `atlas-hub` →
-  la app debe mostrarlo y recuperarlo desde la UI.
+- **Notificaciones (F4):** lanzar el bundle con
+  `open -n -a "$HOME/Applications/ATLAS Panel.app" --env
+  ATLAS_RELAY_URL=http://127.0.0.1:9` (o `ATLAS_PANEL_NOTIFY=1` en dev):
+  comprobar que el aviso aparece **una vez**, que el clic abre la ventana y que
+  no se repite mientras el relay siga caído.
+- **Simulación de fallo real**: `sudo systemctl stop atlas-relay` en `atlas-hub`
+  (pide contraseña) → la app debe mostrarlo en rojo y recuperarlo desde la UI.
 - Independencia: cerrar/eliminar una app y comprobar que la otra sigue.
 - Verificar que no se exponen secretos ni rutas privadas en logs.
 
