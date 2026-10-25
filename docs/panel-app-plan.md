@@ -284,9 +284,15 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   `OK`; con `http://127.0.0.1:9` y `DRY_RUN=1` → `fallo 1/2`, luego
   `DRY RUN: reiniciaría atlas-relay` y contador a cero. `python3 -m py_compile`
   y `bash -n` OK.
-- **Pendiente en `atlas-hub`:** instalar con `scripts/deploy-healthcheck.sh`
-  (pide la contraseña) y probar la caída real (parar el relay → reinicio
-  automático en 1-2 min). Se anotará aquí el resultado.
+- **Verificado en `atlas-hub` (2026-10-25):** instalado con
+  `scripts/deploy-healthcheck.sh`; `atlas-health.timer` `enabled`/`active` y
+  primera pasada `Result=success`. Prueba de caída real: `systemctl stop
+  atlas-relay` a las 23:24 → `/v1/health` sin respuesta durante dos pasadas →
+  el watchdog reinició el servicio a las **23:26:01** (`ActiveEnterTimestamp`
+  coincide con la pasada del timer) y `/v1/health` volvió a 200 a las 23:26:05,
+  con el contador de nuevo a 0. Ojo: `NRestarts` de la unidad sigue en 0 porque
+  systemd no cuenta los reinicios manuales (`systemctl restart`), solo los de
+  su política `Restart=`.
 
 ## 8. Pruebas
 

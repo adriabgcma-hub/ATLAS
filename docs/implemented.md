@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Watchdog del relay: reinicio automático en atlas-hub (F5)
+
+- **Commit:** `feat(health): watchdog systemd que reinicia el relay si no responde (F5)`
+- **Fecha:** `2026-10-25`
+- **Descripción:** red de seguridad en el servidor, independiente del Mac. `deploy/server/atlas-healthcheck.py` (solo stdlib) comprueba `/v1/health` en la IP LAN autodetectada (nunca loopback), con timeout 3 s, y exige HTTP 200 + `ok: true`; tras **2 fallos consecutivos** ejecuta `systemctl restart atlas-relay`. Guarda el contador en `/var/lib/atlas-health/failures` y lo reinicia tras cada intento (si el servicio no levanta, espera otra tanda en vez de martillear cada minuto); si el servicio está `activating`/`deactivating` no lo pisa. Modo seco (`ATLAS_HEALTH_DRY_RUN=1`) y overrides de URL/timeout/umbral/estado/unidad para poder probarlo sin tocar el servicio; exit 0 salvo error real al reiniciar. Unidades: `atlas-health.service` (oneshot, root, `StateDirectory`, `TimeoutStartSec=45`, `Nice`, `NoNewPrivileges`, `ProtectHome`, `PrivateTmp`, `ProtectKernelTunables`, `ProtectControlGroups`) y `atlas-health.timer` (90 s tras arranque, luego 60 s). Instalación única con `scripts/deploy-healthcheck.sh` (copia las unidades, `sudo` interactivo, `daemon-reload`, `enable --now` y primera pasada; aborta si el script no está ya en `/opt/atlas/repo`). Verificado: en local sano contra el relay real y en seco con `1/2` → `2/2` → `DRY RUN: reiniciaría`; en `atlas-hub` timer `enabled`/`active` con primera pasada `Result=success` y prueba de caída real: relay parado a las 23:24, reinicio automático a las 23:26:01 y `/v1/health` 200 a las 23:26:05, contador a 0. `NRestarts` sigue en 0 porque systemd no cuenta los reinicios manuales.
+- **Documentación relacionada:** `docs/relay.md` (§9 watchdog y su operación), `docs/panel-app-plan.md` (§7 F5), `AGENTS.md` (watchdog y mantenimiento).
+
 ### ATLAS Panel: aviso macOS al caer el relay (F4)
 
 - **Commit:** `feat(panel-app): aviso macOS al caer el relay (F4)`

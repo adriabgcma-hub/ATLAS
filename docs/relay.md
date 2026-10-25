@@ -239,6 +239,9 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   ATLAS_HEALTH_STATE_DIR=/tmp/atlas-health python3
   deploy/server/atlas-healthcheck.py` dos veces → `1/2` y luego
   `DRY RUN: reiniciaría atlas-relay`.
+- Verificado el 2026-10-25 en `atlas-hub`: parando `atlas-relay` a las 23:24,
+  el watchdog lo reinició a las 23:26:01 y `/v1/health` volvió a 200 a las
+  23:26:05. `NRestarts` sigue a 0 porque no cuenta reinicios manuales.
 
 ### Prohibiciones explícitas
 
