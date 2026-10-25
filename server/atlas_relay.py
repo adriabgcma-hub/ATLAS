@@ -1405,7 +1405,22 @@ def main() -> int:
     cfg = read_env()
     os.makedirs(cfg["data_dir"], exist_ok=True)
 
-    host = cfg["host"] or lan_ip()
+    if cfg["host"]:
+        host = cfg["host"]
+    else:
+        # Autodetección: si el arranque pilla la red a medias (Wi-Fi/DHCP lento
+        # tras un reinicio), `lan_ip()` cae a loopback y el relay quedaría
+        # inalcanzable para el panel y el frontal. Reintentamos hasta 60 s y,
+        # si sigue sin haber IP LAN, fallamos para que systemd reintente.
+        host = lan_ip()
+        waited = 0
+        while ipaddress.ip_address(host).is_loopback and waited < 60:
+            log("sin IP LAN aún; reintentando autodetección en 2 s…")
+            time.sleep(2)
+            waited += 2
+            host = lan_ip()
+        if ipaddress.ip_address(host).is_loopback:
+            fail_config("no se pudo autodetectar la IP LAN (¿red no lista al arrancar?)")
     try:
         ipaddress.ip_address(host)
     except ValueError:
