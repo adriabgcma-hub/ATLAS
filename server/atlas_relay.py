@@ -1083,6 +1083,11 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "AtlasRelay/3"
+        # HTTP/1.1 mantiene la conexión (keep-alive): el panel sondea varias
+        # rutas cada 2 s y así no paga un handshake nuevo en cada petición.
+        # El timeout cierra las conexiones ociosas para no dejar hilos colgados.
+        protocol_version = "HTTP/1.1"
+        timeout = 15
 
         def _cors(self) -> None:
             origin = self.headers.get("Origin", "")
