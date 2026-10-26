@@ -118,7 +118,7 @@ hace la petición si está en la lista. Misma LAN indispensable.
 Panel en `/panel/` (build Vite de `apps/panel/dist`), recortado a la realidad
 de atlas-hub (2026-10):
 
-- **Portada** (rediseño 2026-10-26, local): barra superior con marca
+- **Portada** (rediseño desplegado 2026-10-26): barra superior con marca
   `HUB PANEL`, hora del snapshot y píldora de estado (LED + servicios activos /
   en vuelo / cola), más 6 KPIs (servicios, peticiones, memoria, disco, uptime y
   energía). Los datos del Mac que antes iban en «Este Mac» viven ahora ahí.

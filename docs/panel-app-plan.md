@@ -4,10 +4,11 @@ Estado: **F1–F5 implementadas y publicadas** (barra de menús, autoarranque,
 reinicio del relay por SSH con clave restringida, aviso macOS al caer el relay
 y watchdog systemd en el servidor; F5 en `137e90b`, docs en `d62818b`). **F6**
 tiene el bundle firmado y ya usa icono propio, pero la prueba de caída real
-sigue pendiente; el rediseño de la UI y los iconos están **en local sin
-commitear** (2026-10-26). Sustituye al panel web servido por el relay como
-*herramienta de control*, sin retirar `/panel/` (sigue disponible para otros
-clientes de la LAN).
+sigue pendiente. El rediseño de la UI y los iconos están commiteados
+(`7e457b6`, 2026-10-26), con el panel web desplegado en `atlas-hub` y el bundle
+`Hub Panel.app` reconstruido en local. Sustituye al panel web servido por el
+relay como *herramienta de control*, sin retirar `/panel/` (sigue disponible
+para otros clientes de la LAN).
 
 Objetivo: una app de escritorio **independiente de la app principal de ATLAS**
 que permita ver el relay y **recuperarlo** (reinicio) aunque esté colgado, y
@@ -123,9 +124,9 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
     (base `./`, empaquetado en el bundle)
 - Dev de la app: `cd apps/panel-app && npm run dev` (Vite del panel en 5174 +
   ventana Tauri; los `invoke` se registran en el log solo en debug).
-- Iconos: propios desde 2026-10-26 (**cambios locales sin commitear**): rombo
-  `◈` cian sobre cuadro oscuro en el bundle y rombo verde/ámbar/rojo en la
-  bandeja. Ya no se copian de la app principal.
+- Iconos: propios desde 2026-10-26 (commit `7e457b6`): rombo `◈` cian sobre
+  cuadro oscuro en el bundle y rombo verde/ámbar/rojo en la bandeja. Ya no se
+  copian de la app principal.
 - Verificado: `cargo check --workspace`, `cargo test -p atlas-panel`
   (2 tests de validación de rutas + prueba real de `/v1/health` con
   `--include-ignored`), `npm run build` de la app principal y arranque real de
@@ -325,7 +326,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   Panel.app`, `lsappinfo` con `type="Foreground"`, relay en verde y el usuario
   confirmó Dock + Cmd+Tab + menú con la ventana y solo icono al cerrarla.
 
-### Rediseño de la UI del panel (2026-10-26, local sin commitear)
+### Rediseño de la UI del panel (2026-10-26, commit `7e457b6`)
 
 - **Portada nueva en `apps/panel`** (la misma para `/panel/` y la app): barra
   superior fija con marca `HUB PANEL`, hora del snapshot y píldora de estado
