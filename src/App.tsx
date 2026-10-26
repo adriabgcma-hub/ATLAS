@@ -27,9 +27,10 @@ import type {
 import './App.css'
 
 const LETTER_CADENCE_MS = 26
-/** URL del relay. En dev (navegador) se sondea directo; en Tauri el núcleo
- *  drena el relay vía ATLAS_RELAY_URL y el frontend usa IPC. */
-const RELAY_URL = import.meta.env.VITE_RELAY_URL || 'http://192.168.100.26:8765'
+/** URL del relay (por nombre: la IP del servidor puede cambiar). En dev
+ *  (navegador) se sondea directo; en Tauri el núcleo drena el relay vía
+ *  ATLAS_RELAY_URL y el frontend usa IPC. */
+const RELAY_URL = import.meta.env.VITE_RELAY_URL || 'http://atlas-hub.local:8765'
 /** Cada cuánto se drena el relay (el cursor evita reprocesar). */
 const RELAY_DRAIN_MS = 4000
 

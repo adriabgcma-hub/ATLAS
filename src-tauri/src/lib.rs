@@ -9,9 +9,10 @@ use std::time::Duration;
 use atlas_core::{AtlasError, Source, codes, get_events, get_session, post_cancel, post_send};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-/// URL del cerebro en la red local. No es un secreto.
+/// URL del cerebro en la red local. No es un secreto. Por nombre (.local):
+/// la IP del servidor puede cambiar, el nombre no.
 fn default_relay_url() -> String {
-    std::env::var("ATLAS_RELAY_URL").unwrap_or_else(|_| "http://192.168.100.26:8765".to_string())
+    std::env::var("ATLAS_RELAY_URL").unwrap_or_else(|_| "http://atlas-hub.local:8765".to_string())
 }
 
 struct CoreState {
