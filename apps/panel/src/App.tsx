@@ -35,12 +35,12 @@ export default function App() {
   }, [])
 
   const { data: snap, error: sysErr } = usePoll<Snapshot>(
-    () => j<Snapshot>('/v1/system'), 5000)
-  const { data: health } = usePoll<Health>(() => j<Health>('/v1/health'), 10000)
-  const { data: session } = usePoll<SessionResp>(() => j<SessionResp>('/v1/session'), 8000)
-  const { data: stats } = usePoll<Stats>(() => j<Stats>('/v1/stats'), 30000)
+    () => j<Snapshot>('/v1/system'), 2000)
+  const { data: health } = usePoll<Health>(() => j<Health>('/v1/health'), 2000)
+  const { data: session } = usePoll<SessionResp>(() => j<SessionResp>('/v1/session'), 2000)
+  const { data: stats } = usePoll<Stats>(() => j<Stats>('/v1/stats'), 5000)
   const { data: logs } = usePoll<{ lines: string[]; total: number }>(
-    () => j<LogsResp>('/v1/logs?tail=140'), 15000)
+    () => j<LogsResp>('/v1/logs?tail=140'), 2000)
 
   const [pending, setPending] = useState<Pending | null>(null)
   const [resolving, setResolving] = useState(false)
@@ -70,7 +70,7 @@ export default function App() {
     setRestarting(true)
     try {
       const res = await restartRelay()
-      if (res.ok) flash(`✅ Relay reiniciado (${res.state})`)
+      if (res.ok) flash(`Relay reiniciado (${res.state})`)
       else flash(`El relay no quedó activo: ${res.state || 'sin estado'}`, true)
     } catch (exc) {
       flash(`No se pudo reiniciar: ${(exc as Error).message}`, true)
@@ -99,7 +99,7 @@ export default function App() {
       if (!res.executed) {
         flash('Acción denegada.')
       } else if (res.result?.ok) {
-        flash(`✅ ${pending.summary}`)
+        flash(pending.summary)
       } else {
         flash(`Falló: ${res.result?.error ?? res.result?.output ?? 'sin detalle'}`, true)
       }
@@ -188,7 +188,7 @@ export default function App() {
           <Kpi label="Uptime" value={res?.uptime_s != null ? fmtDuration(res.uptime_s) : '—'}
                sub={res?.temp_c != null ? `${res.temp_c.toFixed(0)} °C` : 'servidor'} />
           <Kpi label="Energía" value={res?.battery ? `${res.battery.cap_pct}%` : (res?.ac_connected ? 'AC' : '—')}
-               sub={res?.battery ? `${res.battery.status} · ${res?.ac_connected ? 'AC ✓' : 'batería'}` : 'sin batería'} />
+               sub={res?.battery ? `${res.battery.status} · ${res?.ac_connected ? 'AC' : 'batería'}` : 'sin batería'} />
         </section>
       )}
 

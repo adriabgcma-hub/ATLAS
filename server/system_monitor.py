@@ -30,7 +30,7 @@ import subprocess
 import threading
 import time
 
-SNAPSHOT_TTL_S = 10
+SNAPSHOT_TTL_S = 3
 SUBPROC_TIMEOUT_S = 6
 OP_TTL_S = 30
 ACTION_VERBS = ("start", "stop", "restart")

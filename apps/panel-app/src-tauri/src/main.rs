@@ -4,7 +4,7 @@
 //! `apps/panel`) llama a `api_get`/`api_post` mediante `invoke`, así que no
 //! hay CORS ni peticiones directas del webview al relay.
 //!
-//! F2: icono de barra de menús con semáforo, sondeo de `/v1/health` cada 10 s
+//! F2: icono de barra de menús con semáforo, sondeo de `/v1/health` cada 5 s
 //! y ventana que se oculta al cerrar (la app sigue viva en la barra).
 //!
 //! Seguridad: el webview nunca elige la URL del relay, solo la ruta; el
@@ -30,7 +30,7 @@ use tauri_plugin_notification::NotificationExt;
 /// del servidor puede cambiar, el nombre no.
 const DEFAULT_RELAY_URL: &str = "http://atlas-hub.local:8765";
 
-const HEALTH_INTERVAL: Duration = Duration::from_secs(10);
+const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
 /// Aviso de caída: una notificación por caída, con este margen entre avisos
 /// para que un relay que oscila no genere una ráfaga.
 const NOTIFY_COOLDOWN: Duration = Duration::from_secs(300);
@@ -59,9 +59,9 @@ impl RelayStatus {
 
     fn menu_label(self) -> &'static str {
         match self {
-            RelayStatus::Ok => "🟢 Relay: OK",
-            RelayStatus::Degraded => "🟠 Relay: degradado",
-            RelayStatus::Down => "🔴 Relay: sin conexión",
+            RelayStatus::Ok => "Relay: OK",
+            RelayStatus::Degraded => "Relay: degradado",
+            RelayStatus::Down => "Relay: sin conexión",
         }
     }
 
