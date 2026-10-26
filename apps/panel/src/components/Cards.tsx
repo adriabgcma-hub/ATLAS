@@ -1,12 +1,15 @@
-import { fmtDuration, gb, type Health, type Snapshot, type Stats, type Unit } from '../api'
+import type { Health, Snapshot, Stats, Unit } from '../api'
 
 /* Léxico visual: tarjetas sueltas; nada de framework (tokens en panel.css). */
 
-export function Card({ title, badge, wide, tone, children }: {
-  title: string; badge?: string; wide?: boolean; tone?: 'err'; children: React.ReactNode
+export function Card({ title, badge, wide, tone, className, children }: {
+  title: string; badge?: string; wide?: boolean; tone?: 'err'; className?: string
+  children: React.ReactNode
 }) {
+  const cls = ['card', wide ? 'wide' : '', tone === 'err' ? 'err' : '', className ?? '']
+    .filter(Boolean).join(' ')
   return (
-    <section className={`card${wide ? ' wide' : ''}${tone === 'err' ? ' err' : ''}`}>
+    <section className={cls}>
       <h2>{title}{badge ? <span className="badge">{badge}</span> : null}</h2>
       {children}
     </section>
@@ -68,37 +71,12 @@ export function PortsCard({ snap }: { snap: Snapshot }) {
   )
 }
 
-export function MacCard({ snap }: { snap: Snapshot }) {
-  const r = snap.resources
-  const disk = r.disk_root
-  return (
-    <Card title="Este Mac (homelab)" badge={fmtDuration(r.uptime_s)}>
-      <div className="metrics">
-        <div className="metric"><div className="k">Memoria</div>
-          <div className="v">{r.mem_used_pct ?? '—'}<small> %</small></div></div>
-        <div className="metric"><div className="k">Disco</div>
-          <div className="v">{disk
-            ? (Math.round((100 * (disk.total - disk.free)) / disk.total) + '% · ' + gb(disk.free) + ' libres')
-            : '—'}</div></div>
-        <div className="metric"><div className="k">Temperatura</div>
-          <div className="v">{r.temp_c != null ? r.temp_c.toFixed(0) : '—'}<small> °C</small></div></div>
-        <div className="metric"><div className="k">Carga (1m)</div>
-          <div className="v">{r.load_1 ?? '—'}</div></div>
-        <div className="metric"><div className="k">Batería</div>
-          <div className="v">{r.battery ? (`${r.battery.cap_pct}% · ${r.battery.status}`) : '—'}</div></div>
-        <div className="metric"><div className="k">Red</div>
-          <div className="v">{r.ac_connected ? 'AC ✓' : 'AC ✗'}</div></div>
-      </div>
-    </Card>
-  )
-}
-
 export function RelayCard({ health, stats, relayUnit }: {
   health: Health | null; stats: Stats | null; relayUnit: Unit | undefined
 }) {
   const usage = stats?.token_usage
   return (
-    <Card title="Relay Atlas · Telegram" badge={`llm: ${health?.llm ?? '—'} · cal: ${health?.calendar ?? '—'}`}>
+    <Card title="Relay Atlas" wide badge={`llm: ${health?.llm ?? '—'} · cal: ${health?.calendar ?? '—'}`}>
       <div className="row">
         <span className={`dot ${health?.telegram === 'enabled' ? 'ok' : 'dim'}`}></span>
         <div className="grow">
@@ -116,6 +94,10 @@ export function RelayCard({ health, stats, relayUnit }: {
         </span>
       </div>
       <div className="metrics">
+        <div className="metric"><div className="k">Proveedor LLM</div>
+          <div className="v">{health?.llm ?? '—'}</div></div>
+        <div className="metric"><div className="k">Calendario</div>
+          <div className="v">{health?.calendar ?? '—'}</div></div>
         <div className="metric"><div className="k">Llamadas LLM</div>
           <div className="v">{usage?.calls ?? 0}</div></div>
         <div className="metric"><div className="k">Tokens total</div>
@@ -143,7 +125,7 @@ export function PeticionesCard({ health, session, onCancelAll }: {
   const state = session?.session?.state ?? 'idle'
   const chip = ['idle', 'completed', 'failed', 'cancelled'].includes(state) ? '' : 'warn'
   return (
-    <Card title="Peticiones" badge={state}>
+    <Card title="Peticiones" wide badge={state}>
       <div className="row">
         <span className={`state-chip ${chip}`}>{state}</span>
         {health && health.inflight > 0 && (
@@ -151,27 +133,29 @@ export function PeticionesCard({ health, session, onCancelAll }: {
         )}
       </div>
       {msgs.length === 0 && <div className="empty">Sin mensajes en la sesión activa.</div>}
-      {msgs.slice(-12).map(m => (
-        <div className="row" key={m.requestId + m.role}>
-          <span className={`state-chip ${m.role === 'user' ? 'on' : ''}`}>
-            {m.role === 'user'
-              ? (m.source === 'telegram' ? 'TG · TÚ' : 'TÚ')
-              : 'ATLAS'}
-          </span>
-          <div className="grow">
-            <div className="sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {m.content.length > 140 ? m.content.slice(0, 140) + '…' : m.content}
+      <div className="msg-list">
+        {msgs.slice(-12).map(m => (
+          <div className="row" key={m.requestId + m.role}>
+            <span className={`state-chip ${m.role === 'user' ? 'on' : ''}`}>
+              {m.role === 'user'
+                ? (m.source === 'telegram' ? 'TG · TÚ' : 'TÚ')
+                : 'ATLAS'}
+            </span>
+            <div className="grow">
+              <div className="sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {m.content.length > 140 ? m.content.slice(0, 140) + '…' : m.content}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </Card>
   )
 }
 
 export function LogsCard({ lines, total }: { lines: string[]; total: number }) {
   return (
-    <Card title="Log del relay" badge={`${lines.length} lineas · ${total} en total`} wide>
+    <Card title="Log del relay" wide className="log-card" badge={`${lines.length} lineas · ${total} en total`}>
       <pre className="logs">{lines.join('\n') || 'Log vacío.'}</pre>
     </Card>
   )

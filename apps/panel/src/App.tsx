@@ -1,15 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
-  IN_TAURI, j, post, restartRelay, usePoll,
+  IN_TAURI, fmtDuration, gb, j, post, restartRelay, usePoll,
   type Health, type LogsResp, type OpResp, type SessionResp, type Snapshot, type Stats,
 } from './api'
 import {
-  Card, ConfirmCard, LogsCard, MacCard, PeticionesCard,
+  Card, ConfirmCard, LogsCard, PeticionesCard,
   PortsCard, RelayCard, RestartCard, UnitsCard,
 } from './components/Cards'
 
 interface Pending { op: string; kind: string; summary: string }
+
+/** KPI de la portada: cifra grande + contexto. */
+function Kpi({ label, value, unit, sub, bar }: {
+  label: string; value: string | number; unit?: string; sub?: string; bar?: number
+}) {
+  return (
+    <div className="kpi">
+      <div className="kpi-k">{label}</div>
+      <div className="kpi-v">{value}{unit && value !== '—' ? <small>{unit}</small> : null}</div>
+      {bar != null && (
+        <div className="kpi-bar"><span style={{ width: `${Math.max(0, Math.min(100, bar))}%` }} /></div>
+      )}
+      {sub ? <div className="kpi-sub">{sub}</div> : null}
+    </div>
+  )
+}
 
 export default function App() {
   const [fadeOut, setFadeOut] = useState(true)
@@ -104,10 +120,12 @@ export default function App() {
     const relayUnit = snap.units.find(u => u.unit === 'atlas-relay.service')
     return (
       <>
+        {/* Orden de la portada: primero el relay (lo que se vigila), luego
+            servicios/puertos y la actividad, y al final el log. Los datos del
+            Mac viven en los KPIs: no se duplican en una tarjeta. */}
+        <RelayCard health={health} stats={stats} relayUnit={relayUnit} />
         <UnitsCard snap={snap} onAct={(unit, verb) => ask('service', { unit, verb })} />
         <PortsCard snap={snap} />
-        <MacCard snap={snap} />
-        <RelayCard health={health} stats={stats} relayUnit={relayUnit} />
         <PeticionesCard health={health} session={session}
                         onCancelAll={() => ask('cancel_all', {})} />
         <LogsCard lines={logs?.lines ?? []} total={logs?.total ?? 0} />
@@ -115,20 +133,65 @@ export default function App() {
     )
   }, [snap, sysErr, health, stats, session, logs, ask])
 
+  const units = snap?.units ?? []
+  const res = snap?.resources
+  const disk = res?.disk_root
+  const diskPct = disk ? Math.round((100 * (disk.total - disk.free)) / disk.total) : null
+  const activeUnits = units.filter(u => u.active === 'active').length
+  const tone = health?.ok ? 'ok' : health ? 'warn' : sysErr ? 'down' : 'dim'
+  const statusText = { ok: 'RELAY OK', warn: 'DEGRADADO', down: 'SIN CONEXIÓN', dim: 'CONECTANDO' }[tone]
+  const statusSub = health
+    ? `${activeUnits}/${units.length || '—'} servicios · ${health.inflight} en vuelo · ${health.queue} en cola`
+    : 'atlas-hub no responde'
+
   return (
-    <div style={{ opacity: fadeOut ? 0.65 : 1, transition: 'opacity 1.2s ease' }}>
-      {IN_TAURI && (
-        <div className="panel-tools">
-          <button className="btn restart" disabled={restartStep !== 0}
-                  onClick={() => setRestartStep(1)}>
-            Reiniciar relay
-          </button>
+    <div className="shell" style={{ opacity: fadeOut ? 0.65 : 1, transition: 'opacity 1.2s ease' }}>
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">◈</span>
+          <div>
+            <div className="brand-name">HUB PANEL</div>
+            <div className="brand-sub">
+              atlas-hub · {snap?.generated_at?.slice(11, 19) ?? '—'} UTC
+            </div>
+          </div>
         </div>
+
+        <div className={`relay-pill ${tone}`}>
+          <span className="relay-led" aria-hidden="true" />
+          <div className="relay-copy">
+            <div className="relay-state">{statusText}</div>
+            <div className="relay-sub">{statusSub}</div>
+          </div>
+        </div>
+
+        {IN_TAURI && (
+          <div className="topbar-actions">
+            <button className="btn restart" disabled={restartStep !== 0}
+                    onClick={() => setRestartStep(1)}>
+              Reiniciar relay
+            </button>
+          </div>
+        )}
+      </header>
+
+      {snap && (
+        <section className="kpis" aria-label="Resumen">
+          <Kpi label="Servicios" value={`${activeUnits}/${units.length}`} sub="unidades activas" />
+          <Kpi label="Peticiones" value={health?.inflight ?? 0}
+               sub={`cola ${health?.queue ?? 0} · ${health?.events ?? 0} eventos`} />
+          <Kpi label="Memoria" value={res?.mem_used_pct ?? '—'} unit="%"
+               bar={res?.mem_used_pct ?? 0} sub={`carga ${res?.load_1 ?? '—'}`} />
+          <Kpi label="Disco" value={diskPct ?? '—'} unit="%"
+               bar={diskPct ?? 0}
+               sub={res?.disk_root ? `${gb(res.disk_root.free)} libres` : 'sin datos'} />
+          <Kpi label="Uptime" value={res?.uptime_s != null ? fmtDuration(res.uptime_s) : '—'}
+               sub={res?.temp_c != null ? `${res.temp_c.toFixed(0)} °C` : 'servidor'} />
+          <Kpi label="Energía" value={res?.battery ? `${res.battery.cap_pct}%` : (res?.ac_connected ? 'AC' : '—')}
+               sub={res?.battery ? `${res.battery.status} · ${res?.ac_connected ? 'AC ✓' : 'batería'}` : 'sin batería'} />
+        </section>
       )}
-      <div className="app-label">
-        ATLAS · PANEL
-        <small>atlas-hub · {snap?.generated_at?.slice(11, 19) ?? '—'} UTC</small>
-      </div>
+
       <main className="grid">{viewer}</main>
       {pending && (
         <ConfirmCard summary={pending.summary} resolving={resolving} onDecide={decide} />
