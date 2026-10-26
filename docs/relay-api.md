@@ -10,6 +10,11 @@ Base por defecto en clientes: `http://atlas-hub.local:8765` (ver
 de `atlas-hub` (autodetectada) y el acceso se hace por su nombre `.local` o
 por la IP LAN del momento. `127.0.0.1` solo aparece en ejemplos de caída local.
 
+Transporte: **HTTP/1.1 con keep-alive** (el servidor cierra conexiones ociosas
+tras 15 s). Todas las respuestas llevan `Content-Length`; el `204` de CORS no
+tiene cuerpo. El panel sondea cada 2 s, así que reutiliza la conexión y evita
+pagar un TCP nuevo (y el intento IPv6 del nombre `.local`) en cada petición.
+
 ## Eventos y tipos
 
 Los eventos usan los mismos nombres y formas que `contracts.md`:
@@ -75,7 +80,7 @@ PANEL).
 
 ### `GET /v1/system`
 
-Snapshot best-effort del host atlas-hub (con caché de 10 s), fuente del panel:
+Snapshot best-effort del host atlas-hub (con caché de 3 s), fuente del panel:
 
 ```json
 {"generated_at": "…",

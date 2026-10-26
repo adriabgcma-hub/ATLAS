@@ -84,7 +84,7 @@ ni ciclo de vida: si una app falla, la otra sigue.
 
 - **UI compartida**: reutiliza `apps/panel` con otro build (base `./`), de modo
   que `/panel/` y la app muestran las mismas tarjetas.
-- **Barra de menús**: icono con semáforo que sondea `/v1/health` cada 10 s;
+- **Barra de menús**: icono con semáforo que sondea `/v1/health` cada 5 s;
   menú con estado, abrir panel, reiniciar relay y autoarranque al login.
 - **Ventana**: tarjetas del panel; con la ventana visible la app es `Regular`
   (Dock, Cmd+Tab, menú) y al cerrarla pasa a `Accessory` (solo icono).

@@ -138,7 +138,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 - **Barra de menús:** `TrayIconBuilder` con id `main`, icono de semáforo
   embebido en el binario (`icons/tray-ok|warn|down.png`, 44×44) y tooltip
   `Hub Panel · relay <estado>`.
-- **Sondeo de salud:** cada 10 s a `/v1/health`. `ok:true` → verde; respuesta
+- **Sondeo de salud:** cada 5 s a `/v1/health`. `ok:true` → verde; respuesta
   HTTP no-2xx o JSON sin `ok:true` → ámbar (degradado); error de red/timeout →
   rojo (sin conexión). Solo se actualiza el icono/menú cuando cambia el
   estado, y se emite el evento `panel://relay-status` para fases siguientes.
@@ -202,7 +202,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   dentro de Tauri (`IN_TAURI`), y `RestartCard` con dos pasos (Continuar → Sí,
   reiniciar). El menú de la barra activa "Reiniciar relay…", abre la ventana y
   emite `panel://restart-requested`. Al terminar muestra toast
-  `✅ Relay reiniciado (active)` o el error. Nada de comandos arbitrarios: la UI
+  `Relay reiniciado (active)` o el error. Nada de comandos arbitrarios: la UI
   solo invoca `restart_relay`.
 - **Privilegios**: el `sudo` sin contraseña lo aporta
   `deploy/server/atlas-deploy.sudoers` (restart/is-active/status de
@@ -218,7 +218,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   `atlas-relay` en `atlas-hub` (`systemctl stop`, `inactive` y
   `/v1/health` sin respuesta); la app pasó a semáforo rojo y el reinicio desde
   la UI (doble confirmación) devolvió el servicio a `active`, con toast
-  `✅ Relay reiniciado (active)`, `/v1/health` OK y el relay escuchando otra vez
+  `Relay reiniciado (active)`, `/v1/health` OK y el relay escuchando otra vez
   en `192.168.100.26:8765`. El caso "relay colgado" se cubrirá con el watchdog
   de F5.
 - **Despliegue:** `./scripts/deploy-relay.sh --pull` (el check de cambios sin
@@ -338,7 +338,13 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   calendario, bot, tokens y cola), **Peticiones** (ancha) y **Log del relay**
   (ancha). El relay va primero. La tarjeta ámbar de confirmación se mantiene.
 - **Estilo**: tokens de color (cian/ámbar/rojo), rejilla de fondo y tarjetas
-  con blur. Sin framework: un solo frontend y un solo CSS compartido.
+  con blur. Sin framework: un solo frontend y un solo CSS compartido. Sin
+  emojis en la UI ni en el menú de la bandeja (los estados se leen por texto y
+  por el LED/icono).
+- **Frescura**: `/v1/system`, `/v1/health`, `/v1/session` y `/v1/logs` se
+  sondean cada **2 s**; `/v1/stats` cada 5 s. La caché del snapshot del
+  servidor baja a **3 s** para no lanzar `systemctl`/`ss` en cada petición.
+  El semáforo de la bandeja sondea cada 5 s.
 - **Build web regenerado**: `index-DSAldxug.js` / `index-BcTWnyd2.css`.
 - **Ojo con Git**: la regla general ignora `dist/`, pero `apps/panel/dist` está
   versionado a mano. Tras un build hay que `git add -f apps/panel/dist`
@@ -351,7 +357,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 - Producción: `npm run build` (Tauri) y prueba de la app generada.
 - **Reinicio (F3):** probar el botón y el menú de la barra (doble confirmación)
   contra el relay real; solo con permiso, porque corta el servicio unos
-  segundos. Comprobar el toast `✅ Relay reiniciado (active)` y que el semáforo
+  segundos. Comprobar el toast `Relay reiniciado (active)` y que el semáforo
   vuelve a verde. Equivalente por consola:
   `cargo test -p atlas-panel -- --ignored` (incluye `reinicia_el_relay_real`).
 - **Notificaciones (F4):** lanzar el bundle con

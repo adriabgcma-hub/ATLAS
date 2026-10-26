@@ -6,6 +6,20 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Relay: keep-alive HTTP/1.1 para bajar la latencia del panel
+
+- **Commit:** `perf(relay): keep-alive HTTP/1.1 para bajar la latencia del panel`
+- **Fecha:** `2026-10-26`
+- **Descripción:** el relay respondía con HTTP/1.0 y `Connection: close`, de modo que cada sondeo del panel abría un TCP nuevo y pagaba el intento previo de IPv6 link-local del nombre `atlas-hub.local` (~220 ms) antes de caer a IPv4 (~8 ms). El `Handler` pasa a `protocol_version = "HTTP/1.1"` con `timeout = 15` para cerrar conexiones ociosas; el servidor ya era `ThreadingHTTPServer`, así que las conexiones vivas no bloquean a otros clientes, y todas las respuestas llevan `Content-Length` (el `204` de CORS no tiene cuerpo). Verificado tras desplegar `12bff7e`: `curl` muestra `HTTP/1.1 200 OK` y `Re-using existing connection`; 10 peticiones seguidas a `/v1/health` dan 0,23 s la primera (0,218 s de conexión) y ~0,010 s las demás; en caliente `/v1/system` 0,011 s (0,051 s la primera si regenera el snapshot), `/v1/session` 0,012 s, `/v1/stats` 0,010 s y `/v1/logs` 0,015 s. `/v1/health` OK y watchdog sin cambios.
+- **Documentación relacionada:** `docs/relay.md` (§6 frescura y transporte), `docs/relay-api.md` (transporte HTTP).
+
+### Panel: refresco cada 2 s y sin emojis en UI y bandeja
+
+- **Commit:** `perf(panel): refresco cada 2 s y sin emojis en UI y bandeja`
+- **Fecha:** `2026-10-26`
+- **Descripción:** el panel se refresca más rápido y deja de usar emojis. En `apps/panel/src/App.tsx` los sondeos pasan a 2 s para `/v1/system`, `/v1/health`, `/v1/session` y `/v1/logs`, y a 5 s para `/v1/stats`; el snapshot del servidor (`server/system_monitor.py`) se cachea 3 s en vez de 10 s para no lanzar `systemctl`/`ss` en cada petición. Se quitan los emojis de los toasts (`Relay reiniciado (active)`), del KPI de energía (`AC`) y del menú de la bandeja (`Relay: OK`, `Relay: degradado`, `Relay: sin conexión`); el semáforo de la app pasa a sondear cada 5 s. Build web regenerado (`index-Dp5nL5mO.js`, `index-BcTWnyd2.css`). Verificado: `npm run build` del panel y de la app, `cargo check --workspace`, `cargo fmt -p atlas-panel -- --check` y búsqueda sin emojis en los builds. Desplegado con `./scripts/deploy-relay.sh --push`: `/panel/assets/index-Dp5nL5mO.js` 200 (232850 B), el asset anterior `index-DSAldxug.js` 404 y `/v1/health` OK.
+- **Documentación relacionada:** `docs/panel-app-plan.md` (§ Rediseño de la UI del panel), `docs/relay.md` (§6), `docs/relay-api.md` (`/v1/system`), `AGENTS.md` (§ Semáforo).
+
 ### Hub Panel: rediseño de portada e iconos propios
 
 - **Commit:** `feat(panel): rediseño de portada e iconos propios de Hub Panel`

@@ -90,7 +90,7 @@ Si una app falla, la otra sigue funcionando.
   marcador de autoarranque) y el binario interno (`Contents/MacOS/atlas-panel`,
   nombre del crate). No cambies el identificador sin mover la clave y el
   marcador, o el reinicio deja de funcionar.
-- **Semáforo:** sondea `/v1/health` cada 10 s (verde OK, ámbar degradado, rojo
+- **Semáforo:** sondea `/v1/health` cada 5 s (verde OK, ámbar degradado, rojo
   sin conexión). La app **no** reinicia sola: el reinicio es siempre manual y
   confirmado; en el servidor sí hay watchdog automático (`atlas-health.timer`,
   ver la sección del relay).

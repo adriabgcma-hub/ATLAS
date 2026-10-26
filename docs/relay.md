@@ -127,6 +127,15 @@ de atlas-hub (2026-10):
   por modelo, cola/vuelo), **Peticiones** (ancha: mensajes con origen TG/local
   + cancelar en vuelo) y **Log del relay** (ancha). El relay va primero.
   Tarjeta ámbar de confirmación para acciones.
+- **Frescura**: el panel sondea `/v1/system`, `/v1/health`, `/v1/session` y
+  `/v1/logs` cada 2 s y `/v1/stats` cada 5 s; el snapshot del servidor se
+  cachea 3 s (evita lanzar `systemctl`/`ss` en cada petición). Sin emojis: los
+  estados se leen por texto y LED/icono.
+- **Transporte**: el relay responde HTTP/1.1 con keep-alive (cierra conexiones
+  ociosas a los 15 s). El primer handshake tarda ~0,2 s porque el nombre
+  `.local` intenta antes la IPv6 link-local; con la conexión reutilizada cada
+  endpoint cálido tarda ~10 ms. Antes (HTTP/1.0 + `Connection: close`) cada
+  sondeo pagaba ese handshake completo.
 - **Fuera del panel hasta que existan en atlas-hub** (no se observan, ni se
   piden): docker/contenedores, nube Nextcloud (compose, tailscale serve),
   unidades del servidor antiguo (cups, macfan, lid-monitor, smartmontools,
