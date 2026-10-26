@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Hub Panel: ventana bajo demanda y ~16 MB en reposo
+
+- **Commit:** `perf(panel-app): ventana bajo demanda y 16 MB en reposo`
+- **Fecha:** `2026-10-26`
+- **Descripción:** la app de barra de menús deja de mantener el `WKWebView` vivo en reposo. `tauri.conf.json` pasa a `"windows": []` y la ventana la crea `create_panel_window()` dentro de `show_panel()` (1100×820, mínimo 720×520, centrada) cuando se abre el panel desde el icono, el menú, una notificación o el arranque de la app; al cerrar, `CloseRequested` la destruye (`window.destroy()`) y solo queda la bandeja. Para que no se quede detrás, `show_panel()` hace `show()`, `unminimize()` y `set_focus()` también cuando la ventana acaba de nacer. Destruir la última ventana dispara `RunEvent::ExitRequested`, así que `PanelState.closing_window` permite `api.prevent_exit()` solo en Cmd+W (cerrar oculta); "Salir" y Cmd+Q siguen cerrando la app. Con la ventana cerrada, "Reiniciar relay…" marca `restart_requested` y la UI lo lee con el comando `pending_restart` (sin consumir, por el doble montaje de React StrictMode) y lo limpia con `clear_restart_request` al cancelar o terminar. Memoria medida con `footprint`: ~16 MB en reposo (antes ~110 MB) y ~31 MB app + ~64 MB `WebKit WebContent` con la ventana abierta. Verificado: `cargo check --workspace`, `cargo test -p atlas-panel`, `cargo fmt -p atlas-panel -- --check`, bundle firmado con Apple Development (14,63 MiB, firma profunda válida) instalado con `ditto` en `~/Applications`, y prueba del usuario de abrir/cerrar, foco al abrir y flujo de reinicio (incluida la cancelación). Build web regenerado (`index-kGpyvxw7.js`, `index-BcTWnyd2.css`) y desplegado en `atlas-hub`.
+- **Documentación relacionada:** `AGENTS.md` (§ App Hub Panel: ventana y ciclo de la ventana), `docs/panel-app-plan.md` (§7 "Ventana bajo demanda y memoria", §6, §8), `docs/architecture.md` (§ Hub Panel: ventana).
+
 ### Relay: keep-alive HTTP/1.1 para bajar la latencia del panel
 
 - **Commit:** `perf(relay): keep-alive HTTP/1.1 para bajar la latencia del panel`

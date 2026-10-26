@@ -26,6 +26,11 @@ export interface RestartResp {
 /** Reinicia el relay por SSH (solo app Tauri; comando fijo en authorized_keys). */
 export const restartRelay = () => invoke<RestartResp>('restart_relay')
 
+/** El menú de la barra pidió reiniciar antes de crear la ventana. */
+export const hasPendingRestart = () => invoke<boolean>('pending_restart')
+
+export const clearPendingRestart = () => invoke<void>('clear_restart_request')
+
 async function tauriRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase()
   try {

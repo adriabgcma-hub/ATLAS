@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
-  IN_TAURI, fmtDuration, gb, j, post, restartRelay, usePoll,
+  IN_TAURI, clearPendingRestart, fmtDuration, gb, hasPendingRestart, j, post,
+  restartRelay, usePoll,
   type Health, type LogsResp, type OpResp, type SessionResp, type Snapshot, type Stats,
 } from './api'
 import {
@@ -63,7 +64,17 @@ export default function App() {
     listen('panel://restart-requested', () => setRestartStep(1))
       .then(fn => { if (cancelled) fn(); else dispose = fn })
       .catch(() => {})
+    // La ventana se crea al abrirla: si el menú pidió reiniciar antes de que
+    // existiera, el aviso se recoge al montar en vez de perderse.
+    hasPendingRestart()
+      .then(pending => { if (!cancelled && pending) setRestartStep(1) })
+      .catch(() => {})
     return () => { cancelled = true; dispose?.() }
+  }, [])
+
+  const cancelRestart = useCallback(() => {
+    setRestartStep(0)
+    if (IN_TAURI) clearPendingRestart().catch(() => {})
   }, [])
 
   const doRestart = useCallback(async () => {
@@ -77,6 +88,7 @@ export default function App() {
     } finally {
       setRestarting(false)
       setRestartStep(0)
+      if (IN_TAURI) clearPendingRestart().catch(() => {})
     }
   }, [flash])
 
@@ -198,7 +210,7 @@ export default function App() {
       )}
       {restartStep !== 0 && (
         <RestartCard step={restartStep} busy={restarting}
-                     onCancel={() => setRestartStep(0)}
+                     onCancel={cancelRestart}
                      onNext={() => setRestartStep(2)}
                      onRestart={doRestart} />
       )}

@@ -4,14 +4,18 @@
 //! `apps/panel`) llama a `api_get`/`api_post` mediante `invoke`, así que no
 //! hay CORS ni peticiones directas del webview al relay.
 //!
-//! F2: icono de barra de menús con semáforo, sondeo de `/v1/health` cada 5 s
-//! y ventana que se oculta al cerrar (la app sigue viva en la barra).
+//! F2: icono de barra de menús con semáforo y sondeo de `/v1/health` cada 5 s.
+//! La ventana se crea bajo demanda (al abrirla) y se destruye al cerrarla: en
+//! reposo la app es solo el icono de la barra y no mantiene el webview vivo.
 //!
 //! Seguridad: el webview nunca elige la URL del relay, solo la ruta; el
 //! backend valida la ruta (`/v1/...`) y añade la base fija. El reinicio del
 //! relay (SSH con clave restringida) llega en F3 y será un comando fijo.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex, OnceLock,
+};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -21,7 +25,8 @@ use tauri::{
     image::Image,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_notification::NotificationExt;
@@ -36,9 +41,14 @@ const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
 const NOTIFY_COOLDOWN: Duration = Duration::from_secs(300);
 
 /// Estado compartido mínimo: último estado conocido del relay (para rehacer
-/// el menú al cambiar el autoarranque) y si el autoarranque está disponible.
+/// el menú al cambiar el autoarranque), si el autoarranque está disponible y
+/// si el menú pidió reiniciar antes de que existiera la ventana.
 struct PanelState {
     status: Mutex<RelayStatus>,
+    restart_requested: AtomicBool,
+    /// La ventana se está destruyendo: la salida que Tauri pide al quedarse
+    /// sin ventanas hay que ignorarla (la app vive en la barra).
+    closing_window: AtomicBool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -300,14 +310,71 @@ fn build_menu(app: &AppHandle, status: RelayStatus) -> tauri::Result<Menu<tauri:
     )
 }
 
+/// Crea la ventana solo cuando hace falta. Sin ventana declarada en
+/// `tauri.conf.json`, el webview no existe al arrancar y no consume RAM
+/// mientras la app vive solo en la barra de menús.
+fn create_panel_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("Hub Panel")
+        .inner_size(1100.0, 820.0)
+        .min_inner_size(720.0, 520.0)
+        .resizable(true)
+        .fullscreen(false)
+        .center()
+        .build()
+}
+
 fn show_panel(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     set_window_policy(app, true);
+    if app.get_webview_window("main").is_none() {
+        match create_panel_window(app) {
+            Ok(_) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Hub Panel · ventana creada");
+            }
+            Err(err) => {
+                eprintln!("Hub Panel · no se pudo crear la ventana: {err}");
+                #[cfg(target_os = "macos")]
+                set_window_policy(app, false);
+                return;
+            }
+        }
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
+        // También en la ventana recién creada: sin esto aparece detrás y sin
+        // foco, porque la app estaba en la barra (Accessory).
         let _ = window.set_focus();
     }
+}
+
+/// Abre el panel pidiendo el reinicio. Si la ventana ya existe, el evento
+/// llega al listener montado; si hay que crearla, se deja marcado el aviso y
+/// la UI lo recoge al montarse (`pending_restart`), sin depender de tiempos.
+fn request_restart(app: &AppHandle) {
+    if app.get_webview_window("main").is_some() {
+        show_panel(app);
+        let _ = app.emit("panel://restart-requested", ());
+        return;
+    }
+    if let Some(state) = app.try_state::<PanelState>() {
+        state.restart_requested.store(true, Ordering::SeqCst);
+    }
+    #[cfg(debug_assertions)]
+    eprintln!("Hub Panel · reinicio pedido sin ventana");
+    show_panel(app);
+}
+
+#[tauri::command]
+fn pending_restart(state: tauri::State<'_, PanelState>) -> bool {
+    state.restart_requested.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn clear_restart_request(state: tauri::State<'_, PanelState>) {
+    state.restart_requested.store(false, Ordering::SeqCst);
 }
 
 /// Con la ventana visible la app se comporta como una app normal (menú
@@ -456,7 +523,7 @@ fn init_notifications(app: &AppHandle) {
 }
 
 fn main() {
-    let code = match tauri::Builder::default()
+    let app = match tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -464,14 +531,19 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(PanelState {
             status: Mutex::new(RelayStatus::Down),
+            restart_requested: AtomicBool::new(false),
+            closing_window: AtomicBool::new(false),
         })
-        .invoke_handler(tauri::generate_handler![api_get, api_post, restart_relay])
+        .invoke_handler(tauri::generate_handler![
+            api_get,
+            api_post,
+            restart_relay,
+            pending_restart,
+            clear_restart_request
+        ])
         .setup(|app| {
-            // Con la ventana abierta al arrancar: app normal (Dock, Cmd+Tab y
-            // menú superior); al cerrarla pasará a solo icono de barra.
-            #[cfg(target_os = "macos")]
-            set_window_policy(app.handle(), true);
-
+            // Al abrir la app se muestra el panel; al cerrarlo se destruye el
+            // webview y queda solo el icono de la barra (sin Dock ni Cmd+Tab).
             // Primer arranque del bundle: activar el autoarranque al login.
             init_autostart(app.handle());
 
@@ -489,8 +561,7 @@ fn main() {
                     "open" => show_panel(app),
                     "restart" => {
                         // La confirmación doble vive en la UI; el menú solo la abre.
-                        show_panel(app);
-                        let _ = app.emit("panel://restart-requested", ());
+                        request_restart(app);
                     }
                     "autostart" => toggle_autostart(app),
                     "quit" => app.exit(0),
@@ -508,28 +579,52 @@ fn main() {
                 })
                 .build(app)?;
 
+            show_panel(app.handle());
             spawn_health_loop(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Cerrar la ventana no cierra la app: queda en la barra de menús
-            // (y deja de aparecer en Dock/Cmd+Tab hasta que se reabra).
+            // Cerrar la ventana no cierra la app: se destruye el webview y la
+            // app queda en la barra de menús (sin Dock/Cmd+Tab hasta reabrir).
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                if let Some(state) = window.app_handle().try_state::<PanelState>() {
+                    state.restart_requested.store(false, Ordering::SeqCst);
+                    state.closing_window.store(true, Ordering::SeqCst);
+                    if window.destroy().is_err() {
+                        state.closing_window.store(false, Ordering::SeqCst);
+                    }
+                } else {
+                    let _ = window.destroy();
+                }
+                #[cfg(debug_assertions)]
+                eprintln!("Hub Panel · ventana destruida");
                 #[cfg(target_os = "macos")]
                 set_window_policy(window.app_handle(), false);
             }
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
     {
-        Ok(()) => 0,
+        Ok(app) => app,
         Err(err) => {
             eprintln!("Hub Panel no pudo arrancar: {err}");
-            1
+            std::process::exit(1);
         }
     };
-    std::process::exit(code);
+
+    app.run(|app, event| {
+        // Cerrar el panel destruye la única ventana y Tauri pide salir; esa
+        // salida automática se ignora (la app vive en la barra). "Salir" y
+        // Cmd+Q no marcan `closing_window`, así que sí salen.
+        if let RunEvent::ExitRequested { api, .. } = event {
+            let closing = app
+                .try_state::<PanelState>()
+                .is_some_and(|state| state.closing_window.swap(false, Ordering::SeqCst));
+            if closing {
+                api.prevent_exit();
+            }
+        }
+    });
 }
 
 #[cfg(test)]

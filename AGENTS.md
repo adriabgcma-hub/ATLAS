@@ -96,9 +96,19 @@ Si una app falla, la otra sigue funcionando.
   Ojo: la regla `dist/` del `.gitignore` también cubre `apps/panel/dist`, que
   está versionado a mano; tras un build hay que `git add -f apps/panel/dist`
   (incluidos los assets nuevos) y comprobar que se borran los viejos.
-- **Ventana:** cerrarla (Cmd+W) solo la oculta; la app sigue en la barra de
-  menús. Se reabre con clic izquierdo en el icono o con "Abrir panel". Para
-  salir de verdad: menú "Salir" o Cmd+Q.
+- **Ventana:** al lanzar la app se abre el panel; cerrarla (Cmd+W) **destruye el
+  webview** (no lo oculta) y la app sigue en la barra de menús. Se reabre
+  enfocada con clic izquierdo en el icono o con "Abrir panel". El webview solo
+  vive mientras la ventana está abierta: en reposo la app queda en ~16 MB
+  (con la ventana abierta, ~31 MB + ~64 MB del `WebContent`). Para salir de
+  verdad: menú "Salir" o Cmd+Q.
+- **Ciclo de la ventana:** no hay ventana declarada en `tauri.conf.json`;
+  `show_panel()` la crea con `WebviewWindowBuilder` (`index.html`, 1100×820,
+  mínimo 720×520) y `CloseRequested` la destruye. Como al destruir la última
+  ventana Tauri pide salir, `RunEvent::ExitRequested` ignora esa salida con el
+  flag `closing_window`; "Salir" y Cmd+Q no lo marcan y salen normal. No
+  vuelvas a ocultarla en vez de destruirla: el webview seguiría vivo y
+  consumiendo RAM.
 - **Dock, Cmd+Tab y menú superior:** dependen de la política de activación.
   Con la **ventana visible** la app usa `ActivationPolicy::Regular` (sale en
   Dock, Cmd+Tab y menú superior, como una app normal); al cerrarla pasa a
@@ -118,9 +128,11 @@ Si una app falla, la otra sigue funcionando.
   ver la sección del relay).
 - **Reinicio del relay (F3):** solo mediante SSH con clave restringida y doble
   confirmación. Dos entradas: botón "Reiniciar relay" (arriba a la derecha,
-  solo dentro de la app) y menú de la barra "Reiniciar relay…" (abre la ventana
-  y emite `panel://restart-requested`). La confirmación (Continuar → Sí,
-  reiniciar) vive en React; el comando IPC `restart_relay` no acepta parámetros
+  solo dentro de la app) y menú de la barra "Reiniciar relay…" (si la ventana
+  existe emite `panel://restart-requested`; si no, la crea y deja marcado
+  `pending_restart`, que la UI recoge al montar). La confirmación (Continuar →
+  Sí, reiniciar) vive en React; el comando IPC `restart_relay` no acepta
+  parámetros
   y ejecuta siempre `ssh -i <clave> atlas-hub panel-restart` (host fijo,
   timeout 25 s). El comando remoto real está en `authorized_keys`:
   `command="sudo systemctl restart atlas-relay && sudo systemctl is-active

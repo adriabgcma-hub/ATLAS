@@ -91,8 +91,9 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   panel", "Reiniciar relay…", "Abrir al iniciar sesión" y "Salir".
 - **Ventana**: mismas tarjetas del panel (servicios, puertos, Mac, relay,
   peticiones, logs) + botón "Reiniciar relay" (solo en la app) con doble
-  confirmación. Con la ventana abierta la app es normal (Dock, Cmd+Tab, menú
-  superior); al cerrarla queda solo el icono de barra.
+  confirmación. Al lanzar la app se abre el panel y la app es normal (Dock,
+  Cmd+Tab, menú superior); al cerrarla se destruye el webview y queda solo el
+  icono de barra (~16 MB en reposo).
 - **Notificaciones**: una por caída (sin spam), con enlace a la ventana.
 - **Autoarranque**: toggle con `tauri-plugin-autostart`, apagado por defecto.
 
@@ -144,9 +145,11 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   estado, y se emite el evento `panel://relay-status` para fases siguientes.
 - **Menú:** estado actual (deshabilitado), separador, "Abrir panel",
   "Reiniciar relay…" (deshabilitado hasta F3) y "Salir" (⌘Q).
-- **Ventana:** cerrarla (Cmd+W) la oculta y la app sigue en la barra; clic
-  izquierdo en el icono o "Abrir panel" la vuelve a mostrar. `Cmd+Q` o
-  "Salir" terminan la app.
+- **Ventana:** al lanzar la app se abre el panel; cerrarla (Cmd+W) destruye el
+  webview y la app sigue en la barra. Clic izquierdo en el icono o "Abrir
+  panel" la crea otra vez y la enfoca. `Cmd+Q` o "Salir" terminan la app.
+- **Menú "Reiniciar relay…"** con la ventana cerrada: crea el panel y deja
+  `pending_restart`, que la UI recoge al montar para abrir la confirmación.
 - **macOS:** política de activación `Accessory` (sin icono en el Dock).
 - Verificado en dev: arranque real con relay accesible → `relay OK` y la UI
   sondeando por IPC; arranque con `ATLAS_RELAY_URL=http://127.0.0.1:9` →
@@ -350,6 +353,34 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   versionado a mano. Tras un build hay que `git add -f apps/panel/dist`
   (incluidos los assets nuevos) y confirmar que se borran los viejos; si no,
   el `index.html` del repo apuntaría a ficheros ausentes.
+
+### Ventana bajo demanda y memoria (2026-10-26)
+
+- **Problema:** la ventana (y su `WKWebView`) se creaba en el arranque y solo se
+  ocultaba al cerrar; en reposo la app ocupaba ~110 MB de huella.
+- **Solución:** `tauri.conf.json` deja `"windows": []` y la ventana la crea
+  `create_panel_window()` (`WebviewWindowBuilder`, 1100×820, mínimo 720×520,
+  centrada) dentro de `show_panel()`. Al cerrar, `CloseRequested` llama a
+  `window.destroy()`: el webview desaparece de verdad y solo queda el icono de
+  la barra. El arranque abre la ventana llamando a `show_panel()` en `setup`.
+- **Enfoque:** al crear la ventana, `show_panel()` hace `show()`,
+  `unminimize()` y `set_focus()` para que la app pase a primer plano aunque la
+  ventana acabe de nacer.
+- **Cerrar sin salir:** destruir la última ventana dispara
+  `RunEvent::ExitRequested`; un flag `closing_window` de `PanelState` hace
+  `api.prevent_exit()` **solo** en ese caso, así Cmd+W cierra el panel sin
+  salir de la app y "Salir"/Cmd+Q siguen terminándola.
+- **Menú con la ventana cerrada:** "Reiniciar relay…" ya no puede emitir un
+  evento a una ventana inexistente; marca `restart_requested` en
+  `PanelState`, abre la ventana y la UI consulta `pending_restart`. Se lee sin
+  consumir (React StrictMode monta dos veces el efecto en dev) y se limpia con
+  `clear_restart_request` al cancelar o al terminar.
+- **Memoria medida (`footprint`):** ~16 MB de app en reposo (antes ~110 MB) y
+  ~31 MB app + ~64 MB `WebKit WebContent` con la ventana abierta.
+- **Verificado:** `cargo check --workspace`, `cargo test -p atlas-panel`,
+  `cargo fmt -p atlas-panel -- --check`, bundle firmado (14,63 MiB) e instalado
+  con `ditto` en `~/Applications`; el usuario confirmó abrir/cerrar, foco al
+  abrir y el flujo de reinicio (incluida la cancelación) desde la app.
 
 ## 8. Pruebas
 

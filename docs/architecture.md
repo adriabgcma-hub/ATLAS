@@ -86,8 +86,10 @@ ni ciclo de vida: si una app falla, la otra sigue.
   que `/panel/` y la app muestran las mismas tarjetas.
 - **Barra de menús**: icono con semáforo que sondea `/v1/health` cada 5 s;
   menú con estado, abrir panel, reiniciar relay y autoarranque al login.
-- **Ventana**: tarjetas del panel; con la ventana visible la app es `Regular`
-  (Dock, Cmd+Tab, menú) y al cerrarla pasa a `Accessory` (solo icono).
+- **Ventana**: tarjetas del panel, **creada bajo demanda** al abrir o al pulsar
+  el icono y **destruida** al cerrarla (Cmd+W oculta sin salir de la app). En
+  reposo solo queda la bandeja (~16 MB de huella). Con la ventana visible la app
+  es `Regular` (Dock, Cmd+Tab, menú) y al cerrarla pasa a `Accessory`.
 - **Reinicio**: SSH con clave `ed25519` restringida a un comando forzado de
   `systemctl restart atlas-relay`; doble confirmación en la UI.
 - **Aviso**: notificación macOS una vez por caída del relay.
