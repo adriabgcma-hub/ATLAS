@@ -1,10 +1,13 @@
 # Hub Panel — app macOS independiente (plan v1)
 
-Estado: **F1–F5 implementadas** (barra de menús, autoarranque, reinicio del
-relay por SSH con clave restringida, aviso macOS al caer el relay y watchdog
-systemd en el servidor); bundle firmado y probado (2026-10-25; F5 pendiente de
-commit). Sustituye al panel web servido por el relay como *herramienta de
-control*, sin retirar `/panel/` (sigue disponible para otros clientes de la LAN).
+Estado: **F1–F5 implementadas y publicadas** (barra de menús, autoarranque,
+reinicio del relay por SSH con clave restringida, aviso macOS al caer el relay
+y watchdog systemd en el servidor; F5 en `137e90b`, docs en `d62818b`). **F6**
+tiene el bundle firmado y ya usa icono propio, pero la prueba de caída real
+sigue pendiente; el rediseño de la UI y los iconos están **en local sin
+commitear** (2026-10-26). Sustituye al panel web servido por el relay como
+*herramienta de control*, sin retirar `/panel/` (sigue disponible para otros
+clientes de la LAN).
 
 Objetivo: una app de escritorio **independiente de la app principal de ATLAS**
 que permita ver el relay y **recuperarlo** (reinicio) aunque esté colgado, y
@@ -102,7 +105,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 | F3 | Clave restringida + reinicio con doble confirmación (comandos de instalación para `atlas-hub`) — **hecha** |
 | F4 | Notificaciones + autoarranque — **hecha** (aviso macOS al caer el relay y autoarranque al login) |
 | F5 | Watchdog systemd + despliegue — **hecha** (healthcheck + timer en `atlas-hub`) |
-| F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real — **bundle firmado**; prueba de caída pendiente |
+| F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real — **bundle firmado + icono propio** (local); prueba de caída pendiente |
 
 ### F1: qué hay ya
 
@@ -120,7 +123,9 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
     (base `./`, empaquetado en el bundle)
 - Dev de la app: `cd apps/panel-app && npm run dev` (Vite del panel en 5174 +
   ventana Tauri; los `invoke` se registran en el log solo en debug).
-- Iconos: de momento copiados de la app principal; el icono propio llega en F6.
+- Iconos: propios desde 2026-10-26 (**cambios locales sin commitear**): rombo
+  `◈` cian sobre cuadro oscuro en el bundle y rombo verde/ámbar/rojo en la
+  bandeja. Ya no se copian de la app principal.
 - Verificado: `cargo check --workspace`, `cargo test -p atlas-panel`
   (2 tests de validación de rutas + prueba real de `/v1/health` con
   `--include-ignored`), `npm run build` de la app principal y arranque real de
@@ -319,6 +324,25 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   `CFBundleExecutable = atlas-panel`, app corriendo desde `~/Applications/Hub
   Panel.app`, `lsappinfo` con `type="Foreground"`, relay en verde y el usuario
   confirmó Dock + Cmd+Tab + menú con la ventana y solo icono al cerrarla.
+
+### Rediseño de la UI del panel (2026-10-26, local sin commitear)
+
+- **Portada nueva en `apps/panel`** (la misma para `/panel/` y la app): barra
+  superior fija con marca `HUB PANEL`, hora del snapshot y píldora de estado
+  del relay (LED + servicios activos / en vuelo / cola).
+- **Fila de 6 KPIs**: servicios, peticiones, memoria, disco, uptime y energía.
+  La tarjeta `MacCard` desaparece: RAM, disco, temperatura, carga, batería y AC
+  pasan a los KPIs (sin duplicar datos).
+- **Tarjetas**: Servicios, Puertos, **Relay Atlas** (ancha; proveedor LLM,
+  calendario, bot, tokens y cola), **Peticiones** (ancha) y **Log del relay**
+  (ancha). El relay va primero. La tarjeta ámbar de confirmación se mantiene.
+- **Estilo**: tokens de color (cian/ámbar/rojo), rejilla de fondo y tarjetas
+  con blur. Sin framework: un solo frontend y un solo CSS compartido.
+- **Build web regenerado**: `index-DSAldxug.js` / `index-BcTWnyd2.css`.
+- **Ojo con Git**: la regla general ignora `dist/`, pero `apps/panel/dist` está
+  versionado a mano. Tras un build hay que `git add -f apps/panel/dist`
+  (incluidos los assets nuevos) y confirmar que se borran los viejos; si no,
+  el `index.html` del repo apuntaría a ficheros ausentes.
 
 ## 8. Pruebas
 

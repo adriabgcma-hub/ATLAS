@@ -33,7 +33,7 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 8. **Claves Tavily en `.env`:** existen pero sin uso en código (`rg` sin resultados).
    Fuera de alcance de esta fase.
 
-## Estado actual (2026-10-12)
+## Estado actual (revisado 2026-10-26)
 
 - [x] `InputBar` abajo a la izquierda + letras al orbe vía `ScenePort`.
 - [x] Contratos TS↔núcleo (`Source`, `MessageAppended`; `contracts.md` ampliado).
@@ -45,11 +45,13 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       cancelación desde la barra).
 - [x] Pruebas (`npm run build`, `npm run lint`, `npm run test`,
       `cargo test -p atlas-core`, `cargo check --workspace`, humo del relay).
-- [ ] Verificación visual manual (orbe, letras, estados, redimensionado).
-- [ ] Commit publicado con permiso explícito.
-- Cambios **sin commitear** (ver `git status`).
+- [x] Verificación visual manual (cubierta por el uso continuado y por las
+      verificaciones posteriores de F3–F5).
+- [x] Commit publicado: `Fase 2: canales, relay y sesiones`.
 
-## Fase 3 — Cerebro en Python + panel (en curso)> El LLM vive en el relay 24/7 con la app cerrada (decisión del usuario).
+## Fase 3 — Cerebro en Python + panel (cerrada)
+
+> El LLM vive en el relay 24/7 con la app cerrada (decisión del usuario).
 > Rust adelgaza a transporte; el panel muestra mensajes del LLM vengan de
 > donde vengan.
 
@@ -65,9 +67,9 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       hidrata sin letras y solo vuelan los mensajes nuevos (vistos por
       `requestId:rol`).
 - [ ] Verificación Telegram real con app cerrada.
-- [ ] Commit publicado con permiso explícito.
+- [x] Commit publicado: `Fase 3: cerebro en Python y panel` (`307aa7a`).
 
-## Fase 4 — Tools de calendario (en curso)
+## Fase 4 — Tools de calendario (cerrada salvo re-verificación)
 
 > `calendar_read` (todos) + `calendar_write` (solo editables, con
 > confirmación). Bucle multi-turno en el cerebro, UI de confirmación.
@@ -81,11 +83,11 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       historiales (`seq` persistido en disco + reset por `sessionId` en reducer).
 - [x] Comandos `/clear` (sesión nueva real) y `/help` (sin gastar Groq).
 - [ ] Re-verificar lectura/borrado del evento de prueba al despejar throttle.
-- [ ] Commit publicado con permiso explícito.
+- [x] Commit publicado: `Fase 4: tools de calendario` (`a191559`).
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 
-- `GROQ_API_KEY_1/2/3` — rotación Groq (pendiente de uso).
+- `GROQ_API_KEY_1/2/3` — rotación Groq (en uso por el cerebro).
 - `TELEGRAM_BOT_TOKEN` — token de @BotFather.
 - `TELEGRAM_ALLOWED_USER_IDS` — IDs de Telegram autorizados (rechazar el resto).
 

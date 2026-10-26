@@ -6,6 +6,20 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Hub Panel: rediseño de portada e iconos propios
+
+- **Commit:** `feat(panel): rediseño de portada e iconos propios de Hub Panel`
+- **Fecha:** `2026-10-26`
+- **Descripción:** portada nueva en la UI compartida (`apps/panel`, sirve a `/panel/` y a la app): topbar fija con marca `HUB PANEL`, hora del snapshot y píldora de estado del relay (LED + servicios activos / en vuelo / cola), fila de 6 KPIs (servicios, peticiones, memoria, disco, uptime y energía) y tarjetas de Relay Atlas, Peticiones y Log a ancho completo; la antigua tarjeta `MacCard` desaparece porque sus datos pasan a los KPIs. Se añaden iconos propios de Hub Panel (rombo cian en el bundle, rombo verde/ámbar/rojo en la bandeja) en lugar de los copiados de la app principal. Build web regenerado (`index-DSAldxug.js`, `index-BcTWnyd2.css`) y bundle `Hub Panel.app` reconstruido con Apple Development y firma profunda válida. Verificado: `npm run build` de la app principal, `npm run build` del panel, `cargo check --workspace`, `cargo fmt -p atlas-panel -- --check` y `codesign --verify --deep --strict` OK. Nota: `dist/` está ignorado por `.gitignore`; los assets del panel se versionan con `git add -f`.
+- **Documentación relacionada:** `docs/panel-app-plan.md` (§ Rediseño de la UI del panel), `docs/relay.md` (§6, §10), `AGENTS.md` (§ Builds separados).
+
+### Fix: URL del relay por nombre en frontal y núcleo Tauri
+
+- **Commit:** `fix(frontend): usar atlas-hub.local como URL por defecto del relay`
+- **Fecha:** `2026-10-26`
+- **Descripción:** el frontal web en dev (`src/App.tsx`) y el núcleo Tauri (`src-tauri/src/lib.rs`) dejan de usar la IP `192.168.100.26` como defecto y pasan a `http://atlas-hub.local:8765`, coherente con `ATLAS_RELAY_URL` y con la regla de no hardcodear IPs (la IP del servidor puede cambiar). Verificado con `npm run build` y `cargo check --workspace`.
+- **Documentación relacionada:** `docs/relay-api.md` (base por defecto), `AGENTS.md` (§ URL del relay).
+
 ### Hub Panel: renombrado del bundle y ventana con Dock/Cmd+Tab
 
 - **Commit:** `feat(panel-app): renombrar el bundle a Hub Panel y ventana con Dock/Cmd+Tab`

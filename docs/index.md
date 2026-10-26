@@ -13,4 +13,4 @@ Documentación del proyecto Atlas.
 - [Tools](./tools.md): reservado para el catálogo de herramientas de Atlas.
 - [API del cerebro](./relay-api.md): documenta la API HTTP del relay Python (eventos, sesiones, límites y entorno).
 - [Relay: manual de operaciones](./relay.md): qué es el relay, dónde corre (atlas-hub), la nube y el panel — para colaboradores y otras IAs.
-- [Panel: app macOS independiente](./panel-app-plan.md): plan de la app de barra de menús para monitorizar y reiniciar el relay aunque esté colgado.
+- [Hub Panel: app macOS independiente](./panel-app-plan.md): plan y estado de la app de barra de menús (`apps/panel-app`) para monitorizar y reiniciar el relay aunque esté colgado (F1–F5 hechas; F6 pendiente de prueba de caída real).

@@ -5,7 +5,10 @@ Frontera HTTP entre el cerebro (`server/atlas_relay.py`) y sus clientes
 la red local**: fuera de loopback o del mismo /24 responde `403
 same_network_only`. Sin autenticación adicional: la red local ES el perímetro.
 
-Base por defecto: `http://127.0.0.1:8765` (ver `ATLAS_RELAY_URL`).
+Base por defecto en clientes: `http://atlas-hub.local:8765` (ver
+`ATLAS_RELAY_URL`). El relay **no escucha en loopback**: se enlaza a la IP LAN
+de `atlas-hub` (autodetectada) y el acceso se hace por su nombre `.local` o
+por la IP LAN del momento. `127.0.0.1` solo aparece en ejemplos de caída local.
 
 ## Eventos y tipos
 
@@ -22,8 +25,9 @@ En `/v1/events` cada evento lleva además `seq` (cursor monótono) y `kind`
 ### `GET /v1/health`
 
 ```json
-{"ok": true, "telegram": "enabled|disabled", "llm": "groq|stub", "events": 5,
- "queue": 0, "inflight": 0, "bot": {"id": 123, "username": "atlas_bot", "first_name": "Atlas"}}
+{"ok": true, "telegram": "enabled|disabled", "llm": "groq|stub",
+ "calendar": "ok|standby|disabled", "events": 5, "queue": 0, "inflight": 0,
+ "bot": {"id": 123, "username": "atlas_bot", "first_name": "Atlas"}}
 ```
 
 `queue` e `inflight` son peticiones en cola/en vuelo; `bot` solo aparece con

@@ -118,11 +118,15 @@ hace la petición si está en la lista. Misma LAN indispensable.
 Panel en `/panel/` (build Vite de `apps/panel/dist`), recortado a la realidad
 de atlas-hub (2026-10):
 
+- **Portada** (rediseño 2026-10-26, local): barra superior con marca
+  `HUB PANEL`, hora del snapshot y píldora de estado (LED + servicios activos /
+  en vuelo / cola), más 6 KPIs (servicios, peticiones, memoria, disco, uptime y
+  energía). Los datos del Mac que antes iban en «Este Mac» viven ahora ahí.
 - Tarjetas: **Servicios systemd** (ssh, avahi, ufw, atlas-relay), Puertos a
-  la escucha, Este Mac (RAM/disco/temp/batería/AC), Relay·Telegram (bot,
-  tokens por modelo, cola/vuelo), Peticiones (mensajes con origen TG/local +
-  cancelar en vuelo) y Log del relay. Carta ámbar de confirmación para
-  acciones.
+  la escucha, **Relay Atlas** (ancha: bot, proveedor LLM, calendario, tokens
+  por modelo, cola/vuelo), **Peticiones** (ancha: mensajes con origen TG/local
+  + cancelar en vuelo) y **Log del relay** (ancha). El relay va primero.
+  Tarjeta ámbar de confirmación para acciones.
 - **Fuera del panel hasta que existan en atlas-hub** (no se observan, ni se
   piden): docker/contenedores, nube Nextcloud (compose, tailscale serve),
   unidades del servidor antiguo (cups, macfan, lid-monitor, smartmontools,
@@ -268,7 +272,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 | health falla sin resolver `atlas-hub.local` | avahi caído u otra subred | revisar avahi o usar la IP del momento con `ATLAS_RELAY_URL` |
 | sin respuesta en `127.0.0.1:8765` en el servidor | el relay NO escucha en loopback (correcto) | consultar por la IP LAN o `atlas-hub.local` |
 | relay "activo" pero panel/frontal no conectan | arrancó sin red y quedó atado a `127.0.0.1` | `ss -ltn \| grep 8765`; reiniciar cuando haya red (el reintento de 60 s ya lo evita) |
-| panel 404 en `/panel/` | falta `apps/panel/dist` (no build) | `cd apps/panel && npm run build` y copia `dist/` al repo del servidor (no va en Git) |
+| panel 404 en `/panel/` | falta `apps/panel/dist` o el build no se publicó | `cd apps/panel && npm run build`; el `dist` está versionado pese a `dist/` en `.gitignore`: `git add -f apps/panel/dist` y desplegar |
 | tarjeta Servicios sin botones de acción | `PANEL_ACTION_UNITS` vacía (por defecto en atlas-hub; faltan reglas polkit) | consciente: instalar reglas polkit para `atlas` y añadir unidades al `.env` |
 | acción del panel `action_not_allowed` | unidad fuera de lista blanca | añadir a `PANEL_ACTION_UNITS` (solo con polkit listo y siendo consciente) |
 
@@ -278,7 +282,9 @@ Estado previo (ya así en el servidor): hostname `atlas-hub`; `adria_admin`
 administrador con la clave pública del Mac en `authorized_keys` (acceso SSH
 solo con clave); usuario de sistema `atlas` (home `/opt/atlas`, sin login ni
 sudo) que posee `/opt/atlas/repo` (repo público clonado por HTTPS); `ufw`
-activo. Todos los comandos se ejecutan **en atlas-hub** como `adria_admin`;
+instalado y `enabled` pero **INACTIVO** a fecha 2026-10 (ver §2: el perímetro
+efectivo es `same_network_only` + bind a la IP LAN). Todos los comandos se
+ejecutan **en atlas-hub** como `adria_admin`;
 el sudo de la instalación es interactivo (con contraseña), mientras que el
 sudo sin contraseña del sudoers.d solo sirve al despliegue automatizado
 posterior (pull + restart + is-active/status, nada más).

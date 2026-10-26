@@ -76,6 +76,26 @@ app abierta o cerrada:
   presenta cuando está abierta. El núcleo Rust es transporte (contratos + HTTP),
   sin estado propio.
 
+### Hub Panel: app macOS independiente
+
+`apps/panel-app` es una app Tauri v2 **separada** de la principal (bundle
+`Hub Panel`, identifier `com.atlas.panel`, versión propia). No comparte proceso
+ni ciclo de vida: si una app falla, la otra sigue.
+
+- **UI compartida**: reutiliza `apps/panel` con otro build (base `./`), de modo
+  que `/panel/` y la app muestran las mismas tarjetas.
+- **Barra de menús**: icono con semáforo que sondea `/v1/health` cada 10 s;
+  menú con estado, abrir panel, reiniciar relay y autoarranque al login.
+- **Ventana**: tarjetas del panel; con la ventana visible la app es `Regular`
+  (Dock, Cmd+Tab, menú) y al cerrarla pasa a `Accessory` (solo icono).
+- **Reinicio**: SSH con clave `ed25519` restringida a un comando forzado de
+  `systemctl restart atlas-relay`; doble confirmación en la UI.
+- **Aviso**: notificación macOS una vez por caída del relay.
+- **Red de seguridad**: el watchdog `atlas-health.timer` del servidor reinicia
+  el relay aunque no haya nadie delante del Mac.
+
+Detalle de fases y operación en `panel-app-plan.md` y `relay.md` §8.
+
 ## Flujo de una petición
 
 1. El usuario escribe o activa una entrada.
@@ -92,8 +112,12 @@ app abierta o cerrada:
 
 - **Activo**: ventana Tauri transparente, escena WebGL, orbe y órbitas, barra de
   input, panel de conversación, cerebro Python 24/7 (sesiones, Groq con rotación,
-  Telegram con respuesta directa) e IPC de eventos.
-- **Planificado**: memoria y registro de herramientas. Streaming progresivo
-  implementado (visual, en frontend, cadencia 18 ms).
+  Telegram con respuesta directa), IPC de eventos, tools de calendario con
+  confirmaciones, Hub Panel (barra de menús, semáforo, reinicio por SSH,
+  notificaciones, autoarranque) y watchdog del relay en `atlas-hub`.
+- **Planificado**: memoria y nuevas herramientas. El registro de herramientas
+  y `calendar_read`/`calendar_write` ya están implementados (`docs/tools.md`).
+- **Streaming**: revelado progresivo implementado en el frontend (cadencia
+  18 ms), no en el servidor.
 - **No activar por defecto**: micrófono, escucha permanente, wake word, TTS y agentes autónomos.
 

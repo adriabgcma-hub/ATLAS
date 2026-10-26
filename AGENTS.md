@@ -71,6 +71,9 @@ Si una app falla, la otra sigue funcionando.
   `apps/panel-app/dist`, **ignorado por Git**; no lo commitees). El panel web
   del relay usa `cd apps/panel && npm run build` (base `/panel/`, salida
   `apps/panel/dist`, **sí** se commitea y se despliega con el relay).
+  Ojo: la regla `dist/` del `.gitignore` también cubre `apps/panel/dist`, que
+  está versionado a mano; tras un build hay que `git add -f apps/panel/dist`
+  (incluidos los assets nuevos) y comprobar que se borran los viejos.
 - **Ventana:** cerrarla (Cmd+W) solo la oculta; la app sigue en la barra de
   menús. Se reabre con clic izquierdo en el icono o con "Abrir panel". Para
   salir de verdad: menú "Salir" o Cmd+Q.
