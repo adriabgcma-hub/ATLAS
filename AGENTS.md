@@ -2,7 +2,29 @@
 
 - Lee en  `docs/index.md` y lee las documentaciones necesarias
 
-## Servidores de desarrollo (mantener levantados mientras se trabaja)
+## Ciclo de vida de los procesos en el Mac (obligatorio)
+
+El usuario vigila la RAM de su Mac: **ningún proceso relacionado con Atlas puede
+autoarrancar por su cuenta ni quedar huérfano**. Cada proceso nace y muere con
+la app (o con la tarea de trabajo) que lo necesita.
+
+- Los servidores de dev (`npm run dev`, `tauri dev`, `vite`, watchers, túneles
+  SSH, `python` de pruebas) se lanzan **solo mientras hacen falta** y se matan
+  al terminar la prueba. Guardar el PID del proceso propio y matar por ese PID
+  (`kill <pid>`); no usar `pkill` globales que puedan alcanzar procesos del
+  usuario.
+- Antes de dar una tarea por terminada, comprobar `ps`/`pgrep` y
+  `launchctl list` y reportar qué queda vivo y cuánta memoria.
+- **No** crear LaunchAgents ni servicios de arranque para helpers. El
+  autoarranque de Hub Panel (`~/Library/LaunchAgents/Hub Panel.plist`) existe
+  porque el usuario lo pidió para la app; un proceso auxiliar nunca.
+- Los únicos subprocess que la app lanzará son efímeros: `ssh` del reinicio
+  (timeout 25 s) y el `subprocess` del monitor del servidor (solo corre en
+  `atlas-hub`, nunca en el Mac).
+- No matar procesos ajenos sin permiso explícito: informar de lo que consume
+  memoria y preguntar antes de tocar LaunchAgents de otros proyectos.
+
+## Servidores de desarrollo (levantarlos solo mientras se trabaja y cerrarlos al acabar)
 
 - Frontend: `npm run dev` → http://localhost:5173 (recarga sola con HMR).
 - Relay Python: **corre en el servidor remoto** `atlas-hub` (`atlas-hub.local`,
