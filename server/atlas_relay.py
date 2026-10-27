@@ -17,6 +17,7 @@ Endpoints (todos JSON, todos solo red local):
   GET  /v1/events?since=N       {events: [{seq, kind, ...}]} (kind: message|state)
   GET  /v1/session               {sessionId, state, messages} | null
   POST /v1/send    {content, source?} -> {ok, requestId, sessionId}
+                   (lo que empieza por "/" es un comando local, sin Groq)
   POST /v1/cancel {requestId}   -> {ok, cancelled}
 
 Variables de entorno (valores solo en `.env` local, nunca en Git):
@@ -51,6 +52,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zoneinfo
 from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -111,6 +113,14 @@ DENY_WORDS = {
 }
 
 EDITABLE_DEFAULT = "Exámenes,Celebraciones,Horario,Deberes"
+
+# Comandos locales (sin Groq). Las claves van en minúsculas y sin parámetros.
+COMMAND_ALIASES = {
+    "/clear": "clear", "/limpiar": "clear",
+    "/help": "help", "/ayuda": "help",
+    "/log": "log", "/registro": "log",
+}
+LOG_INTERACTIONS = 5
 
 # Catálogo de herramientas (ver docs/tools.md). El riesgo decide si la
 # ejecución es automática (read) o con confirmación en UI (write).
@@ -195,6 +205,24 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{os.urandom(8).hex()}"
 
 
+def one_line(value: str, limit: int) -> str:
+    """Texto en una sola línea y acotado (logs y resúmenes de comandos)."""
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def local_time_label(value: str, timezone_name: str) -> str:
+    """`2026-10-26T14:32:00Z` → `26/10 15:32` en la zona configurada."""
+    try:
+        moment = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        moment = moment.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+        return moment.astimezone(zoneinfo.ZoneInfo(timezone_name)).strftime("%d/%m %H:%M")
+    except (ValueError, KeyError):
+        return value
+
+
 def read_env() -> dict:
     port_raw = os.environ.get("RELAY_PORT", "8765").strip()
     try:
@@ -234,10 +262,13 @@ def read_env() -> dict:
         fail_config(f"GROQ_TEMPERATURE fuera de rango 0..2: {temp_raw!r}")
     timezone_name = os.environ.get("RELAY_TIMEZONE", "").strip() or DEFAULT_TIMEZONE
     try:
-        import zoneinfo  # noqa: PLC0415 (stdlib, validación temprana)
         zoneinfo.ZoneInfo(timezone_name)
     except Exception:
         fail_config(f"RELAY_TIMEZONE desconocida: {timezone_name!r}")
+
+    editable_names = [chunk.strip() for chunk in
+                      os.environ.get("CALDAV_EDIT_CALENDARS",
+                                     EDITABLE_DEFAULT).split(",") if chunk.strip()]
 
     return {
         "token": os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
@@ -248,9 +279,8 @@ def read_env() -> dict:
         "timezone": timezone_name,
         "caldav_user": os.environ.get("CALDAV_USERNAME", "").strip(),
         "caldav_password": os.environ.get("CALDAV_APP_PASSWORD", "").strip(),
-        "editable": {norm_name(chunk) for chunk in
-                     os.environ.get("CALDAV_EDIT_CALENDARS",
-                                    EDITABLE_DEFAULT).split(",") if chunk.strip()},
+        "editable": {norm_name(name) for name in editable_names},
+        "editable_names": editable_names,
         "host": os.environ.get("RELAY_HOST", "").strip(),
         "port": port,
         "data_dir": resolved,
@@ -296,6 +326,9 @@ class Brain:
         # Panel: identidad del bot (getMe) y peticiones en vuelo (cola+activo).
         self.bot_info: dict | None = None
         self.inflight: set[str] = set()
+        # Uso y resultado por petición: alimenta /log (se poda, no se persiste).
+        self.usage_by_request: dict[str, dict] = {}
+        self.result_by_request: dict[str, str] = {}
         # Logging detallado + consumo de tokens (Groq).
         self.log_path = os.path.join(cfg["data_dir"], "relay.log")
         self.token_usage = {"prompt": 0, "completion": 0, "total": 0,
@@ -452,45 +485,137 @@ class Brain:
         return events
 
     # -- recepción -------------------------------------------------------
+    def _remember(self, request_id: str, usage: dict | None = None,
+                  result: str | None = None) -> None:
+        """Guarda uso/resultado de una petición. Requiere self.lock."""
+        if usage is not None:
+            self.usage_by_request[request_id] = usage
+        if result is not None:
+            self.result_by_request[request_id] = result
+        for mapping in (self.usage_by_request, self.result_by_request):
+            if len(mapping) > 200:
+                keep = list(mapping)[-100:]
+                snapshot = {key: mapping[key] for key in keep}
+                mapping.clear()
+                mapping.update(snapshot)
+
+    def _recent_interactions_locked(self) -> list[dict]:
+        """Últimas interacciones de todas las sesiones. Requiere self.lock."""
+        interactions = []
+        for session in self.sessions.values():
+            messages = session.get("messages", [])
+            for index, message in enumerate(messages):
+                if message.get("role") != "user":
+                    continue
+                replied = False
+                for following in messages[index + 1:]:
+                    if following.get("role") == "user":
+                        break
+                    if following.get("role") == "assistant":
+                        replied = True
+                        break
+                interactions.append({
+                    "requestId": message.get("requestId", "?"),
+                    "content": message.get("content", ""),
+                    "source": message.get("source", "local"),
+                    "timestamp": message.get("timestamp", ""),
+                    "replied": replied,
+                })
+        # Reverso antes del sort estable: con el mismo segundo (habitual en
+        # comandos), el desempate deja primero la interacción más nueva.
+        interactions.reverse()
+        interactions.sort(key=lambda item: item["timestamp"], reverse=True)
+        return interactions[:LOG_INTERACTIONS]
+
+    def _help_text(self, unknown: str | None = None) -> str:
+        editable = ", ".join(self.cfg["editable_names"]) or "ninguno"
+        lines = []
+        if unknown:
+            lines.extend([f"Comando no reconocido: {one_line(unknown, 80)}", ""])
+        lines.extend([
+            "Comandos",
+            "/clear  (/limpiar)  · reinicia la conversación.",
+            "/help   (/ayuda)    · esta ayuda.",
+            "/log    (/registro) · últimas 5 interacciones y consumo de tokens.",
+            "Los comandos responden al instante y no consumen tokens.",
+            "",
+            "Permisos",
+            "· Consultar el calendario es automático, sin confirmación.",
+            "· Crear, modificar o borrar eventos pide confirmación.",
+            "· La confirmación caduca a los 5 minutos; sin respuesta no se ejecuta.",
+            "· En Telegram, «sí» o «adelante» acepta; «no» deniega.",
+            f"· Solo se puede escribir en: {editable}.",
+        ])
+        return "\n".join(lines)
+
+    def _log_text(self) -> str:
+        """Resumen ordenado: interacciones y consumo. Requiere self.lock."""
+        interactions = self._recent_interactions_locked()
+        lines = [f"Últimas {LOG_INTERACTIONS} interacciones", ""]
+        if not interactions:
+            lines.extend(["Sin interacciones registradas.", ""])
+        for index, item in enumerate(interactions, 1):
+            request_id = item["requestId"]
+            usage = self.usage_by_request.get(request_id)
+            result = self.result_by_request.get(request_id)
+            if result is None:
+                result = "completada" if item["replied"] else "sin respuesta"
+            channel = "Telegram" if item["source"] == "telegram" else "App"
+            when = local_time_label(item["timestamp"], self.cfg["timezone"])
+            lines.append(f"{index}) {request_id} · {channel} · {when}")
+            lines.append(f"   Mensaje: «{one_line(item['content'], 160) or '(vacío)'}»")
+            if usage is None:
+                lines.append("   Tokens: sin datos")
+            elif usage["calls"] == 0:
+                lines.append("   Tokens: sin consumo")
+            else:
+                lines.append(f"   Tokens: prompt={usage['prompt']} "
+                             f"completion={usage['completion']} "
+                             f"total={usage['total']} llamadas={usage['calls']}")
+            lines.append(f"   Resultado: {result}")
+            lines.append("")
+        totals = self.token_usage
+        lines.extend([
+            "Consumo total",
+            f"Tokens: prompt={totals['prompt']} completion={totals['completion']} "
+            f"total={totals['total']}",
+            f"Llamadas: {totals['calls']}",
+        ])
+        for model, usage in totals["by_model"].items():
+            lines.append(f"Modelo: {model} · total={usage['total']} "
+                         f"llamadas={usage['calls']}")
+        active = self.sessions.get(self.active_id) if self.active_id else None
+        if active is None:
+            lines.append("Sesión activa: nueva (se creará con el próximo mensaje)")
+        else:
+            lines.append(f"Sesión activa: {active['id']} ({active['state']})")
+        lines.append(f"Cola: {self.jobs.qsize()} · En vuelo: {len(self.inflight)}")
+        return "\n".join(lines)
+
     def _local_reply(self, text: str, source: str, chat_id: int | None = None) -> dict:
         """Respuesta directa sin Groq (comandos). Ahorra cuota y es exacta."""
-        dlog(self, "LOCAL_REPLY", f"command={text.strip()} source={source}")
-        command = text.strip()
+        command_text = text.strip()
+        command = COMMAND_ALIASES.get(command_text.split(maxsplit=1)[0].casefold())
+        dlog(self, "LOCAL_REPLY", f"command={command_text} source={source}")
         with self.lock:
-            if command == "/clear":
+            if command == "clear":
                 # Sesión nueva y vacía: contexto realmente limpio.
                 self.active_id = None
             session = self._active()
             session["state"] = "completed"
             session["updated_at"] = utc_now()
             request_id = new_id("req")
-            if command == "/clear":
+            if command == "clear":
                 content = "Historial reiniciado. ¿En qué le puedo ayudar?"
-            elif command == "/help":
-                content = ("Comandos: /clear (reiniciar la conversación), "
-                           "/log (últimos 3 registros del log). "
-                           "También puedo consultar su calendario iCloud "
-                           "y, con su permiso, crear, modificar o borrar "
-                           "eventos en sus calendarios editables.")
-                session["messages"].append({
-                    "requestId": request_id, "sessionId": session["id"],
-                    "role": "user", "content": text, "source": source,
-                    "timestamp": utc_now(),
-                })
-            else:  # /log
-                try:
-                    with open(self.log_path, encoding="utf-8") as fh:
-                        lines = fh.readlines()
-                    last3 = [ln.rstrip("\\n") for ln in lines[-3:]]
-                    log_part = "\n".join(last3) if last3 else "Log vacío."
-                except OSError:
-                    log_part = "No se pudo leer el log."
-                # Unificar con consumo de tokens (lectura sin lock para evitar
-                # deadlock: ya estamos dentro de self.lock).
-                u = self.token_usage
-                stats_part = (f"Tokens: prompt={u['prompt']} completion={u['completion']} "
-                              f"total={u['total']} llamadas={u['calls']}")
-                content = "Últimos 3 registros del log:\n" + log_part + "\n\n" + stats_part
+            elif command == "log":
+                content = self._log_text()
+            else:  # /help y comandos desconocidos
+                unknown = None if command == "help" else command_text
+                content = self._help_text(unknown)
+            self._remember(request_id, usage={"prompt": 0, "completion": 0,
+                                              "total": 0, "calls": 0},
+                           result="local")
+            if command != "clear":
                 session["messages"].append({
                     "requestId": request_id, "sessionId": session["id"],
                     "role": "user", "content": text, "source": source,
@@ -504,7 +629,7 @@ class Brain:
             session["messages"] = session["messages"][-STORE_HISTORY:]
             self._save_sessions()
             self._push_state(session["id"], request_id, "thinking")
-            if command != "/clear":
+            if command != "clear":
                 self._push_message(session["id"], request_id, "user", text, source)
             self._push_state(session["id"], request_id, "responding")
             self._push_message(session["id"], request_id, "assistant",
@@ -521,7 +646,8 @@ class Brain:
         if not text:
             raise ValueError("empty_message")
         text = text[:MAX_CONTENT_LEN]
-        if text in ("/clear", "/help", "/log"):
+        if text.startswith("/"):
+            # Comandos locales (conocidos o no): nunca gastan una llamada a Groq.
             return self._local_reply(text, source, chat_id)
         with self.lock:
             session = self._active()
@@ -584,7 +710,6 @@ class Brain:
     def _context_block(self, channel: str) -> str:
         """Fecha/hora server-side (zona configurable) + canal. Bloque variable,
         separado del sistema fijo para no romper la caché de prefijo."""
-        import zoneinfo  # noqa: PLC0415 (stdlib)
         now = datetime.now(zoneinfo.ZoneInfo(self.cfg["timezone"]))
         canal = "Telegram" if channel == "telegram" else "aplicación"
         return (f"Contexto actual: {_DIAS[now.weekday()]} {now.day} de "
@@ -790,12 +915,35 @@ class Brain:
                 self._send_telegram(chat_id, f"{icon} Acción {verb}.")
             return True
 
+    def _account_usage(self, raw: dict) -> dict:
+        """Acumula el consumo de un turno y devuelve el delta normalizado."""
+        try:
+            prompt = int(raw.get("prompt_tokens", 0) or 0)
+            completion = int(raw.get("completion_tokens", 0) or 0)
+            total = int(raw.get("total_tokens", 0) or 0)
+        except (ValueError, TypeError):
+            prompt = completion = total = 0
+        model = self.cfg["groq_model"]
+        with self.lock:
+            self.token_usage["prompt"] += prompt
+            self.token_usage["completion"] += completion
+            self.token_usage["total"] += total
+            self.token_usage["calls"] += 1
+            bucket = self.token_usage["by_model"].setdefault(
+                model, {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
+            bucket["prompt"] += prompt
+            bucket["completion"] += completion
+            bucket["total"] += total
+            bucket["calls"] += 1
+        return {"prompt": prompt, "completion": completion,
+                "total": total, "calls": 1}
+
     def groq_completion(self, messages: list[dict]
-                        ) -> tuple[str | None, list | None, str | None]:
-        """Un turno con tools. Devuelve (contenido, tool_calls, error)."""
+                        ) -> tuple[str | None, list | None, str | None, dict | None]:
+        """Un turno con tools. Devuelve (contenido, tool_calls, error, uso)."""
         keys = self.cfg["groq_keys"]
         if not keys:
-            return (None, None, "no_keys")
+            return (None, None, "no_keys", None)
         body = json.dumps({
             "model": self.cfg["groq_model"],
             "temperature": self.cfg["groq_temperature"],
@@ -815,43 +963,29 @@ class Brain:
             try:
                 with urllib.request.urlopen(req, timeout=GROQ_TIMEOUT_S) as response:
                     data = json.load(response)
-                usage = data.get("usage") or {}
-                # Registrar consumo de tokens.
-                try:
-                    self.token_usage["prompt"] += int(usage.get("prompt_tokens", 0))
-                    self.token_usage["completion"] += int(usage.get("completion_tokens", 0))
-                    self.token_usage["total"] += int(usage.get("total_tokens", 0))
-                    self.token_usage["calls"] += 1
-                    model = self.cfg["groq_model"]
-                    self.token_usage["by_model"].setdefault(model, {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
-                    self.token_usage["by_model"][model]["prompt"] += int(usage.get("prompt_tokens", 0))
-                    self.token_usage["by_model"][model]["completion"] += int(usage.get("completion_tokens", 0))
-                    self.token_usage["by_model"][model]["total"] += int(usage.get("total_tokens", 0))
-                    self.token_usage["by_model"][model]["calls"] += 1
-                except (ValueError, TypeError):
-                    pass
+                delta = self._account_usage(data.get("usage") or {})
                 dlog(self, "LLM", f"groq completion ok model={self.cfg['groq_model']}",
-                     prompt_tokens=usage.get("prompt_tokens", 0),
-                     completion_tokens=usage.get("completion_tokens", 0),
-                     total_tokens=usage.get("total_tokens", 0))
+                     prompt_tokens=delta["prompt"],
+                     completion_tokens=delta["completion"],
+                     total_tokens=delta["total"])
                 message = (data.get("choices") or [{}])[0].get("message", {})
                 content = (message.get("content") or "").strip() or None
                 calls = message.get("tool_calls") or None
                 if content is None and not calls:
-                    return (None, None, "empty_response")
-                return (content, calls, None)
+                    return (None, None, "empty_response", delta)
+                return (content, calls, None, delta)
             except urllib.error.HTTPError as exc:
                 if exc.code in (401, 403, 429) or 500 <= exc.code < 600:
                     last_err = f"http_{exc.code}"
                     if index + 1 < len(keys):
                         continue
-                return (None, None, f"http_{exc.code}")
+                return (None, None, f"http_{exc.code}", None)
             except Exception:
                 last_err = "unreachable"
                 if index + 1 < len(keys):
                     continue
-                return (None, None, "unreachable")
-        return (None, None, last_err)
+                return (None, None, "unreachable", None)
+        return (None, None, last_err, None)
 
     # -- worker ----------------------------------------------------------
     def worker(self) -> None:
@@ -864,19 +998,25 @@ class Brain:
             finally:
                 self.jobs.task_done()
 
-    def _complete(self, request_id: str, job: dict, text: str, error: str | None) -> None:
+    def _complete(self, request_id: str, job: dict, text: str,
+                  error: str | None, usage: dict | None = None) -> None:
         """Cierra la operación (vía común de stub, LLM y tools)."""
         dlog(self, "COMPLETE", f"request={request_id} error={error} text_len={len(text or '')}")
         with self.lock:
             self.inflight.discard(request_id)
+            self._remember(request_id, usage=usage)
             session = self.sessions.get(job["session_id"])
             if session is None:
+                self._remember(request_id, result="sesión perdida")
                 return
             if request_id in self.cancelled:
                 self.cancelled.discard(request_id)
+                self._remember(request_id, result="cancelada")
                 return  # cancelada a mitad: sin efectos
             if time.monotonic() > job["deadline"]:
                 error, text = "timeout", ""
+            self._remember(request_id,
+                           result="completada" if error is None else f"error ({error})")
             session["updated_at"] = utc_now()
             if error is None:
                 session["state"] = "completed"
@@ -941,23 +1081,28 @@ class Brain:
             dlog(self, "PROCESS", f"no groq keys, stub reply request={request_id}")
             self._complete(request_id, job,
                            f"(stub local · sin claves Groq) Recibido: {last_user}",
-                           None)
+                           None, usage={"prompt": 0, "completion": 0,
+                                        "total": 0, "calls": 0})
             return
         messages: list[dict] = [
             {"role": "system", "content": SYSTEM_FIXED},
             {"role": "system", "content": self._context_block(channel)},
         ]
         messages.extend(history[-MAX_HISTORY:])
+        usage_total = {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
         for turn in range(MAX_TURNS):
             dlog(self, "PROCESS", f"turn {turn+1}/{MAX_TURNS} request={request_id}")
-            content, calls, error = self.groq_completion(messages)
+            content, calls, error, usage = self.groq_completion(messages)
+            if usage is not None:
+                for key in usage_total:
+                    usage_total[key] += usage[key]
             if error is not None:
                 dlog(self, "PROCESS", f"groq error={error} request={request_id}")
-                self._complete(request_id, job, "", error)
+                self._complete(request_id, job, "", error, usage_total)
                 return
             if not calls:
                 dlog(self, "PROCESS", f"final response len={len(content or '')} request={request_id}")
-                self._complete(request_id, job, content or "(vacío)", None)
+                self._complete(request_id, job, content or "(vacío)", None, usage_total)
                 return
             tool_names = [c.get("function", {}).get("name") for c in (calls or [])]
             dlog(self, "PROCESS", f"tool_calls={tool_names} request={request_id}")
@@ -970,7 +1115,7 @@ class Brain:
                 messages.append({"role": "tool", "tool_call_id": call_id,
                                  "content": result})
         dlog(self, "PROCESS", f"max turns reached request={request_id}")
-        self._complete(request_id, job, "", "max_turns")
+        self._complete(request_id, job, "", "max_turns", usage_total)
 
     # -- Telegram --------------------------------------------------------
     def _telegram_call(self, method: str, payload: dict, timeout: int) -> dict:

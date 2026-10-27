@@ -150,9 +150,26 @@ Body: `{"content": "…", "source": "local"|"telegram"}` (defecto `local`).
 
 Errores: `400 empty_message` (vacío), `400 bad_source`, `400 bad_body`.
 
-Comandos de chat (respuesta directa sin Groq): `/clear` (sesión nueva y
-vacía), `/help` (ayuda) y `/log` (últimos 3 registros del log, sin llamar
-al LLM). Valen por ambos canales.
+Comandos de chat (respuesta local, sin Groq). Se reconoce el primer token sin
+distinguir mayúsculas; cualquier texto que empiece por `/` se trata como
+comando y **no** llega al modelo. Un comando desconocido responde con el aviso
+y la ayuda.
+
+| Comando | Alias | Respuesta |
+| --- | --- | --- |
+| `/clear` | `/limpiar` | Reinicia la conversación (sesión nueva y vacía). |
+| `/help` | `/ayuda` | Lista de comandos y flujo de permisos. |
+| `/log` | `/registro` | Últimas 5 interacciones y consumo de tokens. |
+
+`/log` ordena las interacciones de la más reciente a la más antigua. Por cada
+una muestra `requestId`, canal, hora local, mensaje del usuario, tokens
+consumidos (`prompt`/`completion`/`total`/`llamadas`) y resultado
+(`completada`, `cancelada`, `error (…)`, `local`). Al final, el consumo total,
+el desglose por modelo, la sesión activa y el estado de cola/vuelo. El uso por
+petición vive en memoria y se poda (no se persiste): tras reiniciar, las
+interacciones siguen apareciendo desde `sessions.json`, pero sin desglose de
+tokens. `/help` incluye el flujo de confirmaciones y la lista de calendarios
+editables. Los comandos valen por ambos canales y no consumen cuota.
 
 ### `POST /v1/cancel`
 
