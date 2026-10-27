@@ -621,8 +621,10 @@ class Brain:
                     "role": "user", "content": text, "source": source,
                     "timestamp": utc_now(),
                 })
+            # Mismo requestId que el evento: la hidratación sustituye el
+            # historial y la UI no debe perder la identidad del mensaje.
             session["messages"].append({
-                "requestId": new_id("req"), "sessionId": session["id"],
+                "requestId": request_id, "sessionId": session["id"],
                 "role": "assistant", "content": content, "source": "local",
                 "timestamp": utc_now(),
             })
@@ -1020,8 +1022,11 @@ class Brain:
             session["updated_at"] = utc_now()
             if error is None:
                 session["state"] = "completed"
+                # Correlación estable con el evento y el mensaje del usuario:
+                # si el id cambiara, la re-hidratación del frontal reiniciaría
+                # la impresión del mensaje a mitad.
                 session["messages"].append({
-                    "requestId": new_id("req"), "sessionId": session["id"],
+                    "requestId": request_id, "sessionId": session["id"],
                     "role": "assistant", "content": text, "source": "local",
                     "timestamp": utc_now(),
                 })

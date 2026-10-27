@@ -46,6 +46,23 @@ export type ConversationAction =
 /** Tope de mensajes en el frontal (el cerebro guarda 100; margen local). */
 const MAX_MESSAGES = 200
 
+function messageKey(message: ChatMessage): string {
+  return `${message.requestId}:${message.role}`
+}
+
+/**
+ * Fusiona la instantánea con los mensajes recibidos en vivo: la hidratación
+ * y el drenado corren en paralelo, así que el snapshot puede ser anterior al
+ * último evento y no debe borrarlo (el frontal volvería a imprimirlo).
+ */
+function mergeHydrated(local: ChatMessage[], snapshot: ChatMessage[]): ChatMessage[] {
+  const known = new Set(snapshot.map(messageKey))
+  const lastKey = snapshot.length > 0 ? messageKey(snapshot[snapshot.length - 1]) : ''
+  const tail = local.slice(local.findIndex((m) => messageKey(m) === lastKey) + 1)
+  const merged = [...snapshot, ...tail.filter((m) => !known.has(messageKey(m)))]
+  return merged.length > MAX_MESSAGES ? merged.slice(-MAX_MESSAGES) : merged
+}
+
 const TERMINAL: ReadonlySet<SessionState> = new Set([
   'idle',
   'cancelled',
@@ -130,10 +147,13 @@ export function conversationReducer(
       // Al reabrir, una operación a medias ya murió con el proceso anterior:
       // se conserva el historial pero el estado vuelve a reposo.
       const settled = isSessionSettled(action.session.state)
+      const sameSession = state.sessionId === action.session.sessionId
       return {
         sessionId: action.session.sessionId,
         sessionState: settled ? action.session.state : 'idle',
-        messages: action.session.messages,
+        messages: sameSession
+          ? mergeHydrated(state.messages, action.session.messages)
+          : action.session.messages,
         pendingRequestIds: [],
         lastError: null,
         // Las confirmaciones son en vivo: al recargar caducan solas.

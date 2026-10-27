@@ -47,6 +47,11 @@ En `/v1/events` cada evento lleva además `seq` (cursor monótono) y `kind`
 
 `cursor` es el `seq` vivo: el cliente arranca ahí para no re-jugar historia.
 
+Cada mensaje persistido lleva el `requestId` de su interacción: la petición del
+usuario y la respuesta del assistant comparten id (se distinguen por `role`).
+Así la hidratación conserva la identidad de los mensajes que el cliente ya
+recibió por eventos y no los vuelve a representar.
+
 ### `GET /v1/events?since=N`
 
 ```json

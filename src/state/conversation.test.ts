@@ -119,6 +119,61 @@ describe('conversationReducer', () => {
     expect(next.messages).toHaveLength(1)
     expect(next.pendingRequestIds).toEqual([])
   })
+
+  it('hydrate con la misma sesión conserva el mensaje que ya llegó por evento', () => {
+    const live = conversationReducer(initialConversationState, {
+      type: 'conversation.message_appended',
+      event: { ...appended('assistant'), content: 'respuesta' },
+    })
+    const next = conversationReducer(live, {
+      type: 'conversation.hydrate',
+      session: {
+        sessionId: 'ses-1',
+        state: 'responding',
+        messages: [
+          {
+            requestId: 'req-1', sessionId: 'ses-1', role: 'user', content: 'hola',
+            source: 'local', timestamp: '2026-10-12T00:00:00.000Z',
+          },
+          {
+            requestId: 'req-1', sessionId: 'ses-1', role: 'assistant',
+            content: 'respuesta', source: 'local',
+            timestamp: '2026-10-12T00:00:01.000Z',
+          },
+        ],
+      },
+    })
+    expect(next.messages.map((m) => `${m.requestId}:${m.role}`)).toEqual([
+      'req-1:user',
+      'req-1:assistant',
+    ])
+  })
+
+  it('hydrate con snapshot anterior al último evento no borra ni reordena', () => {
+    const withUser = conversationReducer(initialConversationState, {
+      type: 'conversation.message_appended',
+      event: appended('user'),
+    })
+    const live = conversationReducer(withUser, {
+      type: 'conversation.message_appended',
+      event: { ...appended('assistant'), content: 'respuesta' },
+    })
+    const stale = conversationReducer(live, {
+      type: 'conversation.hydrate',
+      session: {
+        sessionId: 'ses-1',
+        state: 'responding',
+        messages: [
+          {
+            requestId: 'req-1', sessionId: 'ses-1', role: 'user', content: 'hola',
+            source: 'local', timestamp: '2026-10-12T00:00:00.000Z',
+          },
+        ],
+      },
+    })
+    expect(stale.messages).toHaveLength(2)
+    expect(stale.messages[1].role).toBe('assistant')
+  })
 })
 
 describe('sessionStateToOrbInput + deriveOrbState', () => {
