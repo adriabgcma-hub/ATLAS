@@ -6,6 +6,20 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### App: eventos IPC con canales válidos y red fuera del hilo principal
+
+- **Commit:** `fix(app): recibir eventos IPC y no bloquear el hilo principal`
+- **Fecha:** `2026-10-27`
+- **Descripción:** la app parecía no responder aunque el relay sí procesaba los mensajes. Causa doble: (1) Tauri 2 no admite puntos en nombres de evento, el frontend escuchaba `session.state_changed` / `conversation.message_appended` / `permission.confirmation_required` y el núcleo emitía los mismos nombres con guiones, de modo que React no recibía ningún evento y el orbe se quedaba en el estado `failed` anterior; (2) una petición `session_get` hacía E/S HTTP síncrona en el hilo principal (stack del hang de las 23:02: `run_invoke_handler → session_get → relay::http → poll`). El núcleo pasa a emitir y escuchar los canales `session-state-changed`, `conversation-message-appended` y `permission-confirmation-required` (el contrato con puntos sigue dentro del payload como `type`), y todos los comandos IPC (`conversation_send`, `conversation_cancel`, `permission_respond`, `session_get`, `relay_drain`) ejecutan la red con `spawn_blocking`. El cliente del relay ordena IPv4 antes que el IPv6 link-local que devuelve `atlas-hub.local` y limita cada intento a 2 s; el frontend re-hidrata al montar y cada 30 s, y el chat respeta los saltos de línea con `white-space: pre-wrap`. Verificado: `cargo check --workspace`, `cargo test --workspace` (8 + 1 + 2 pruebas OK), `npm run build`, `npm test` (13/13) y `npm run lint` (solo los 3 errores previos de `apps/panel`). Bundle reconstruido con Apple Development, firma profunda válida (`codesign --verify --deep --strict`) e instalado con `ditto` en `/Applications/Atlas.app`; el binario embebe `index-BKVKt3rr.js` / `index-BcGiiHem.css` y el usuario confirmó que responde en release.
+- **Documentación relacionada:** `docs/contracts.md` (§ Canales de eventos IPC), `docs/implementation-plan.md`.
+
+### Relay: comandos locales con alias y /log con tokens
+
+- **Commit:** `feat(relay): /log con tokens y comandos locales con alias`
+- **Fecha:** `2026-10-27`
+- **Descripción:** los comandos de chat se resuelven localmente sin llamar a Groq y valen por la app y Telegram. Se reconoce el primer token sin distinguir mayúsculas; cualquier texto que empiece por `/` se trata como comando (nunca llega al modelo) y uno desconocido responde con el aviso y la ayuda. `/clear` (`/limpiar`) reinicia la conversación, `/help` (`/ayuda`) lista comandos y explica el flujo de confirmaciones y calendarios editables, y `/log` (`/registro`) muestra las 5 últimas interacciones de la más reciente a la más antigua con `requestId`, canal, hora local, mensaje, tokens (`prompt`/`completion`/`total`/llamadas) y resultado, seguidas del consumo total, desglose por modelo, sesión activa y estado de cola/vuelo. El uso por petición vive en memoria y se poda (no se persiste), y las respuestas conservan los saltos de línea en ambos canales. Verificado tras `./scripts/deploy-relay.sh`: push y pull `8fa8316..93716eb`, servicio `atlas-relay` `active` desde las 18:04:37, `/v1/health` OK (`telegram: enabled`, `llm: groq`, `queue: 0`) y `sha256` de `server/atlas_relay.py` idéntico en el Mac y en `/opt/atlas/repo`.
+- **Documentación relacionada:** `docs/relay-api.md` (§ Comandos de chat), `docs/implementation-plan.md`.
+
 ### Hub Panel: ventana bajo demanda y ~16 MB en reposo
 
 - **Commit:** `perf(panel-app): ventana bajo demanda y 16 MB en reposo`

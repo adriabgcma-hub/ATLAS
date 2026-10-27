@@ -82,10 +82,12 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 - [x] Fix panel fantasma: sin reset al cambiar de sesión se acumulaban
       historiales (`seq` persistido en disco + reset por `sessionId` en reducer).
 - [x] Comandos `/clear` (sesión nueva real) y `/help` (sin gastar Groq).
-- [x] Comandos locales ampliados (pendientes de commit y despliegue): alias
+- [x] Comandos locales ampliados y desplegados (`d37ef88`): alias
       `/limpiar`, `/ayuda` y `/registro`; `/log` con las 5 últimas interacciones
       (id, mensaje y tokens por petición) y consumo total; los comandos
       desconocidos responden localmente y el chat respeta los saltos de línea.
+      La entrega de eventos a la app se arregló en `93716eb` (canales Tauri
+      con guiones e IPC asíncrono).
 - [ ] Re-verificar lectura/borrado del evento de prueba al despejar throttle.
 - [x] Commit publicado: `Fase 4: tools de calendario` (`a191559`).
 
