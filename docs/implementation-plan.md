@@ -100,6 +100,21 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 - [x] Streaming adaptativo: duración según longitud con techo de 6 s y avance
       por tiempo transcurrido (sobrevive al throttling de pestañas en segundo
       plano).
+- [x] Cursor en línea con el texto Markdown: se inserta en el último bloque
+      renderizado, no como hermano posterior al párrafo; eliminado su margen
+      superior. En código se coloca antes del salto final añadido por Markdown.
+      Sin cambios en la velocidad de revelado ni en los mensajes del usuario.
+      Verificado en desarrollo (2026-10-27): build, 31/31 tests (16 nuevos),
+      lint de los componentes del chat y `cargo check --workspace` correctos.
+      Geometría DOM comprobada en navegador: cursor junto al último carácter
+      en 11 casos (párrafos, saltos, títulos, listas, citas, código y tablas),
+      sin cursor al terminar. `ConversationPanel` real con texto de prueba
+      completa 696 caracteres en ~6,18 s incluso en pestaña oculta.
+      Consola sin errores; captura no disponible por navegador integrado oculto.
+      Lint global mantiene los 3 errores previos de Hub Panel.
+      Vite cerrado por PID al terminar: puerto 5173 libre, sin procesos Atlas/dev
+      activos; `launchctl list` conserva Hub Panel registrado pero sin PID.
+      Commit `446ecb4`; bundle firmado e instalado en `/Applications/Atlas.app`.
 - [ ] Tablas en ventana aparte (`Atlas · Tabla`) con detección + botón
       "Abrir en ventana" y exportar CSV a `~/Documents/Atlas/tablas/`
       (diseñado; pendiente de implementar).

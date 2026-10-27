@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Chat: cursor de streaming junto al texto
+
+- **Commit:** `fix(chat): cursor de streaming junto al texto`
+- **Fecha:** `2026-10-27`
+- **Descripción:** la barra que parpadea durante el revelado caía una línea por debajo del texto porque se renderizaba como hermano posterior al bloque Markdown (y con `margin-top: 4px`). Ahora `MarkdownMessage` recibe `streaming` y un plugin rehype inserta el cursor dentro del último bloque renderizado —párrafo, título, lista anidada, cita, tabla o código—, justo tras el último carácter; en bloques de código va antes del salto final que añade Markdown. Se retira el margen superior y no cambia ni la duración del revelado (6 s de techo) ni los mensajes del usuario. Verificado: `npm run build`, `npm test` 31/31 (16 pruebas nuevas del cursor por tipo de bloque, HTML escapado y salto final del código), eslint de los componentes del chat y `cargo check --workspace`; en navegador, geometría DOM sobre 11 formatos (cursor en la misma línea, 2-6 px tras el texto, uno solo por mensaje) y `ConversationPanel` real revelando 696 caracteres en ~6,18 s incluso con la pestaña oculta, sin cursor al terminar y sin errores de consola. Bundle reconstruido con Apple Development, firma profunda válida, binario embebe `index-DHDxsiMz.js` / `index-Do2eRXct.css`, instalado con `ditto` en `/Applications/Atlas.app` y abierto (PID 96994, ~115 MB). Lint global mantiene los 3 errores previos de Hub Panel; el Vite de prueba se cerró por PID y no quedan procesos huérfanos.
+- **Documentación relacionada:** `docs/implementation-plan.md` (§ Presentación del chat).
+
 ### Chat: markdown formateado y streaming adaptativo
 
 - **Commit:** `feat(chat): markdown formateado y streaming adaptativo`
