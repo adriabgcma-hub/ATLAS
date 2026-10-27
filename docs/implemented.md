@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Chat: identidad estable de mensajes al rehidratar
+
+- **Commit:** `fix(chat): identidad estable de mensajes al rehidratar`
+- **Fecha:** `2026-10-27`
+- **Descripción:** a veces el revelado progresivo del último mensaje se reiniciaba a mitad y volvía a imprimir todo el texto. Causa: el relay persistía la respuesta del assistant con un `requestId` nuevo (`new_id("req")`) mientras el evento `conversation.message_appended` llevaba el `requestId` de la interacción; la rehidratación cada 30 s sustituía el historial y cambiaba la identidad del último mensaje, y `ConversationPanel` lo tomaba por un mensaje nuevo (`revealed = 0`). Ahora el assistant persistido comparte `requestId` con la petición del usuario, tanto en respuestas normales como en comandos locales, y la hidratación de la misma sesión fusiona el snapshot con los mensajes recibidos en vivo en vez de reemplazarlos, de modo que un snapshot anterior al último evento ya no lo borra. Verificado: `npm test` 15/15 (dos pruebas nuevas para la fusión), `tsc -b` y lint; relay desplegado con `./scripts/deploy-relay.sh` (`/v1/health` OK) y comprobado que el usuario y el assistant de un `/help` comparten `requestId` (`req-4764…`); bundle firmado con Apple Development (firma profunda válida), `index-MpYmPoOi.js` embebido, reinstalado en `/Applications/Atlas.app` y app abierta.
+- **Documentación relacionada:** `docs/relay-api.md` (§ `GET /v1/session`).
+
 ### App: eventos IPC con canales válidos y red fuera del hilo principal
 
 - **Commit:** `fix(app): recibir eventos IPC y no bloquear el hilo principal`
