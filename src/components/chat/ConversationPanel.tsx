@@ -101,8 +101,7 @@ export function ConversationPanel({ messages }: { messages: ChatMessage[] }) {
               </span>
               {message.role === 'assistant' ? (
                 <div className="chat-msg-text chat-md">
-                  <MarkdownMessage text={text} />
-                  {showCursor && <span className="stream-cursor" aria-hidden="true" />}
+                  <MarkdownMessage text={text} streaming={showCursor} />
                 </div>
               ) : (
                 <p className="chat-msg-text">

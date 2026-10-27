@@ -540,10 +540,6 @@ select { font: inherit; }
   color: #eaf8ff;
 }
 
-.chat-md .stream-cursor {
-  margin-top: 4px;
-}
-
 /* Cursor de streaming: parpadea mientras Atlas escribe */
 .stream-cursor {
   display: inline-block;
