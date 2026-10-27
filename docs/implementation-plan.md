@@ -91,6 +91,19 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 - [ ] Re-verificar lectura/borrado del evento de prueba al despejar throttle.
 - [x] Commit publicado: `Fase 4: tools de calendario` (`a191559`).
 
+## Presentación del chat (2026-10-27)
+
+- [x] Markdown real en las respuestas del LLM (`703b135`): `react-markdown` +
+      GFM + saltos de línea, HTML crudo desactivado, tablas con scroll
+      horizontal y cabeceras sin partir; los mensajes del usuario siguen en
+      texto plano.
+- [x] Streaming adaptativo: duración según longitud con techo de 6 s y avance
+      por tiempo transcurrido (sobrevive al throttling de pestañas en segundo
+      plano).
+- [ ] Tablas en ventana aparte (`Atlas · Tabla`) con detección + botón
+      "Abrir en ventana" y exportar CSV a `~/Documents/Atlas/tablas/`
+      (diseñado; pendiente de implementar).
+
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 
 - `GROQ_API_KEY_1/2/3` — rotación Groq (en uso por el cerebro).

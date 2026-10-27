@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Chat: markdown formateado y streaming adaptativo
+
+- **Commit:** `feat(chat): markdown formateado y streaming adaptativo`
+- **Fecha:** `2026-10-27`
+- **Descripción:** las respuestas del LLM dejan de mostrarse como markdown crudo. Se añaden `react-markdown` 10, `remark-gfm` 4 y `remark-breaks` 4, y `MarkdownMessage` (memoizado) renderiza títulos, listas, código y tablas GFM; el HTML crudo queda desactivado (react-markdown lo escapa), los enlaces abren en pestaña nueva y las tablas van envueltas en un contenedor con scroll. `ConversationPanel` renderiza solo los mensajes del assistant como markdown; los del usuario siguen en texto plano. Las tablas pasan a medir según su contenido (`width: auto; min-width: 100%`), con mínimo de 84 px por columna y cabeceras `white-space: nowrap`: en un chat de 296 px una tabla de 6 columnas ocupa 598 px y scrollea en horizontal en vez de partir los títulos letra a letra. El revelado progresivo calcula su duración con la longitud (`streamDuration` = longitud × 18 ms acotado entre 400 ms y 6 s) y avanza por tiempo transcurrido, no por tick, de modo que un mensaje de 3759 caracteres se completa en ~6 s (antes ~68 s) y una pestaña en segundo plano se pone al día al volver en lugar de alargar la espera. Verificado: `npm run build`, `npm test` (15/15) y eslint de los ficheros nuevos; en navegador, tabla inyectada de 6 columnas con 598/296 px y scroll, cabeceras en una línea, y streaming de 3759 caracteres medido en 4,18 s desde que se detectó el cursor (≈6 s desde el inicio). Bundle reconstruido con Apple Development, firma profunda válida (`codesign --verify --deep --strict`), binario embebe `index-ClN1lmhm.js` e `index-uDjekY4f.css`, instalado con `ditto` en `/Applications/Atlas.app` y abierto. Coste: el JS del frontal pasa de ~219 KB a 382,72 KB (119,20 KB gzip). El Vite de desarrollo se cerró por PID al terminar.
+- **Documentación relacionada:** `docs/implementation-plan.md` (§ Presentación del chat).
+
 ### Chat: identidad estable de mensajes al rehidratar
 
 - **Commit:** `fix(chat): identidad estable de mensajes al rehidratar`
