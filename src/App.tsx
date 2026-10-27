@@ -33,6 +33,11 @@ const LETTER_CADENCE_MS = 26
 const RELAY_URL = import.meta.env.VITE_RELAY_URL || 'http://atlas-hub.local:8765'
 /** Cada cuánto se drena el relay (el cursor evita reprocesar). */
 const RELAY_DRAIN_MS = 4000
+/** Canales IPC. Tauri 2 rechaza los puntos en nombres de evento; el nombre
+ *  de contrato (`session.state_changed`, etc.) viaja dentro como `type`. */
+const IPC_STATE = 'session-state-changed'
+const IPC_MESSAGE = 'conversation-message-appended'
+const IPC_CONFIRM = 'permission-confirmation-required'
 
 /** true solo dentro del webview de Tauri (con `withGlobalTauri`). */
 function inTauri(): boolean {
@@ -162,6 +167,8 @@ export default function App() {
   const pumpRetryRef = useRef(0)
   // Cursor del sondeo dev (sin Tauri no hay núcleo que lo guarde).
   const devRelayCursorRef = useRef(0)
+  // Un drenado IPC a la vez: el relay lento no acumula comandos en vuelo.
+  const drainInFlightRef = useRef(false)
   // Vistos (requestId:rol): las letras solo vuelan para mensajes nuevos,
   // nunca para re-juegos del historial (recargas, HMR, cursor atrasado).
   const seenRef = useRef<Set<string>>(new Set())
@@ -393,26 +400,16 @@ export default function App() {
     let hydrateTimer = 0
 
     if (inTauri()) {
-      invoke<ActiveSession | null>('session_get')
-        .then((session) => {
-          if (!cancelled && session) {
-            seedSeen(session.messages)
-            dispatch({ type: 'conversation.hydrate', session })
-          }
-        })
-        .catch(() => {
-          /* núcleo aún no listo: se hidratará con los eventos */
-        })
-      listen<SessionEvent>('session.state_changed', (event) => {
+      listen<SessionEvent>(IPC_STATE, (event) => {
         dispatch({ type: 'session.state_changed', event: event.payload })
       })
         .then((unsub) => {
           unsubs.push(unsub)
         })
-        .catch(() => {
-          /* sin eventos: modo degradado */
+        .catch((error: unknown) => {
+          console.warn('No se pudo escuchar el estado de sesión', error)
         })
-      listen<MessageAppended>('conversation.message_appended', (event) => {
+      listen<MessageAppended>(IPC_MESSAGE, (event) => {
         dispatch({ type: 'conversation.message_appended', event: event.payload })
         if (event.payload.role === 'user' && rememberMessage(event.payload.requestId, event.payload.role)) {
           enqueueLetters(event.payload.content)
@@ -421,10 +418,10 @@ export default function App() {
         .then((unsub) => {
           unsubs.push(unsub)
         })
-        .catch(() => {
-          /* sin eventos: modo degradado */
+        .catch((error: unknown) => {
+          console.warn('No se pudo escuchar la conversación', error)
         })
-      listen<ConfirmationRequest>('permission.confirmation_required', (event) => {
+      listen<ConfirmationRequest>(IPC_CONFIRM, (event) => {
         dispatch({ type: 'permission.confirmation_required', event: event.payload })
         // Una confirmación necesita acción: expande la zona sola.
         setChatExpanded(true)
@@ -432,15 +429,22 @@ export default function App() {
         .then((unsub) => {
           unsubs.push(unsub)
         })
-        .catch(() => {
-          /* sin eventos: modo degradado */
+        .catch((error: unknown) => {
+          console.warn('No se pudieron escuchar las confirmaciones', error)
         })
       // El relay es opcional: si está caído se ignora en silencio.
-      drainTimer = window.setInterval(() => {
-        invoke('relay_drain').catch(() => {
-          /* relay no disponible */
-        })
-      }, RELAY_DRAIN_MS)
+      const drainTauri = () => {
+        if (drainInFlightRef.current) return
+        drainInFlightRef.current = true
+        invoke('relay_drain')
+          .catch(() => {
+            /* relay no disponible */
+          })
+          .finally(() => {
+            drainInFlightRef.current = false
+          })
+      }
+      drainTimer = window.setInterval(drainTauri, RELAY_DRAIN_MS)
       // Re-hidratación periódica del historial: recupera mensajes de Telegram
       // que llegaron mientras el frontend estaba cerrado y reintenta si la
       // sesión_get inicial falló (relay aún no disponible al montar). El
@@ -494,6 +498,7 @@ export default function App() {
       window.clearInterval(drainTimer)
       window.clearInterval(hydrateTimer)
       for (const timer of timers) clearTimeout(timer)
+      drainInFlightRef.current = false
     }
   }, [enqueueLetters, pollDevRelay, rememberMessage, seedSeen])
 

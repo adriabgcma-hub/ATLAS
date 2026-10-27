@@ -3,7 +3,7 @@
 //! Fina por diseño: el cerebro (sesiones, Groq, Telegram) vive en el relay
 //! Python. Esta capa transporta peticiones y eventos, sin estado propio.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use atlas_core::{AtlasError, Source, codes, get_events, get_session, post_cancel, post_send};
@@ -17,7 +17,7 @@ fn default_relay_url() -> String {
 
 struct CoreState {
     relay_url: String,
-    relay_cursor: Mutex<u64>,
+    relay_cursor: Arc<Mutex<u64>>,
 }
 
 fn parse_source(raw: Option<String>) -> Result<&'static str, AtlasError> {
@@ -32,17 +32,24 @@ fn parse_source(raw: Option<String>) -> Result<&'static str, AtlasError> {
     }
 }
 
+/// Canales IPC de Tauri. No pueden llevar puntos (Tauri 2 solo admite
+/// alfanuméricos y `- / : _`); el nombre de contrato con puntos sigue dentro
+/// del payload como `type`.
+const EVENT_STATE: &str = "session-state-changed";
+const EVENT_MESSAGE: &str = "conversation-message-appended";
+const EVENT_CONFIRM: &str = "permission-confirmation-required";
+
 fn emit_all(app: &AppHandle, events: &[atlas_core::OutEvent]) {
     for event in events {
         match event {
             atlas_core::OutEvent::Session(e) => {
-                let _ = app.emit("session.state_changed", e);
+                let _ = app.emit(EVENT_STATE, e);
             }
             atlas_core::OutEvent::Message(e) => {
-                let _ = app.emit("conversation.message_appended", e);
+                let _ = app.emit(EVENT_MESSAGE, e);
             }
             atlas_core::OutEvent::Confirm(e) => {
-                let _ = app.emit("permission.confirmation_required", e);
+                let _ = app.emit(EVENT_CONFIRM, e);
             }
         }
     }
@@ -50,6 +57,18 @@ fn emit_all(app: &AppHandle, events: &[atlas_core::OutEvent]) {
 
 fn poisoned() -> AtlasError {
     AtlasError::new(codes::INTERNAL, "Núcleo no disponible.", true)
+}
+
+/// Los comandos de Tauri síncronos corren en el hilo principal: cualquier
+/// E/S bloquenate ahí congela teclado y repintado. Toda la red va en el pool.
+async fn run_blocking<T, F>(work: F) -> Result<T, AtlasError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AtlasError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| poisoned())?
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -87,19 +106,20 @@ struct ActiveSessionView {
 }
 
 /// Drena los eventos nuevos del cerebro, actualiza el cursor y los emite.
-fn drain_events(state: &State<CoreState>, app: &AppHandle) -> Result<DrainResult, AtlasError> {
-    let (url, cursor) = {
-        let cursor = state.relay_cursor.lock().map_err(|_| poisoned())?;
-        (state.relay_url.clone(), *cursor)
-    };
-    let fetched = get_events(&url, cursor, Duration::from_secs(3))?;
+fn drain_blocking(
+    url: &str,
+    cursor: &Arc<Mutex<u64>>,
+    app: &AppHandle,
+) -> Result<DrainResult, AtlasError> {
+    let since = *cursor.lock().map_err(|_| poisoned())?;
+    let fetched = get_events(url, since, Duration::from_secs(3))?;
     let max = fetched
         .items
         .iter()
         .map(|(seq, _)| *seq)
         .max()
-        .unwrap_or(cursor);
-    if let Ok(mut stored) = state.relay_cursor.lock() {
+        .unwrap_or(since);
+    if let Ok(mut stored) = cursor.lock() {
         if max > *stored {
             *stored = max;
         }
@@ -115,44 +135,51 @@ fn drain_events(state: &State<CoreState>, app: &AppHandle) -> Result<DrainResult
 
 /// Envía un mensaje al cerebro y drena de inmediato (eco sin espera).
 #[tauri::command]
-fn conversation_send(
+async fn conversation_send(
     content: String,
     source: Option<String>,
-    state: State<CoreState>,
+    state: State<'_, CoreState>,
     app: AppHandle,
 ) -> Result<SendResult, AtlasError> {
     let src = parse_source(source)?;
     let url = state.relay_url.clone();
-    let (request_id, session_id) =
-        post_send(&url, &content, src, Duration::from_secs(10))?;
-    // Drenado inmediato: el input local se representa sin esperar al ciclo.
-    let _ = drain_events(&state, &app);
-    Ok(SendResult {
-        request_id,
-        session_id,
+    let cursor = Arc::clone(&state.relay_cursor);
+    run_blocking(move || {
+        let (request_id, session_id) = post_send(&url, &content, src, Duration::from_secs(10))?;
+        // Drenado inmediato: el input local se representa sin esperar al ciclo.
+        let _ = drain_blocking(&url, &cursor, &app);
+        Ok(SendResult {
+            request_id,
+            session_id,
+        })
     })
+    .await
 }
 
 /// Pide al cerebro cancelar una petición (idempotente).
 #[tauri::command]
-fn conversation_cancel(
+async fn conversation_cancel(
     request_id: String,
-    state: State<CoreState>,
+    state: State<'_, CoreState>,
     app: AppHandle,
 ) -> Result<(), AtlasError> {
     let url = state.relay_url.clone();
-    post_cancel(&url, &request_id, Duration::from_secs(5))?;
-    let _ = drain_events(&state, &app);
-    Ok(())
+    let cursor = Arc::clone(&state.relay_cursor);
+    run_blocking(move || {
+        post_cancel(&url, &request_id, Duration::from_secs(5))?;
+        let _ = drain_blocking(&url, &cursor, &app);
+        Ok(())
+    })
+    .await
 }
 
 /// Responde a una petición de confirmación (`allow_once` | `deny`).
 /// Devuelve si fue aceptada (false también al caducar: idempotente).
 #[tauri::command]
-fn permission_respond(
+async fn permission_respond(
     request_id: String,
     decision: String,
-    state: State<CoreState>,
+    state: State<'_, CoreState>,
 ) -> Result<bool, AtlasError> {
     if decision != "allow_once" && decision != "deny" {
         return Err(AtlasError::new(
@@ -162,40 +189,52 @@ fn permission_respond(
         ));
     }
     let url = state.relay_url.clone();
-    atlas_core::post_confirm(&url, &request_id, &decision, Duration::from_secs(5))
+    run_blocking(move || {
+        atlas_core::post_confirm(&url, &request_id, &decision, Duration::from_secs(5))
+    })
+    .await
 }
 /// Arranca el cursor en el borde vivo: lo ya mostrado no se re-juega.
 #[tauri::command]
-fn session_get(state: State<CoreState>) -> Result<Option<ActiveSessionView>, AtlasError> {
+async fn session_get(state: State<'_, CoreState>) -> Result<Option<ActiveSessionView>, AtlasError> {
     let url = state.relay_url.clone();
-    let (snapshot, cursor) = get_session(&url, Duration::from_secs(5))?;
-    if let Ok(mut stored) = state.relay_cursor.lock() {
-        if cursor > *stored {
-            *stored = cursor;
+    let cursor = Arc::clone(&state.relay_cursor);
+    run_blocking(move || {
+        let (snapshot, current) = get_session(&url, Duration::from_secs(5))?;
+        if let Ok(mut stored) = cursor.lock() {
+            if current > *stored {
+                *stored = current;
+            }
         }
-    }
-    Ok(snapshot.map(|session| ActiveSessionView {
-        session_id: session.session_id,
-        state: session.state,
-        messages: session
-            .messages
-            .into_iter()
-            .map(|m| MessageView {
-                request_id: m.request_id,
-                session_id: m.session_id,
-                role: m.role,
-                content: m.content,
-                source: m.source,
-                timestamp: m.timestamp,
-            })
-            .collect(),
-    }))
+        Ok(snapshot.map(|session| ActiveSessionView {
+            session_id: session.session_id,
+            state: session.state,
+            messages: session
+                .messages
+                .into_iter()
+                .map(|m| MessageView {
+                    request_id: m.request_id,
+                    session_id: m.session_id,
+                    role: m.role,
+                    content: m.content,
+                    source: m.source,
+                    timestamp: m.timestamp,
+                })
+                .collect(),
+        }))
+    })
+    .await
 }
 
 /// Drena los eventos nuevos del cerebro (ciclo del frontend).
 #[tauri::command]
-fn relay_drain(state: State<CoreState>, app: AppHandle) -> Result<DrainResult, AtlasError> {
-    drain_events(&state, &app)
+async fn relay_drain(
+    state: State<'_, CoreState>,
+    app: AppHandle,
+) -> Result<DrainResult, AtlasError> {
+    let url = state.relay_url.clone();
+    let cursor = Arc::clone(&state.relay_cursor);
+    run_blocking(move || drain_blocking(&url, &cursor, &app)).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -205,7 +244,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(CoreState {
             relay_url: default_relay_url(),
-            relay_cursor: Mutex::new(0),
+            relay_cursor: Arc::new(Mutex::new(0)),
         })
         .invoke_handler(tauri::generate_handler![
             conversation_send,
@@ -244,4 +283,26 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EVENT_CONFIRM, EVENT_MESSAGE, EVENT_STATE};
+
+    /// Tauri 2 rechaza cualquier nombre con caracteres fuera de este conjunto,
+    /// y el rechazo llega como error de `listen`/`emit`: si un canal lo viola,
+    /// el frontend se queda sin eventos en silencio.
+    fn canal_valido(name: &str) -> bool {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '-' | '/' | ':' | '_'))
+    }
+
+    #[test]
+    fn canales_ipc_aceptados_por_tauri() {
+        for channel in [EVENT_STATE, EVENT_MESSAGE, EVENT_CONFIRM] {
+            assert!(canal_valido(channel), "canal IPC inválido: {channel}");
+        }
+    }
 }

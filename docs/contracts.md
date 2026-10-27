@@ -40,6 +40,22 @@ type SessionEvent = Correlation & {
 
 El frontend solo representa este estado; no puede forzar una transición de ejecución sin pasar por IPC y permisos.
 
+## Canales de eventos IPC
+
+El nombre del canal Tauri no puede contener puntos (Tauri 2 solo admite
+caracteres alfanuméricos y `-`, `/`, `:`, `_`); si se viola, `listen` y `emit`
+fallan y el frontal se queda sin eventos en silencio. Los canales son por tanto:
+
+| Contrato (campo `type` del payload) | Canal Tauri |
+| --- | --- |
+| `session.state_changed` | `session-state-changed` |
+| `conversation.message_appended` | `conversation-message-appended` |
+| `permission.confirmation_required` | `permission-confirmation-required` |
+
+El contrato sigue siendo el nombre con puntos: viaja dentro del payload como
+`type`. El test `canales_ipc_aceptados_por_tauri` (`src-tauri/src/lib.rs`)
+vigila los nombres de canal.
+
 ## Mensajes IPC
 
 ```ts

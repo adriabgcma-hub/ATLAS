@@ -4,7 +4,7 @@
 //! Este módulo solo transporta eventos y peticiones por la red local.
 
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -42,6 +42,36 @@ fn split_host_port(base_url: &str) -> Result<(String, u16), AtlasError> {
     }
 }
 
+/// Ordena IPv4 primero: el relay escucha en la IPv4 de la LAN y el nombre
+/// `.local` también resuelve a IPv6 link-local, que sin scope no conecta.
+fn prefer_ipv4(mut addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    addrs.sort_by_key(SocketAddr::is_ipv6);
+    addrs
+}
+
+fn resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>, AtlasError> {
+    let addrs: Vec<SocketAddr> = format!("{host}:{port}")
+        .to_socket_addrs()
+        .map_err(|_| unreachable("No se resuelve el relay."))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(unreachable("Relay sin dirección."));
+    }
+    Ok(prefer_ipv4(addrs))
+}
+
+fn connect(addrs: &[SocketAddr], timeout: Duration) -> Result<TcpStream, AtlasError> {
+    // Tope por dirección: una IPv6 inalcanzable no debe consumir el timeout
+    // entero cuando después hay una IPv4 válida.
+    let per_attempt = timeout.min(Duration::from_secs(2));
+    for addr in addrs {
+        if let Ok(stream) = TcpStream::connect_timeout(addr, per_attempt) {
+            return Ok(stream);
+        }
+    }
+    Err(unreachable("No se pudo conectar con el relay."))
+}
+
 fn http(
     method: &str,
     base_url: &str,
@@ -50,13 +80,8 @@ fn http(
     timeout: Duration,
 ) -> Result<serde_json::Value, AtlasError> {
     let (host, port) = split_host_port(base_url)?;
-    let addr = format!("{host}:{port}")
-        .to_socket_addrs()
-        .map_err(|_| unreachable("No se resuelve el relay."))
-        .and_then(|mut it| it.next().ok_or_else(|| unreachable("Relay sin dirección.")))?;
-
-    let mut stream = TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|_| unreachable("No se pudo conectar con el relay."))?;
+    let addrs = resolve(&host, port)?;
+    let mut stream = connect(&addrs, timeout)?;
     stream
         .set_read_timeout(Some(timeout))
         .map_err(|_| unreachable("No se pudo configurar el relay."))?;
@@ -441,6 +466,17 @@ mod tests {
         let fetched = get_events(&url, 0, Duration::from_secs(5)).expect("fetch ok");
         assert_eq!(fetched.items.len(), 1);
         assert!(matches!(fetched.items[0].1, OutEvent::Confirm(_)));
+    }
+
+    #[test]
+    fn ipv4_va_antes_que_ipv6() {
+        let addrs = vec![
+            "[::1]:8765".parse().unwrap(),
+            "192.168.100.26:8765".parse().unwrap(),
+        ];
+        let ordered = prefer_ipv4(addrs);
+        assert!(ordered[0].is_ipv4());
+        assert!(ordered[1].is_ipv6());
     }
 
     #[test]
