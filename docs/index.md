@@ -7,6 +7,7 @@ Documentación del proyecto Atlas.
 - [Arquitectura](./architecture.md): describe las capas de Atlas, sus responsabilidades y el flujo de una petición.
 - [Contratos](./contracts.md): define los mensajes IPC, estados de sesión, herramientas, permisos y errores compartidos.
 - [Plan de implementación](./implementation-plan.md): organiza las fases previstas para construir Atlas.
+- [Hefesto](./hefesto-plan.md): plan revisado del especialista del Mac, fronteras de confianza, protocolo y puertas de validación.
 - [Implementado](./implemented.md): mantiene el historial de implementaciones y el nombre de cada commit asociado.
 - [Seguridad y privacidad](./security.md): define el tratamiento de secretos, permisos, datos y sensores.
 - [Release](./release.md): describe las comprobaciones y comandos para generar y publicar bundles.

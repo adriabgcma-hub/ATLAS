@@ -18,11 +18,15 @@ la app (o con la tarea de trabajo) que lo necesita.
 - **No** crear LaunchAgents ni servicios de arranque para helpers. El
   autoarranque de Hub Panel (`~/Library/LaunchAgents/Hub Panel.plist`) existe
   porque el usuario lo pidió para la app; un proceso auxiliar nunca.
-- Los únicos subprocess que la app lanzará son efímeros: `ssh` del reinicio
-  (timeout 25 s) y el `subprocess` del monitor del servidor (solo corre en
-  `atlas-hub`, nunca en el Mac).
-- No matar procesos ajenos sin permiso explícito: informar de lo que consume
-  memoria y preguntar antes de tocar LaunchAgents de otros proyectos.
+- Los subprocess existentes son efímeros: `ssh` del reinicio (timeout 25 s) y
+  el monitor del servidor (solo en `atlas-hub`). Hefesto podrá añadir procesos
+  efímeros en el Mac según `docs/hefesto-plan.md`: autorización por operación,
+  límites de tiempo/salida, entorno sin secretos y supervisión de descendientes.
+  Nada de `sudo`, LaunchAgents, autoarranque ni procesos desacoplados. Un timeout
+  o `kill_on_drop` solos no demuestran que no queden descendientes huérfanos.
+- El aborto limpia solo los procesos propios y suspende Hefesto. Matar un proceso
+  ajeno del usuario requiere confirmación individual mostrando identidad y consumo;
+  revalidar la identidad, no solo el PID. No tocar LaunchAgents de otros proyectos.
 
 ## Servidores de desarrollo (levantarlos solo mientras se trabaja y cerrarlos al acabar)
 
@@ -204,6 +208,10 @@ Si una app falla, la otra sigue funcionando.
 - Nunca guardar secretos/tokens/contraseñas/claves en el repositorio.
 - Validar entradas antes de ejecutar herramientas; normalizar respuestas externas.
 - Confirmación explícita para escritura, comunicación externa, ejecución de comandos, cambios de configuración y borrado.
+- Hefesto sigue la matriz de `docs/hefesto-plan.md`: solo adaptadores triviales
+  expresamente definidos pueden actuar sin confirmar; crear nunca sobrescribe y
+  un plan no sustituye la confirmación de acciones destructivas. La política de
+  la app no autoriza al agente de desarrollo a ejecutar esas acciones por su cuenta.
 - La falta de respuesta nunca significa autorización.
 - Cancelación, timeouts y estados de error en operaciones lentas o con efectos.
 - No exponer secretos, rutas privadas, datos personales ni contenido sensible en logs/respuestas.

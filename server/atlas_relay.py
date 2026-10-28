@@ -46,6 +46,7 @@ import json
 import os
 import queue
 import socket
+import sqlite3
 import sys
 import threading
 import time
@@ -54,11 +55,13 @@ import urllib.parse
 import urllib.request
 import zoneinfo
 from collections import deque
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NoReturn
 
 import atlas_caldav
+import hefesto
 import system_monitor
 
 MAX_CONTENT_LEN = 4000
@@ -1555,6 +1558,64 @@ def load_dotenv(path: str = ".env") -> None:
         os.environ[key] = value
 
 
+@contextmanager
+def hefesto_listener(host: str, data_dir: str):
+    names = ("HEFESTO_PORT", "HEFESTO_TLS_CERT", "HEFESTO_TLS_KEY",
+             "HEFESTO_TLS_CA", "HEFESTO_PEERS_FILE")
+    if not any(name in os.environ for name in names):
+        yield
+        return
+    if not all(os.environ.get(name, "").strip() for name in names):
+        fail_config("Hefesto requiere puerto, certificado, clave, CA y registro de pares.")
+    try:
+        port = int(os.environ["HEFESTO_PORT"])
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except ValueError:
+        fail_config("Puerto de Hefesto inválido.")
+
+    with ExitStack() as resources:
+        try:
+            peers = hefesto.load_peers(os.environ["HEFESTO_PEERS_FILE"])
+            journal = hefesto.Journal(os.path.join(data_dir, "hefesto.sqlite"))
+            resources.callback(journal.close)
+            server = hefesto.create_server(
+                (host, port), journal, peers,
+                certfile=os.environ["HEFESTO_TLS_CERT"],
+                keyfile=os.environ["HEFESTO_TLS_KEY"],
+                cafile=os.environ["HEFESTO_TLS_CA"],
+            )
+        except (OSError, ValueError, sqlite3.Error):
+            fail_config("Configuración segura de Hefesto no disponible.")
+        resources.callback(server.server_close)
+        lifecycle = threading.Lock()
+        stopping = threading.Event()
+        serving = threading.Event()
+
+        def serve():
+            with lifecycle:
+                if stopping.is_set():
+                    return
+                serving.set()
+            server.serve_forever()
+
+        def stop():
+            with lifecycle:
+                stopping.set()
+                started = serving.is_set()
+            if started:
+                server.shutdown()
+            if thread.ident is not None:
+                thread.join()
+
+        thread = threading.Thread(target=serve, name="hefesto-https", daemon=True)
+        # También cubre una interrupción dentro de start(), antes de entrar al with.
+        resources.callback(stop)
+        thread.start()
+        log("Hefesto: listener mTLS habilitado (solo eco).")
+        yield
+
+
 def main() -> int:
     load_dotenv()
     cfg = read_env()
@@ -1597,19 +1658,19 @@ def main() -> int:
     sysmon = system_monitor.SystemMonitor(
         log_panel=lambda _kind, message: dlog(brain, "PANEL", message))
 
-    threading.Thread(target=brain.worker, daemon=True, name="brain-worker").start()
-    if cfg["token"]:
-        threading.Thread(target=brain.telegram_loop, daemon=True,
-                         name="telegram-poll").start()
-
-    server = ThreadingHTTPServer((host, cfg["port"]),
-                                 make_handler(brain, network, status, sysmon))
-    log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
-    log(f"panel estático en /panel/ ({sysmon.panel_dist}).")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    with ThreadingHTTPServer((host, cfg["port"]),
+                             make_handler(brain, network, status, sysmon)) as server:
+        with hefesto_listener(host, cfg["data_dir"]):
+            threading.Thread(target=brain.worker, daemon=True, name="brain-worker").start()
+            if cfg["token"]:
+                threading.Thread(target=brain.telegram_loop, daemon=True,
+                                 name="telegram-poll").start()
+            log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
+            log(f"panel estático en /panel/ ({sysmon.panel_dist}).")
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
     return 0
 
 

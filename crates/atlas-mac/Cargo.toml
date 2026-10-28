@@ -1,0 +1,11 @@
+[package]
+name = "atlas-mac"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed, effect-free Hefesto protocol and local echo foundation"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }

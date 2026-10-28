@@ -76,6 +76,20 @@ app abierta o cerrada:
   presenta cuando está abierta. El núcleo Rust es transporte (contratos + HTTP),
   sin estado propio.
 
+### Hefesto: base aislada del especialista del Mac
+
+La primera entrega es solo eco, no control del Mac. `server/hefesto.py` separa el
+journal SQLite y el protocolo mTLS del chat/FIFO/eventos existentes. El listener es
+opcional y comparte proceso con el relay; el HTTP de Atlas no le delega trabajo.
+`crates/atlas-mac` contiene contratos estrictos, cliente HTTPS y ejecutor de eco con
+política local, identidad de instancia, caducidad, deduplicación y suspensión.
+
+La biblioteca todavía no está enlazada a Tauri: no hay bucle nativo, nuevo proceso,
+control de apps/archivos/terminal ni cambios en UI. La integración del ciclo de vida,
+el aborto local y los controles app/panel preceden a las herramientas reales. Después
+se añadirá delegación no bloqueante; no se amplía la espera del worker FIFO actual.
+Detalle y puertas de validación en [el plan de Hefesto](./hefesto-plan.md).
+
 ### Hub Panel: app macOS independiente
 
 `apps/panel-app` es una app Tauri v2 **separada** de la principal (bundle

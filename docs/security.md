@@ -14,6 +14,31 @@ Las herramientas deben declarar su nivel de riesgo y sus permisos requeridos. La
 
 La ausencia de respuesta nunca equivale a autorización. Las confirmaciones deben caducar, estar vinculadas a una única petición y poder rechazarse o cancelarse.
 
+Para Hefesto rige la matriz de [su plan](./hefesto-plan.md): prohibición > permiso
+individual > plan > adaptador trivial. Crear no permite sobrescribir, un plan no
+permite saltar la confirmación destructiva y no se admite elevación mediante `sudo`.
+Las excepciones triviales describen herramientas futuras: la base solo admite eco.
+
+## Frontera de Hefesto (base local, no desplegada)
+
+El HTTP de Atlas no autoriza acciones del Mac. Hefesto usa un listener distinto con
+mTLS, CA explícita y registro de huellas de certificados ligado a rol/dispositivo.
+La huella se comprueba al terminar el handshake, antes de procesar HTTP, y un
+certificado no listado se cierra sin respuesta; cada conexión tiene un plazo
+absoluto que la cierra aunque el cliente gotee bytes, para que el trabajo lento
+previo a la autenticación no agote las plazas del listener.
+No hay activación por defecto, downgrade, credenciales en frontend ni ejecución desde
+mensajes de chat. Las entradas y confirmaciones de delegación real siguen pendientes.
+
+El ejecutor empieza suspendido; las instancias, generaciones, leases e invocaciones
+impiden reutilizar entregas antiguas. Un resultado desconocido no se reejecuta. El
+aborto local no depende de la red y no revierte efectos ya producidos; falta todavía
+integrarlo en los controles de app/panel antes de habilitar capacidades reales.
+
+Las pruebas usan certificados efímeros y texto ficticio. No provisionar certificados,
+TCC ni secretos reales sin permiso. El journal de eco persiste texto de prueba para
+validar duplicados; no admite documentos privados ni hace llamadas a proveedores.
+
 ## Datos
 
 Atlas debe distinguir entre:

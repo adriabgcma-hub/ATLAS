@@ -163,3 +163,18 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
+## Hefesto v1 — base de eco
+
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-de-base-v1-solo-eco).
+No añade herramientas al catálogo del LLM ni comandos IPC. Usa `protocolVersion: 1`,
+IDs opacos, campos estrictos, cuerpo máximo 8 KiB y texto máximo 256 bytes UTF-8.
+
+`deviceId` se deriva del certificado mTLS, nunca del cuerpo del cliente. `instanceId`
+identifica un arranque; `generation` invalida trabajo anterior; `submissionId` evita
+duplicar envíos y `invocationId` identifica la entrega/resultado. `requestId`,
+`sessionId` y `taskId` sirven para correlación, no conceden permisos.
+
+El journal conserva `pending`, `dispatched`, `succeeded`, `cancelled`, `expired` y
+`unknown`. Reiniciar cancela lo pendiente e invalida instancias; un despachado sin
+resultado queda desconocido, sin reintento automático. El protocolo no promete
+exactly-once para efectos externos ni sustituye el consentimiento por acción.

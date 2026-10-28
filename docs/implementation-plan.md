@@ -119,6 +119,25 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       "Abrir en ventana" y exportar CSV a `~/Documents/Atlas/tablas/`
       (diseñado; pendiente de implementar).
 
+## Hefesto — especialista del Mac (2026-10-27)
+
+Plan completo y criterios: [Hefesto](./hefesto-plan.md). Commit, push y despliegue
+de prueba autorizados por el usuario (2026-10-28).
+
+- [x] Revisar historial y preservar la base publicada (`49c8cf2`).
+- [x] Sustituir el borrador por el plan revisado: autenticación, identidad por
+      invocación, disponibilidad real, deduplicación, privacidad y parada.
+- [x] Base v1 local con mTLS, roles, leases, control y eco sin efectos; pruebas
+      Rust–Python correctas. Sin activación real. Revisión final cerrada
+      (2026-10-28): registro en dos fases (lease anclado al primer envío) y
+      autorización TLS antes de HTTP con plazo absoluto por conexión.
+- [ ] Integración nativa/app/panel y pruebas de parada antes de herramientas reales.
+- [ ] Delegación no bloqueante, identidad visual y recuperación de tareas.
+- [ ] Archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.
+
+La API HTTP actual no puede lanzar Hefesto; las capacidades reales permanecen
+fuera de la primera entrega. La ventana de tablas queda pendiente.
+
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 
 - `GROQ_API_KEY_1/2/3` — rotación Groq (en uso por el cerebro).

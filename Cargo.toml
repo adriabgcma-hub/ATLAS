@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/atlas-core", "apps/panel-app/src-tauri"]
+members = ["src-tauri", "crates/atlas-core", "crates/atlas-mac", "apps/panel-app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

@@ -234,6 +234,32 @@ Nota: el cliente CalDAV usa PROPFIND + GET (no REPORT) para evitar el
 throttle de Apple. Las lecturas son rápidas (~10 s para todos los
 calendarios) y se cachean 120 s en el relay.
 
+## Hefesto: listener mTLS separado (base local, no desplegada)
+
+Las rutas `/v1/hefesto/*` no existen en este listener HTTP. El protocolo de eco está
+especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-de-base-v1-solo-eco) y vive
+exclusivamente en HTTPS con certificados cliente obligatorios. No forma parte del
+catálogo del LLM ni del flujo de Telegram.
+
+Desactivado salvo configuración explícita completa de **las cinco** variables:
+
+- `HEFESTO_PORT`: puerto independiente, 1–65535; sin valor por defecto.
+- `HEFESTO_TLS_CERT`, `HEFESTO_TLS_KEY`: rutas del certificado/clave del listener.
+- `HEFESTO_TLS_CA`: ruta de la CA para verificar certificados cliente.
+- `HEFESTO_PEERS_FILE`: JSON externo, mapa de huella SHA-256 hexadecimal minúscula
+  del certificado DER a `{role: "device"|"controller", deviceId: "id-opaco"}`.
+
+Una configuración parcial o TLS inválida impide arrancar; nunca degrada a HTTP.
+El listener usa el mismo host LAN y proceso del relay, sin helper/autoarranque nuevo.
+Autoriza la huella al completar el handshake y antes de procesar HTTP: un certificado
+válido de la CA pero fuera del registro se cierra sin respuesta. Cada conexión tiene un
+plazo absoluto de 5 s (cerrado también contra un goteo de bytes), controlado por un
+vigilante interno que solo vive mientras hay conexiones.
+Su hilo, socket y journal se cierran al abandonar el contexto del servidor.
+`RELAY_DATA_DIR/hefesto.sqlite` conserva invocaciones y resultados de prueba; no es
+un log público ni se sirve por las rutas existentes. No se han instalado credenciales
+ni modificado `.env`, firewall o systemd. El despliegue espera permiso de publicación.
+
 ## Variables de entorno (nombres; valores solo en `.env` local)
 
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`
