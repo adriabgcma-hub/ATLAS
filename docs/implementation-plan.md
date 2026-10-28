@@ -128,9 +128,13 @@ de prueba autorizados por el usuario (2026-10-28).
 - [x] Sustituir el borrador por el plan revisado: autenticación, identidad por
       invocación, disponibilidad real, deduplicación, privacidad y parada.
 - [x] Base v1 local con mTLS, roles, leases, control y eco sin efectos; pruebas
-      Rust–Python correctas. Sin activación real. Revisión final cerrada
-      (2026-10-28): registro en dos fases (lease anclado al primer envío) y
-      autorización TLS antes de HTTP con plazo absoluto por conexión.
+      Rust–Python correctas. Revisión final cerrada (2026-10-28): registro en dos
+      fases (lease anclado al primer envío) y autorización TLS antes de HTTP con
+      plazo absoluto por conexión.
+- [x] Desplegar y activar el listener de prueba en atlas-hub (8767, solo LAN,
+      PKI de prueba fuera del repo) y validar el eco completo desde el Mac.
+      `hefesto-echo` resuelve IPv4 (el link-local IPv6 de mDNS no escucha y
+      agotaba el timeout en cada petición) y renueva la lease con `heartbeat`.
 - [ ] Integración nativa/app/panel y pruebas de parada antes de herramientas reales.
 - [ ] Delegación no bloqueante, identidad visual y recuperación de tareas.
 - [ ] Archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.

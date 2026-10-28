@@ -292,6 +292,20 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   clientes `device`/`controller`, `peers.json`) generada fuera del repo en un
   directorio del usuario con permisos 700/600, y validada localmente contra un
   listener real con la consola `hefesto-echo` (eco, reutilización de instancia,
-  Unicode y límite de 256 bytes). La activación del listener en atlas-hub (puerto
-  8767, `.env` y `ufw` solo LAN) queda preparada en `/tmp/hefesto-setup` y necesita
-  un paso con la contraseña de `adria_admin`; se registrará al completarse.
+  Unicode y límite de 256 bytes).
+- 2026-10-28, activación del listener en atlas-hub completada por el usuario con
+  el bundle de `/tmp/hefesto-setup`: `.env` con las cinco variables, certificados
+  en `/opt/atlas/hefesto` (700) y `ufw` limitado a la LAN. Verificado desde el
+  Mac: `atlas-relay` activo (PID 5584, ~22 MB), listener en
+  `192.168.100.26:8767`, `/v1/health` correcto, estado mTLS 200, envío con el
+  certificado de dispositivo 403 `forbidden` (RBAC) y HTTP plano cortado antes
+  de cualquier respuesta. El bundle de activación (con `server.key`) se eliminó
+  del servidor.
+- 2026-10-28, corregida la consola de prueba `hefesto-echo` (fuera del repo):
+  `atlas-hub.local` anuncia primero un IPv6 link-local donde el relay no escucha
+  y `urllib` gastaba el timeout de 10 s en cada petición, agotando la lease de
+  15 s (`device_offline`). Ahora resuelve IPv4 conservando el nombre para SNI y
+  verificación de certificado, y hace `heartbeat` justo después de registrar
+  porque registrar un ID vivo no renueva la lease. Eco completo correcto dos
+  veces seguidas (Unicode incluido, instancia reutilizada, generación estable) y
+  `--status` mostrando la instancia viva.

@@ -19,7 +19,7 @@ individual > plan > adaptador trivial. Crear no permite sobrescribir, un plan no
 permite saltar la confirmación destructiva y no se admite elevación mediante `sudo`.
 Las excepciones triviales describen herramientas futuras: la base solo admite eco.
 
-## Frontera de Hefesto (base local, no desplegada)
+## Frontera de Hefesto (base local; listener de prueba activo en atlas-hub)
 
 El HTTP de Atlas no autoriza acciones del Mac. Hefesto usa un listener distinto con
 mTLS, CA explícita y registro de huellas de certificados ligado a rol/dispositivo.
@@ -38,6 +38,9 @@ integrarlo en los controles de app/panel antes de habilitar capacidades reales.
 Las pruebas usan certificados efímeros y texto ficticio. No provisionar certificados,
 TCC ni secretos reales sin permiso. El journal de eco persiste texto de prueba para
 validar duplicados; no admite documentos privados ni hace llamadas a proveedores.
+Desde 2026-10-28 el listener está activo en atlas-hub (8767, solo LAN) con una PKI
+de prueba fuera del repo, sin enlace con la app ni con Telegram; sus credenciales y
+el journal contienen únicamente material de prueba.
 
 ## Datos
 

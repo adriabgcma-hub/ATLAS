@@ -234,7 +234,7 @@ Nota: el cliente CalDAV usa PROPFIND + GET (no REPORT) para evitar el
 throttle de Apple. Las lecturas son rápidas (~10 s para todos los
 calendarios) y se cachean 120 s en el relay.
 
-## Hefesto: listener mTLS separado (base local, no desplegada)
+## Hefesto: listener mTLS separado (activo en atlas-hub, solo pruebas)
 
 Las rutas `/v1/hefesto/*` no existen en este listener HTTP. El protocolo de eco está
 especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-de-base-v1-solo-eco) y vive
@@ -257,8 +257,14 @@ plazo absoluto de 5 s (cerrado también contra un goteo de bytes), controlado po
 vigilante interno que solo vive mientras hay conexiones.
 Su hilo, socket y journal se cierran al abandonar el contexto del servidor.
 `RELAY_DATA_DIR/hefesto.sqlite` conserva invocaciones y resultados de prueba; no es
-un log público ni se sirve por las rutas existentes. No se han instalado credenciales
-ni modificado `.env`, firewall o systemd. El despliegue espera permiso de publicación.
+un log público ni se sirve por las rutas existentes.
+
+En atlas-hub está activo con fines de prueba (2026-10-28): puerto 8767, certificados
+en `/opt/atlas/hefesto` (700), entradas en `.env` y `ufw` limitado a
+`192.168.100.0/24`. Verificado desde el Mac: estado mTLS 200, envío con certificado
+de dispositivo 403 `forbidden`, HTTP plano cortado y eco completo `succeeded`. Las
+credenciales son una PKI de prueba fuera del repo; la app todavía no puede lanzar
+Hefesto ni delegarle tareas.
 
 ## Variables de entorno (nombres; valores solo en `.env` local)
 
