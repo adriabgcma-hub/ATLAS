@@ -286,5 +286,12 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   idempotente, abort y estado final; huella no listada (curl 56, sin respuesta HTTP),
   CA ajena (curl 60) y HTTP plano (curl 56, sin servicio). El arnés vive en `/tmp`, no
   en el repo; al terminar no quedan procesos, listeners ni temporales.
-- 2026-10-28: commit, push y despliegue de prueba autorizados por el usuario.
-  El despliegue, las credenciales de prueba y su verificación se registran al ejecutarlos.
+- 2026-10-28, publicación y despliegue de prueba (autorizados): commit `e22157f`
+  subido a `origin/main` y relay desplegado con `./scripts/deploy-relay.sh`;
+  `/v1/health` correcto (Telegram y Groq activos). PKI de prueba (CA, servidor y
+  clientes `device`/`controller`, `peers.json`) generada fuera del repo en un
+  directorio del usuario con permisos 700/600, y validada localmente contra un
+  listener real con la consola `hefesto-echo` (eco, reutilización de instancia,
+  Unicode y límite de 256 bytes). La activación del listener en atlas-hub (puerto
+  8767, `.env` y `ufw` solo LAN) queda preparada en `/tmp/hefesto-setup` y necesita
+  un paso con la contraseña de `adria_admin`; se registrará al completarse.
