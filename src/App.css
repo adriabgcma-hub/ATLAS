@@ -487,6 +487,15 @@ select { font: inherit; }
   background: rgba(14, 30, 44, 0.55);
 }
 
+.chat-msg-hefesto {
+  border: 1px solid rgba(186, 124, 255, 0.35);
+  background: rgba(32, 16, 52, 0.55);
+}
+
+.chat-msg-hefesto .chat-msg-tag {
+  color: rgba(206, 166, 255, 0.75);
+}
+
 .chat-msg-tag {
   font-size: 9px;
   font-weight: 700;

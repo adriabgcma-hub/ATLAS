@@ -85,20 +85,26 @@ export function ConversationPanel({ messages }: { messages: ChatMessage[] }) {
             isLastAssistant
               ? (done ? message.content : message.content.slice(0, revealed))
               : message.content
+          const isHefesto = message.agent === 'hefesto'
+          const tag = message.role === 'user'
+            ? message.source === 'telegram'
+              ? 'TG · TÚ'
+              : 'TÚ'
+            : isHefesto
+              ? 'HEFESTO'
+              : 'ATLAS'
           return (
             <article
               key={`${message.requestId}-${message.role}`}
               className={
-                message.role === 'user' ? 'chat-msg chat-msg-user' : 'chat-msg chat-msg-assistant'
+                message.role === 'user'
+                  ? 'chat-msg chat-msg-user'
+                  : isHefesto
+                    ? 'chat-msg chat-msg-assistant chat-msg-hefesto'
+                    : 'chat-msg chat-msg-assistant'
               }
             >
-              <span className="chat-msg-tag">
-                {message.role === 'user'
-                  ? message.source === 'telegram'
-                    ? 'TG · TÚ'
-                    : 'TÚ'
-                  : 'ATLAS'}
-              </span>
+              <span className="chat-msg-tag">{tag}</span>
               {message.role === 'assistant' ? (
                 <div className="chat-msg-text chat-md">
                   <MarkdownMessage text={text} streaming={showCursor} />
