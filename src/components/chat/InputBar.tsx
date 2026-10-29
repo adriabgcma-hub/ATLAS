@@ -108,12 +108,11 @@ export function InputBar({
         autoComplete="off"
         spellCheck={false}
         aria-label="Escribe un mensaje para Atlas"
-        disabled={pending && !hasConfirmations}
       />
       <button
         type="submit"
         className="chat-send-btn"
-        disabled={(!canSubmit && !pending && !hasConfirmations) || (pending && !hasConfirmations)}
+        disabled={!canSubmit && !pending && !hasConfirmations}
         aria-label={
           hasConfirmations
             ? 'Enviar respuesta de confirmación'
