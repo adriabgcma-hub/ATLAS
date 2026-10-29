@@ -35,7 +35,7 @@ siendo solo eco); la reactivación de Hefesto sigue siendo **manual y en la app*
 - La suspensión remota deja el mismo rastro que la local: marcador
   `hefesto-suspended` en el directorio de datos de la app y dispositivo invalidado en el journal.
 - La reactivación sigue siendo **manual y en la app** (no se reactiva desde el panel).
-- La latencia de la suspensión remota está acotada (~5 s, el latido del dispositivo).
+- La latencia de la suspensión remota está acotada (~1 s, el sondeo del dispositivo).
 
 ### 2.3 Matriz de fallos
 
@@ -60,32 +60,28 @@ usuario y registrados en `docs/hefesto-plan.md` §8:
 
 ### 3.2 Control desde Hub Panel
 
-Cadena de control remoto (el panel no obtiene certificados nuevos; usa el relay):
+Cadena de control remoto (el panel no obtiene certificados nuevos; usa el relay).
+El mecanismo de bajo nivel **ya existe**: el journal expone `status` (GET, legible
+por el controller) y `control` (POST `abort`/`resume`), y el dispositivo **ya
+observa la suspensión remota** — ante un rechazo pide `status`, ve `suspended`
+y se autosuspende (marcador + fase Suspended, cableado en `resync`→`observe`→
+`apply_status`→`suspend_local` y la puerta `Suspend` de `hefesto_loop`). Falta el
+lado controlador y la UI:
 
-1. **Journal (protocolo v1)**: nueva operación `status`, rol controller, lectura pura:
-   `POST /v1/hefesto/status {protocolVersion: 1}` →
-   `{protocolVersion: 1, generation: int, suspended: bool}`.
-   - `_FIELDS` gana `"status": set()` (sin campos obligatorios).
-   - RBAC: `status` se añade a la lista controller (`submit`, `outcome`, `status`).
-     `control` queda como está (ya lo puede enviar cualquier peer autenticado, incluido el controller).
-   - `_operate`: rama `status` que devuelve `generation` y `suspended` del dispositivo del peer, sin mutar.
-2. **Relay**: nuevos endpoints HTTP (documentados en `docs/relay.md`):
-   - `GET /v1/hefesto/status` → `{configured: bool, deviceId: str|null, suspended: bool|null}`.
-   - `POST /v1/hefesto/suspend` → lee `status` del journal (para la `generation` actual),
-     envía `control {action: "abort", expectedGeneration}` y devuelve
-     `{ok: true, suspended: true}`. Si el listener Hefesto no está configurado,
-     `{ok: false, error: "hefesto_disabled"}`. Ante `stale_generation`, reintenta una vez.
-   - La suspensión solo invalida (no reactiva): no hay endpoint de `resume` remoto.
-3. **Dispositivo (observación de suspensión remota)**: en el bucle `hefesto_loop`
-   (`src-tauri/src/lib.rs`), cuando una respuesta de estado trae `suspended: true`
-   y el dispositivo se cree activo (sin aborto pendiente), se autosuspende:
-   escribe el marcador `hefesto-suspended` y ejecuta el aborto local (igual que
-   `hefesto_abort`). El campo `suspended` ya viaja en `Status` (wire.rs:305); solo falta observarlo.
-4. **Hub Panel**: nueva tarjeta/tarjeta ampliada "Hefesto" que consume
-   `GET /v1/hefesto/status` (sondeo, misma cadencia que el resto del panel) y un
-   botón **Suspender** que llama a `POST /v1/hefesto/suspend`. Sin reinicio automático ni `resume`.
+1. **Relay (Brain)**: dos métodos nuevos:
+   - `hefesto_status() -> dict` — como controller, `dispatch` GET `/v1/hefesto/status`
+     y devuelve `{configured, deviceId, suspended, generation}`; `configured: False`
+     si no hay journal ni dispositivo.
+   - `hefesto_suspend() -> dict` — lee `status` (para la `generation` actual), envía
+     `control {action: "abort", expectedGeneration}` y devuelve
+     `{ok: true, suspended: true}`; ante `stale_generation`, reintenta una vez;
+     si no hay listener, `{ok: false, error: "hefesto_disabled"}`.
+2. **Relay (HTTP)**: `GET /v1/hefesto/status` y `POST /v1/hefesto/suspend`
+   (documentados en `docs/relay.md`). La suspensión solo invalida: no hay `resume` remoto.
+3. **Hub Panel**: tarjeta "Hefesto" que consume `GET /v1/hefesto/status` (sondeo) y
+   un botón **Suspender** que llama a `POST /v1/hefesto/suspend`. Sin reinicio automático ni `resume`.
 
-Trade-off asumido: la suspensión remota es asíncrona (~5 s) y unifica local/Hub
+Trade-off asumido: la suspensión remota es asíncrona (~1 s) y unifica local/Hub
 Panel/remoto en el mecanismo del journal, sin certificados nuevos en el panel.
 
 ### 3.3 Matriz de fallos
@@ -100,9 +96,9 @@ Panel/remoto en el mecanismo del journal, sin certificados nuevos en el panel.
 
 ## 4. Contratos y documentación
 
-- `docs/contracts.md`: sección Hefesto v1 gana la operación `status` (controller, lectura pura).
-- `docs/hefesto-plan.md`: §5 (tabla de operaciones) y §8 (registro) actualizados.
 - `docs/relay.md`: documentar `GET /v1/hefesto/status` y `POST /v1/hefesto/suspend`.
+- `docs/hefesto-plan.md`: §8 (registro de la entrega 2) actualizado.
+- `docs/contracts.md` no cambia: `status` y `control` ya forman parte del protocolo v1.
 - Los contratos tipados Rust/TS (`agent`/`taskId`) **no cambian**: no hay mensajes ni eventos nuevos.
 
 ## 5. Fuera de alcance
