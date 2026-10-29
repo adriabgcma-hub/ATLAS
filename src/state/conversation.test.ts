@@ -61,6 +61,37 @@ describe('conversationReducer', () => {
     expect(s3.messages).toHaveLength(2)
   })
 
+  it('conserva agent y taskId del continuador', () => {
+    const event: MessageAppended = {
+      ...appended('assistant', 'req-2'),
+      agent: 'hefesto',
+      taskId: 'tsk-1',
+    }
+    const s = conversationReducer(initialConversationState, {
+      type: 'conversation.message_appended',
+      event,
+    })
+    expect(s.messages[0]).toMatchObject({ agent: 'hefesto', taskId: 'tsk-1' })
+  })
+
+  it('el continuador con requestId propio no colisiona con el interino', () => {
+    const interino = appended('assistant', 'req-1')
+    const continuador: MessageAppended = {
+      ...appended('assistant', 'req-2'),
+      agent: 'hefesto',
+      taskId: 'tsk-1',
+    }
+    let s = conversationReducer(initialConversationState, {
+      type: 'conversation.message_appended',
+      event: interino,
+    })
+    s = conversationReducer(s, {
+      type: 'conversation.message_appended',
+      event: continuador,
+    })
+    expect(s.messages).toHaveLength(2)
+  })
+
   it('completed limpia el request en vuelo', () => {    const s1 = conversationReducer(initialConversationState, {
       type: 'session.state_changed',
       event: stateChanged('thinking'),

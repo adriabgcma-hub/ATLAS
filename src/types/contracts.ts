@@ -8,6 +8,8 @@ export type Source = 'local' | 'telegram'
 
 export type MessageRole = 'user' | 'assistant'
 
+export type Agent = 'atlas' | 'hefesto'
+
 export type SessionState =
   | 'idle'
   | 'thinking'
@@ -36,6 +38,10 @@ export interface MessageAppended extends Correlation {
   role: MessageRole
   content: string
   source: Source
+  /** Agente emisor del mensaje; ausente = Atlas. */
+  agent?: Agent
+  /** Correlación con la delegación (taskId del protocolo Hefesto). */
+  taskId?: string
 }
 
 export interface AtlasError {
@@ -63,6 +69,8 @@ export interface ChatMessage {
   content: string
   source: Source
   timestamp: string
+  agent?: Agent
+  taskId?: string
 }
 
 /** Resultado de `conversation_send` / mensajes drenados del relay. */

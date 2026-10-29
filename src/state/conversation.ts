@@ -78,6 +78,8 @@ function toChatMessage(event: MessageAppended): ChatMessage {
     content: event.content,
     source: event.source,
     timestamp: event.timestamp,
+    agent: event.agent,
+    taskId: event.taskId,
   }
 }
 
