@@ -225,6 +225,7 @@ name = "atlas-next"
 version = "0.1.0"
 dependencies = [
  "atlas-core",
+ "atlas-mac",
  "serde",
  "tauri",
  "tauri-build",

@@ -83,3 +83,27 @@ export interface ActiveSession {
   state: SessionState
   messages: ChatMessage[]
 }
+
+/** Fase del dispositivo Hefesto (runtime nativo dentro de la app). */
+export type HefestoPhase =
+  | 'unconfigured'
+  | 'connecting'
+  | 'suspended'
+  | 'ready'
+  | 'offline'
+  | 'error'
+
+/** Estado que publica el bucle nativo de Hefesto. */
+export interface HefestoSnapshot {
+  phase: HefestoPhase
+  deviceId: string | null
+  generation: number | null
+  lastEcho: string | null
+  /** Código estable corto; nunca rutas, certificados ni secretos. */
+  detail: string | null
+}
+
+/** Evento IPC `hefesto-state-changed`. */
+export interface HefestoEvent extends HefestoSnapshot {
+  type: 'hefesto.state_changed'
+}

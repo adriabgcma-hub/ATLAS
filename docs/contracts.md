@@ -51,6 +51,7 @@ fallan y el frontal se queda sin eventos en silencio. Los canales son por tanto:
 | `session.state_changed` | `session-state-changed` |
 | `conversation.message_appended` | `conversation-message-appended` |
 | `permission.confirmation_required` | `permission-confirmation-required` |
+| `hefesto.state_changed` | `hefesto-state-changed` |
 
 El contrato sigue siendo el nombre con puntos: viaja dentro del payload como
 `type`. El test `canales_ipc_aceptados_por_tauri` (`src-tauri/src/lib.rs`)
@@ -166,8 +167,47 @@ Los detalles internos, rutas privadas, tokens y respuestas completas de proveedo
 ## Hefesto v1 — base de eco
 
 Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-de-base-v1-solo-eco).
-No añade herramientas al catálogo del LLM ni comandos IPC. Usa `protocolVersion: 1`,
+No añade herramientas al catálogo del LLM. Usa `protocolVersion: 1`,
 IDs opacos, campos estrictos, cuerpo máximo 8 KiB y texto máximo 256 bytes UTF-8.
+
+El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
+el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
+
+```ts
+type HefestoPhase =
+  | 'unconfigured' | 'connecting' | 'suspended' | 'ready' | 'offline' | 'error'
+
+type HefestoSnapshot = {
+  phase: HefestoPhase
+  deviceId: string | null
+  generation: number | null
+  lastEcho: string | null
+  /** Código estable corto (p. ej. `transport_failed`); nunca rutas ni secretos. */
+  detail: string | null
+}
+
+type HefestoEvent = HefestoSnapshot & { type: 'hefesto.state_changed' }
+```
+
+| Comando IPC | Entrada | Salida |
+| --- | --- | --- |
+| `hefesto_status` | — | `HefestoSnapshot` (estado actual, sin red) |
+| `hefesto_resume` | — | — (reactivación manual tras una suspensión; el evento publica el cambio) |
+| `hefesto_abort` | — | — (suspende en local al instante; el aviso al relay se reintenta) |
+
+Al abrirse, la app activa el dispositivo sola si la suspensión anterior se había
+levantado a mano; así Hefesto queda disponible por intención sin un paso extra.
+Suspender —desde la app, Hub Panel o control remoto— deja un marcador
+`hefesto-suspended` en el directorio de datos de la app
+(`~/Library/Application Support/com.atlas.next/`). Mientras exista, arrancar no
+reactiva nada: el chip muestra `Activar` y hasta que no se pulsa no se aceptan
+encargos. Activar borra el marcador. El marcador no guarda datos, solo la
+intención; si no se puede leer, se asume suspendido.
+
+Las credenciales (`ATLAS_HEFESTO_CA`, `ATLAS_HEFESTO_CERT`, `ATLAS_HEFESTO_KEY`,
+`ATLAS_HEFESTO_DEVICE_ID` y `ATLAS_HEFESTO_URL` opcional) se leen solo del
+entorno del proceso Tauri. Sin ellas, `phase` es `unconfigured` y el frontal
+oculta el indicador: no existe un Hefesto inerte.
 
 `deviceId` se deriva del certificado mTLS, nunca del cuerpo del cliente. `instanceId`
 identifica un arranque; `generation` invalida trabajo anterior; `submissionId` evita

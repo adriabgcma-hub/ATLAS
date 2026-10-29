@@ -19,7 +19,7 @@ individual > plan > adaptador trivial. Crear no permite sobrescribir, un plan no
 permite saltar la confirmación destructiva y no se admite elevación mediante `sudo`.
 Las excepciones triviales describen herramientas futuras: la base solo admite eco.
 
-## Frontera de Hefesto (base local; listener de prueba activo en atlas-hub)
+## Frontera de Hefesto (dispositivo en la app; listener de prueba activo en atlas-hub)
 
 El HTTP de Atlas no autoriza acciones del Mac. Hefesto usa un listener distinto con
 mTLS, CA explícita y registro de huellas de certificados ligado a rol/dispositivo.
@@ -30,17 +30,26 @@ previo a la autenticación no agote las plazas del listener.
 No hay activación por defecto, downgrade, credenciales en frontend ni ejecución desde
 mensajes de chat. Las entradas y confirmaciones de delegación real siguen pendientes.
 
-El ejecutor empieza suspendido; las instancias, generaciones, leases e invocaciones
-impiden reutilizar entregas antiguas. Un resultado desconocido no se reejecuta. El
-aborto local no depende de la red y no revierte efectos ya producidos; falta todavía
-integrarlo en los controles de app/panel antes de habilitar capacidades reales.
+El ejecutor solo acepta encargos con el dispositivo activo: al arrancar se activa
+solo si no hay una suspensión pendiente; suspender (app, Hub Panel o control remoto)
+deja un marcador `hefesto-suspended` en el directorio de datos de la app que exige
+reactivación manual, también tras reiniciar. Las instancias, generaciones, leases e
+invocaciones impiden reutilizar entregas antiguas. Un resultado desconocido no se
+reejecuta. El aborto local no depende de la red y no revierte efectos ya producidos.
+Desde 2026-10-28 el bucle nativo vive dentro de la app Tauri (un solo hilo, ligado a
+su vida): lee las credenciales mTLS solo del entorno del proceso, el webview nunca
+las ve y no ejecuta nada hasta que la app activa el dispositivo (sola al arrancar o a
+mano tras suspender). Sin credenciales no hay hilo ni indicador. Atajo, control desde
+Hub Panel y la matriz completa de fallos siguen pendientes antes de habilitar
+capacidades reales.
 
 Las pruebas usan certificados efímeros y texto ficticio. No provisionar certificados,
 TCC ni secretos reales sin permiso. El journal de eco persiste texto de prueba para
 validar duplicados; no admite documentos privados ni hace llamadas a proveedores.
 Desde 2026-10-28 el listener está activo en atlas-hub (8767, solo LAN) con una PKI
-de prueba fuera del repo, sin enlace con la app ni con Telegram; sus credenciales y
-el journal contienen únicamente material de prueba.
+de prueba fuera del repo; la app en dev se conecta con ella y se activa desde el
+indicador, sin enlace con Telegram. Sus credenciales y el journal contienen
+únicamente material de prueba.
 
 ## Datos
 

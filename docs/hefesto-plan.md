@@ -189,9 +189,13 @@ No se considera autorización ni se ejecuta por recibir un mensaje de chat.
 
 1. **Base segura, sin efectos (cerrada, 2026-10-28):** protocolo v1, mTLS/roles, registro durable,
    deduplicación, leases, control y ejecutor Rust de eco con pruebas cruzadas.
-2. **Integración app/panel:** bucle nativo ligado a Atlas, instancia única, interruptor,
-   atajo y control Hub Panel; aborto local independiente de red y estado recuperable.
-   Probar salida normal, crash, pérdida de red, suspensión y reinicios antes de ejecutar.
+2. **Integración app/panel (primer corte, 2026-10-28/29):** bucle nativo ligado a Atlas,
+   instancia única, indicador y kill switch local, arranque disponible por intención,
+   suspensión persistente entre reinicios, aborto local independiente de red y estado
+   recuperable, implementados y probados en dev. Verificado en vivo el ciclo
+   activar → eco → suspender con el relay real y la recuperación tras reiniciar el Mac.
+   Pendientes de esta entrega: atajo y control Hub Panel, y la matriz completa de
+   salida normal/crash/pérdida de red/suspensión/reinicios antes de ejecutar.
 3. **Delegación e identidad:** entradas autenticadas, continuaciones no bloqueantes,
    orbe/etiquetas, snapshots atómicos de tareas/confirmaciones/cursor; mantener Atlas
    operativo mientras Hefesto espera. Medir resultados, latencia y tokens.
@@ -309,3 +313,54 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   porque registrar un ID vivo no renueva la lease. Eco completo correcto dos
   veces seguidas (Unicode incluido, instancia reutilizada, generación estable) y
   `--status` mostrando la instancia viva.
+- 2026-10-29, integración en la app (local, sin commit): módulo
+  `crates/atlas-mac/src/runtime.rs` (latido 5 s, sondeo 1 s, reconexión 15 s,
+  fases, snapshot camelCase y aborto local con reintento remoto) y cableado
+  Tauri (`hefesto_status`/`hefesto_resume`/`hefesto_abort`, evento
+  `hefesto-state-changed`, hilo único y credenciales solo por entorno
+  `ATLAS_HEFESTO_CA/CERT/KEY/DEVICE_ID`; el webview nunca las ve). Badge
+  violeta con Activar/Suspender y último eco. Pruebas: `cargo test -p
+  atlas-mac` 53 (11 de runtime), `cargo test -p atlas-next` 1, `cargo check
+  --workspace`, clippy sin avisos, `npm run build` y `npm test` 31.
+- Prueba en vivo en dev con el relay real (el Mac se reinició entre medias y se
+  relanzó `tauri dev`): la app registra `app-2810-1793228549937-1` (generación
+  40, suspendida); el usuario pulsa Activar → generación 41; el eco
+  `6275aef5…` se ejecuta en menos de 1 s (sin agotar el TTL de 15 s) y el
+  usuario lo ve en el chip; el usuario pulsa Suspender → generación 42 con
+  `suspended: true`. Ciclo completo confirmado.
+- Borde de diseño registrado: un `resume` iniciado por el controlador no
+  habilita la ejecución del dispositivo; el ejecutor solo adopta la activación
+  si la app la inicia (ACK con la generación exacta siguiente) y rechaza una
+  respuesta "sin cambios" (`crates/atlas-mac/tests/executor.rs`). En la prueba
+  previa el eco quedó pendiente hasta caducar; no se relaja el contrato.
+- Al cerrar: `tauri dev` parado por tarea/PID, puerto 5173 libre, sin procesos
+  Atlas/Vite/Tauri ni agentes nuevos en `launchctl`. Siguen en `atlas-hub` el
+  relay y el listener 8767; nada queda vivo en el Mac.
+- Pendiente: atajo local, control desde Hub Panel, matriz completa de fallos y
+  commit (requiere permiso explícito).
+- 2026-10-29, aclarado el papel del interruptor tras preguntarlo el usuario:
+  la detección por intención (entrega 3) decide *cuándo* Atlas delega; el
+  interruptor decide *si este Mac acepta ejecutar*. Decisión del usuario para
+  el arranque: **disponible por intención** (activo) salvo suspensión
+  pendiente, en vez de exigir Activar en cada apertura. Implementado en la
+  capa Tauri con una compuerta (`hefesto_gate`): un registro nuevo reactiva
+  solo si no hay marcador; una suspensión desde `ready` (Hub Panel/Telegram)
+  o local escribe `hefesto-suspended` en el directorio de datos de la app
+  (`~/Library/Application Support/com.atlas.next/`) y exige Activar a mano,
+  también tras reiniciar; Activar adjunta la reactivación y borra el
+  marcador. Lectura conservadora: si el marcador no se puede consultar, se
+  asume suspendido. Pruebas: 4/4 en `cargo test -p atlas-next`, clippy sin
+  avisos; `cargo fmt --check` solo conserva el desorden de imports previo.
+- 2026-10-29, prueba en vivo del nuevo arranque: tras lanzar dev sin marcador
+  la app registró `app-4995-…` (gen 44), se auto-activó (gen 45) sin clic y
+  ejecutó el eco `935386e3…`; un abort del controlador llevó a gen 46,
+  `suspended: true` y marcador creado; al reiniciar registró `app-5427-…`
+  (gen 48) y siguió suspendida durante 12 s (sin reactivarse sola); el
+  usuario pulsó Activar (gen 49, marcador limpio). Un eco posterior quedó
+  pendiente porque la app se cerró limpiamente durante la prueba (sin
+  informes de fallo): al morir el proceso no hay sondeo y la invocación
+  caduca a los 15 s, como está diseñado. Relanzada sin marcador, se
+  auto-activó (gen 52) y ejecutó `596ddef4…`; el usuario pulsó Suspender
+  (gen 53) y el marcador quedó escrito. Al cerrar: `tauri dev` parado por
+  tarea/PID, 5173 libre, sin procesos ni agentes Atlas en el Mac; el
+  marcador de suspensión queda a propósito como último estado intencionado.

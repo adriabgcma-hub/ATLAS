@@ -6,6 +6,7 @@ import { AtlasScene, type ScenePort } from './components/scene/Scene'
 import { InputBar } from './components/chat/InputBar'
 import { ConversationPanel } from './components/chat/ConversationPanel'
 import { ConfirmationPanel } from './components/chat/ConfirmationPanel'
+import { HefestoBadge } from './components/hefesto/HefestoBadge'
 import {
   conversationReducer,
   initialConversationState,
@@ -17,6 +18,8 @@ import type {
   AtlasError,
   ConfirmationDecision,
   ConfirmationRequest,
+  HefestoEvent,
+  HefestoSnapshot,
   MessageAppended,
   MessageRole,
   SendResult,
@@ -38,6 +41,7 @@ const RELAY_DRAIN_MS = 4000
 const IPC_STATE = 'session-state-changed'
 const IPC_MESSAGE = 'conversation-message-appended'
 const IPC_CONFIRM = 'permission-confirmation-required'
+const IPC_HEFESTO = 'hefesto-state-changed'
 
 /** true solo dentro del webview de Tauri (con `withGlobalTauri`). */
 function inTauri(): boolean {
@@ -207,6 +211,9 @@ export default function App() {
       /* almacenamiento no disponible */
     }
   }, [chatExpanded])
+
+  // Último estado del dispositivo Hefesto (null en dev: no hay bucle nativo).
+  const [hefesto, setHefesto] = useState<HefestoSnapshot | null>(null)
 
   const enqueueLetters = useCallback((text: string) => {
     if (!text) return
@@ -432,6 +439,23 @@ export default function App() {
         .catch((error: unknown) => {
           console.warn('No se pudieron escuchar las confirmaciones', error)
         })
+      listen<HefestoEvent>(IPC_HEFESTO, (event) => {
+        setHefesto(event.payload)
+      })
+        .then((unsub) => {
+          unsubs.push(unsub)
+        })
+        .catch((error: unknown) => {
+          console.warn('No se pudo escuchar a Hefesto', error)
+        })
+      // El evento solo llega en cambios: al montar hay que pedir el estado.
+      invoke<HefestoSnapshot>('hefesto_status')
+        .then((snapshot) => {
+          if (!cancelled) setHefesto(snapshot)
+        })
+        .catch(() => {
+          /* app sin credenciales de Hefesto */
+        })
       // El relay es opcional: si está caído se ignora en silencio.
       const drainTauri = () => {
         if (drainInFlightRef.current) return
@@ -589,6 +613,19 @@ export default function App() {
     })
   }, [conversation.confirmations, conversation.pendingRequestIds, handlePermissionRespond])
 
+  // Hefesto actúa solo con activación explícita; suspender siempre es local.
+  const handleHefestoResume = useCallback(() => {
+    invoke('hefesto_resume').catch((error: unknown) => {
+      console.warn('No se pudo activar Hefesto', errorCode(error))
+    })
+  }, [])
+
+  const handleHefestoAbort = useCallback(() => {
+    invoke('hefesto_abort').catch((error: unknown) => {
+      console.warn('No se pudo suspender Hefesto', errorCode(error))
+    })
+  }, [])
+
   const orbState = deriveOrbState(
     sessionStateToOrbInput(conversation.sessionState, conversation.messages.length > 0),
   )
@@ -604,6 +641,13 @@ export default function App() {
       <Orbits asleep={false} portRef={orbitPortRef} />
       <AtlasScene orbState={orbState} levelRef={levelRef} portRef={scenePortRef} />
       <div className="app-label" aria-label="Atlas">ATLAS</div>
+      {hefesto && (
+        <HefestoBadge
+          state={hefesto}
+          onResume={handleHefestoResume}
+          onAbort={handleHefestoAbort}
+        />
+      )}
       <div className={`chat-stack${chatExpanded ? ' open' : ''}`} aria-hidden={!chatExpanded}>
         {(conversation.messages.length > 0 || conversation.confirmations.length > 0) && (
           <>

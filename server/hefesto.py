@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from types import MappingProxyType
-
 MAX_BODY_BYTES = 8192
 LEASE_SECONDS = 15
 INVOCATION_SECONDS = 15

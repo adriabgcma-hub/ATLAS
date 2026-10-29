@@ -2,10 +2,12 @@
 
 pub mod client;
 pub mod executor;
+pub mod runtime;
 pub mod wire;
 
 pub use client::HefestoClient;
 pub use executor::{Clock, EchoExecutor, RegistrationAttempt, ResumeAttempt};
+pub use runtime::{Phase, Runtime, Snapshot, Transport};
 pub use wire::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

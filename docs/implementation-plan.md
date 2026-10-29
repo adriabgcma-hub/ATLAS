@@ -135,18 +135,34 @@ de prueba autorizados por el usuario (2026-10-28).
       PKI de prueba fuera del repo) y validar el eco completo desde el Mac.
       `hefesto-echo` resuelve IPv4 (el link-local IPv6 de mDNS no escucha y
       agotaba el timeout en cada petición) y renueva la lease con `heartbeat`.
-- [ ] Integración nativa/app/panel y pruebas de parada antes de herramientas reales.
+- [x] Primer corte de la integración en la app (2026-10-28): bucle nativo único
+      (`atlas-mac::Runtime`) con heartbeat, sondeo de eco, aborto local con reintento
+      acotado y reconexión con instancia nueva; comandos `hefesto_status/resume/abort`,
+      evento `hefesto-state-changed` e indicador violeta con Activar/Suspender y último
+      eco. Credenciales solo por entorno; sin ellas no hay hilo ni indicador.
+- [x] Arranque listo y suspensión persistente (2026-10-29): al abrir, el dispositivo
+      se activa solo si no hay suspensión pendiente (Hefesto queda disponible por
+      intención, no por un interruptor); suspender —local, Hub Panel o remoto— deja
+      `hefesto-suspended` en el directorio de datos de la app y exige Activar a mano,
+      también tras reiniciar. Probado en vivo con el relay real.
+- [ ] Cerrar la entrega 2: atajo local, control desde Hub Panel y matriz completa de
+      salida normal/crash/pérdida de red/suspensión/reinicios en la app.
 - [ ] Delegación no bloqueante, identidad visual y recuperación de tareas.
 - [ ] Archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.
 
-La API HTTP actual no puede lanzar Hefesto; las capacidades reales permanecen
-fuera de la primera entrega. La ventana de tablas queda pendiente.
+La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
+la app Tauri cuando el entorno trae sus credenciales, y sigue limitado al eco. Las
+capacidades reales permanecen fuera de esta entrega. La ventana de tablas queda
+pendiente.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 
 - `GROQ_API_KEY_1/2/3` — rotación Groq (en uso por el cerebro).
 - `TELEGRAM_BOT_TOKEN` — token de @BotFather.
 - `TELEGRAM_ALLOWED_USER_IDS` — IDs de Telegram autorizados (rechazar el resto).
+- `ATLAS_HEFESTO_URL` (por defecto `https://atlas-hub.local:8767`), `ATLAS_HEFESTO_CA`,
+  `ATLAS_HEFESTO_CERT`, `ATLAS_HEFESTO_KEY`, `ATLAS_HEFESTO_DEVICE_ID` — identidad mTLS
+  del dispositivo Hefesto en la app; los ficheros viven fuera del repo.
 
 ## Regla de avance
 
