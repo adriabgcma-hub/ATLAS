@@ -10,8 +10,8 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::contracts::{
-    AtlasError, ConfirmationRequest, Correlation, EventType, MessageAppended, OutEvent, RiskLevel,
-    Role, SessionEvent, SessionState, Source, codes,
+    Agent, AtlasError, ConfirmationRequest, Correlation, EventType, MessageAppended, OutEvent,
+    RiskLevel, Role, SessionEvent, SessionState, Source, codes,
 };
 
 fn unreachable(message: &str) -> AtlasError {
@@ -172,6 +172,10 @@ fn convert(value: &serde_json::Value) -> Option<(u64, OutEvent)> {
                     role,
                     content,
                     source,
+                    agent: value
+                        .get("agent")
+                        .and_then(|field| serde_json::from_value(field.clone()).ok()),
+                    task_id: text_field(value, "taskId"),
                 }),
             ))
         }
@@ -321,6 +325,10 @@ pub struct SnapshotMessage {
     pub content: String,
     pub source: Source,
     pub timestamp: String,
+    #[serde(rename = "agent")]
+    pub agent: Option<Agent>,
+    #[serde(rename = "taskId")]
+    pub task_id: Option<String>,
 }
 
 /// Instantánea de la sesión activa del cerebro (`None` si no hay).
@@ -477,6 +485,18 @@ mod tests {
         let ordered = prefer_ipv4(addrs);
         assert!(ordered[0].is_ipv4());
         assert!(ordered[1].is_ipv6());
+    }
+
+    #[test]
+    fn snapshot_message_lee_agent_y_task() {
+        let url = fake_brain(vec![(
+            "/v1/session",
+            r#"{"session":{"sessionId":"ses-1","state":"idle","messages":[{"requestId":"req-1","sessionId":"ses-1","role":"assistant","content":"eco","source":"local","timestamp":"2026-10-29T00:00:00.000Z","agent":"hefesto","taskId":"tsk-1"}]},"cursor":0}"#,
+        )]);
+        let (snapshot, _) = get_session(&url, Duration::from_secs(2)).expect("ok");
+        let message = &snapshot.expect("sesión").messages[0];
+        assert_eq!(message.agent, Some(Agent::Hefesto));
+        assert_eq!(message.task_id.as_deref(), Some("tsk-1"));
     }
 
     #[test]

@@ -53,6 +53,14 @@ pub enum Role {
     Assistant,
 }
 
+/// Agente emisor de un mensaje; ausente = Atlas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Agent {
+    Atlas,
+    Hefesto,
+}
+
 /// Nivel de riesgo de una herramienta (ver `contracts.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -136,6 +144,10 @@ pub struct MessageAppended {
     pub role: Role,
     pub content: String,
     pub source: Source,
+    #[serde(rename = "agent", skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Agent>,
+    #[serde(rename = "taskId", skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
 }
 
 /// Evento `permission.confirmation_required`. La ausencia de respuesta nunca
@@ -214,5 +226,29 @@ mod tests {
         let a = Correlation::new("ses-1");
         let b = Correlation::new("ses-1");
         assert_ne!(a.request_id, b.request_id);
+    }
+
+    #[test]
+    fn message_appended_con_agente_serializa_campos_opcionales() {
+        let event = MessageAppended {
+            correlation: Correlation::new("ses-1"),
+            kind: EventType::MessageAppended,
+            role: Role::Assistant,
+            content: "eco".into(),
+            source: Source::Local,
+            agent: Some(Agent::Hefesto),
+            task_id: Some("tsk-1".into()),
+        };
+        let json = serde_json::to_value(&event).expect("serializa");
+        assert_eq!(json["agent"], "hefesto");
+        assert_eq!(json["taskId"], "tsk-1");
+        let without = MessageAppended {
+            agent: None,
+            task_id: None,
+            ..event.clone()
+        };
+        let json = serde_json::to_value(&without).expect("serializa");
+        assert!(json.get("agent").is_none());
+        assert!(json.get("taskId").is_none());
     }
 }

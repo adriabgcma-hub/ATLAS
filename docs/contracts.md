@@ -138,16 +138,25 @@ polling saliente. El núcleo trata ambos igual; solo cambia el origen registrado
 ```ts
 type MessageRole = 'user' | 'assistant'
 
+type Agent = 'atlas' | 'hefesto'
+
 type MessageAppended = Correlation & {
   type: 'conversation.message_appended'
   role: MessageRole
   content: string // no vacío, máximo 4000 caracteres
   source: Source
+  /** Agente emisor del mensaje; ausente = Atlas. */
+  agent?: Agent
+  /** Correlación con la delegación (taskId del protocolo Hefesto). */
+  taskId?: string
 }
 ```
 
 El frontend suscribe este evento y representa el mensaje sin distinguir el origen:
-la cadencia visual es idéntica en ambos canales.
+la cadencia visual es idéntica en ambos canales. Un continuador de Hefesto llega
+como `message_appended` con `agent: 'hefesto'` y **requestId propio** (nunca
+reutiliza el del turno): el interino y el resultado no colisionan. Los
+continuadores no emiten eventos de estado de sesión.
 
 ## Errores
 

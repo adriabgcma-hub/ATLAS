@@ -100,6 +100,10 @@ struct MessageView {
     content: String,
     source: Source,
     timestamp: String,
+    #[serde(rename = "agent", skip_serializing_if = "Option::is_none")]
+    agent: Option<atlas_core::Agent>,
+    #[serde(rename = "taskId", skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -224,6 +228,8 @@ async fn session_get(state: State<'_, CoreState>) -> Result<Option<ActiveSession
                     content: m.content,
                     source: m.source,
                     timestamp: m.timestamp,
+                    agent: m.agent,
+                    task_id: m.task_id.clone(),
                 })
                 .collect(),
         }))
