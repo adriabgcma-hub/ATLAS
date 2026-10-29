@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest import mock
 
 import atlas_relay
 
@@ -113,3 +114,73 @@ class ToolAvailabilityTests(unittest.TestCase):
         self.assertIn("demasiado largo",
                       brain.execute_tool("hefesto_echo", {"text": "á" * 200}, JOB))
         self.assertEqual(fake.submits, [])
+
+
+class ContinuationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-delegation-")
+        self.addCleanup(self.temp.cleanup)
+
+    def delegate(self, brain, fake, invocation_id="inv-1", job=None):
+        fake.accept(invocation_id)
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        brain.execute_tool("hefesto_echo", {"text": "hola"}, job or JOB)
+        return brain._delegations[invocation_id]
+
+    def test_continuador_exitoso_con_etiqueta_y_task(self):
+        brain = make_brain(self.temp.name)
+        session_id = brain._active()["id"]
+        fake = FakeJournal()
+        entry = self.delegate(brain, fake, job={**JOB, "session_id": session_id})
+        brain._hefesto_finish(entry, "succeeded", "hola mundo")
+        last = brain.sessions[session_id]["messages"][-1]
+        self.assertEqual(last["role"], "assistant")
+        self.assertEqual(last["content"], "hola mundo")
+        self.assertEqual(last["agent"], "hefesto")
+        self.assertEqual(last["taskId"], entry["task_id"])
+        event = brain.events[-1]
+        self.assertEqual(event["type"], "conversation.message_appended")
+        self.assertEqual(event["agent"], "hefesto")
+        self.assertEqual(event["taskId"], entry["task_id"])
+        self.assertNotEqual(event["requestId"], entry["request_id"])
+        self.assertNotIn(entry["invocation_id"], brain._delegations)
+
+    def test_continuador_avisa_por_telegram(self):
+        brain = make_brain(self.temp.name)
+        session_id = brain._active()["id"]
+        fake = FakeJournal()
+        entry = self.delegate(brain, fake,
+                              job={**JOB, "session_id": session_id,
+                                   "source": "telegram", "chat_id": 42})
+        with mock.patch.object(brain, "_send_telegram") as send:
+            brain._hefesto_finish(entry, "succeeded", "eco")
+        send.assert_called_once_with(42, "Hefesto: eco")
+
+    def test_cancelar_el_turno_descarta_la_delegacion(self):
+        brain = make_brain(self.temp.name)
+        session_id = brain._active()["id"]
+        fake = FakeJournal()
+        self.delegate(brain, fake, job={**JOB, "session_id": session_id})
+        brain.cancel("req-1")
+        self.assertEqual(brain._delegations, {})
+        self.assertEqual(
+            brain._load_delegations(), {})
+
+    def test_continuador_de_sesion_abandonada_se_descarta(self):
+        brain = make_brain(self.temp.name)
+        first = brain._active()["id"]
+        fake = FakeJournal()
+        entry = self.delegate(brain, fake, job={**JOB, "session_id": first})
+        brain._local_reply("/clear", "local")
+        brain._hefesto_finish(entry, "succeeded", "eco")
+        self.assertNotIn("eco", [m["content"] for m in brain.sessions[first]["messages"]])
+        self.assertNotIn(entry["invocation_id"], brain._delegations)
+
+    def test_delegaciones_persisten_entre_instancias(self):
+        brain1 = make_brain(self.temp.name)
+        session_id = brain1._active()["id"]
+        fake = FakeJournal()
+        self.delegate(brain1, fake, job={**JOB, "session_id": session_id})
+        brain2 = make_brain(self.temp.name)
+        self.assertIn("inv-1", brain2._delegations)

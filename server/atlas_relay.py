@@ -393,6 +393,7 @@ class Brain:
             self.offset = int(value) if isinstance(value, int) and value >= 0 else 0
         except (OSError, ValueError, AttributeError):
             pass
+        self._delegations = self._load_delegations()
 
     def _save_sessions(self) -> None:
         sessions_path, _ = self._paths()
@@ -409,6 +410,24 @@ class Brain:
     def _save_offset(self) -> None:
         _, offset_path = self._paths()
         atomic_write(offset_path, {"offset": self.offset})
+
+    def _delegations_path(self) -> str:
+        return os.path.join(self.cfg["data_dir"], "hefesto-delegations.json")
+
+    def _load_delegations(self) -> dict[str, dict]:
+        try:
+            with open(self._delegations_path(), encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                return {}
+            return {key: entry for key, entry in data.items()
+                    if isinstance(entry, dict)
+                    and isinstance(entry.get("invocation_id"), str)}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def _save_delegations(self) -> None:
+        atomic_write(self._delegations_path(), self._delegations)
 
     # -- sesiones --------------------------------------------------------
     def _active(self) -> dict:
@@ -723,6 +742,12 @@ class Brain:
             if entry is not None:
                 entry["decision"] = "deny"
                 entry["event"].set()
+            removed = [iid for iid, entry in self._delegations.items()
+                       if entry.get("request_id") == request_id]
+            if removed:
+                for iid in removed:
+                    self._delegations.pop(iid, None)
+                self._save_delegations()
             return found
 
     def cancel_all(self) -> int:
@@ -829,9 +854,50 @@ class Brain:
                 "source": job.get("source", "local"),
                 "chat_id": job.get("chat_id"),
             }
+            self._save_delegations()
         dlog(self, "HEFESTO", f"delegated invocation={invocation_id} "
                               f"request={job['request_id']} task={submission['taskId']}")
         return f"delegado a Hefesto ({invocation_id})"
+
+    def _hefesto_finish(self, entry: dict, state: str,
+                        output_text: str | None) -> None:
+        if state == "succeeded" and output_text is not None:
+            content = output_text
+        elif state == "expired":
+            content = "Hefesto no respondió a tiempo y el encargo caducó."
+        elif state == "cancelled":
+            content = "El encargo a Hefesto se canceló."
+        else:
+            content = "El encargo a Hefesto quedó en un estado desconocido."
+        with self.lock:
+            session = self.sessions.get(entry["session_id"])
+            if session is None or session["id"] != self.active_id:
+                self._delegations.pop(entry["invocation_id"], None)
+                self._save_delegations()
+                return
+            request_id = new_id("req")
+            session["messages"].append({
+                "requestId": request_id, "sessionId": session["id"],
+                "role": "assistant", "content": content, "source": "local",
+                "agent": "hefesto", "taskId": entry["task_id"],
+                "timestamp": utc_now(),
+            })
+            session["messages"] = session["messages"][-STORE_HISTORY:]
+            self._save_sessions()
+            self._delegations.pop(entry["invocation_id"], None)
+            self._save_delegations()
+            self._push_event({
+                "kind": "message", "type": "conversation.message_appended",
+                "requestId": request_id, "sessionId": session["id"],
+                "timestamp": utc_now(), "role": "assistant", "content": content,
+                "source": "local", "agent": "hefesto",
+                "taskId": entry["task_id"],
+            })
+        if entry.get("chat_id") is not None:
+            self._send_telegram(entry["chat_id"],
+                                f"Hefesto: {content}"[:MAX_CONTENT_LEN])
+        dlog(self, "HEFESTO", f"continuation invocation={entry['invocation_id']} "
+                              f"state={state} session={entry['session_id']}")
 
     def _execute_write(self, args: dict) -> str:
         action = args.get("action")
