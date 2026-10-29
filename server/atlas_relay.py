@@ -424,7 +424,9 @@ class Brain:
                 return {}
             return {key: entry for key, entry in data.items()
                     if isinstance(entry, dict)
-                    and isinstance(entry.get("invocation_id"), str)}
+                    and isinstance(entry.get("invocation_id"), str)
+                    and isinstance(entry.get("session_id"), str)
+                    and isinstance(entry.get("task_id"), str)}
         except (OSError, ValueError, AttributeError):
             return {}
 
@@ -926,7 +928,10 @@ class Brain:
 
     def _hefesto_tracker(self) -> None:
         while not self._hefesto_stop.wait(1.0):
-            self._hefesto_poll()
+            try:
+                self._hefesto_poll()
+            except Exception as exc:  # el tracker nunca muere
+                dlog(self, "HEFESTO", f"poll falló ({type(exc).__name__}), sigue.")
 
     def _hefesto_poll(self) -> None:
         with self.lock:

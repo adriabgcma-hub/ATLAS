@@ -220,6 +220,12 @@ class ContinuationTests(unittest.TestCase):
         brain2 = make_brain(self.temp.name)
         self.assertIn("inv-1", brain2._delegations)
 
+    def test_load_delegaciones_descarta_entradas_incompletas(self):
+        brain = make_brain(self.temp.name)
+        with open(brain._delegations_path(), "w", encoding="utf-8") as fh:
+            json.dump({"x": {"invocation_id": "x"}}, fh)
+        self.assertEqual(brain._load_delegations(), {})
+
 
 class TrackerTests(unittest.TestCase):
     def setUp(self):
