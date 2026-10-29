@@ -926,6 +926,44 @@ class Brain:
         if thread is not None and thread.ident is not None:
             thread.join(timeout=2)
 
+    def hefesto_status(self) -> dict:
+        """Estado del dispositivo Hefesto visto por el controlador (lectura)."""
+        with self.lock:
+            journal, device_id = self._hefesto_journal, self._hefesto_device
+        if journal is None or device_id is None:
+            return {"configured": False, "deviceId": None,
+                    "suspended": None, "generation": None}
+        status, response = journal.dispatch(
+            hefesto.Peer("controller", device_id), "GET", "/v1/hefesto/status")
+        if status != 200:
+            return {"configured": True, "deviceId": device_id,
+                    "suspended": None, "generation": None,
+                    "error": response.get("error")}
+        return {"configured": True, "deviceId": device_id,
+                "suspended": response["suspended"],
+                "generation": response["generation"]}
+
+    def hefesto_suspend(self) -> dict:
+        """Suspende Hefesto por control remoto (solo invalida; no reactiva)."""
+        with self.lock:
+            journal, device_id = self._hefesto_journal, self._hefesto_device
+        if journal is None or device_id is None:
+            return {"ok": False, "error": "hefesto_disabled"}
+        peer = hefesto.Peer("controller", device_id)
+        for _ in range(2):
+            status, body = journal.dispatch(peer, "GET", "/v1/hefesto/status")
+            if status != 200:
+                return {"ok": False, "error": body.get("error", "status_failed")}
+            status, body = journal.dispatch(
+                peer, "POST", "/v1/hefesto/control",
+                json.dumps({"protocolVersion": 1, "action": "abort",
+                            "expectedGeneration": body["generation"]}).encode("utf-8"))
+            if status == 200:
+                return {"ok": True, "suspended": True}
+            if body.get("error") != "stale_generation":
+                return {"ok": False, "error": body.get("error", "control_failed")}
+        return {"ok": False, "error": "stale_generation"}
+
     def _hefesto_tracker(self) -> None:
         while not self._hefesto_stop.wait(1.0):
             try:
@@ -1608,6 +1646,9 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                     usage["by_model"] = {k: dict(v) for k, v in brain.token_usage["by_model"].items()}
                 self._json(200, {"token_usage": usage})
                 return
+            if parsed.path == "/v1/hefesto/status":
+                self._json(200, brain.hefesto_status())
+                return
             self._json(404, {"ok": False, "error": "not_found"})
 
         def do_POST(self) -> None:  # noqa: N802 (firma de BaseHTTPRequestHandler)
@@ -1654,6 +1695,9 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                     return
                 accepted = brain.confirm(request_id, decision)
                 self._json(200, {"ok": True, "accepted": accepted})
+                return
+            if path == "/v1/hefesto/suspend":
+                self._json(200, brain.hefesto_suspend())
                 return
             if path == "/v1/system/asks":
                 kind = payload.get("kind", "")

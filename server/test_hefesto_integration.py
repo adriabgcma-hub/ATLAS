@@ -209,13 +209,12 @@ class ExistingHttpBoundaryTests(unittest.TestCase):
             thread.start()
             try:
                 with patch.object(atlas_relay.hefesto, "Journal") as journal:
-                    for route in ("status", "register", "heartbeat", "control",
+                    for route in ("register", "heartbeat", "control",
                                   "submit", "next", "result"):
-                        method = "GET" if route == "status" else "POST"
                         conn = http.client.HTTPConnection(*server.server_address, timeout=3)
                         try:
-                            conn.request(method, f"/v1/hefesto/{route}",
-                                         body=None if method == "GET" else '{"protocolVersion":1}',
+                            conn.request("POST", f"/v1/hefesto/{route}",
+                                         body='{"protocolVersion":1}',
                                          headers={"Content-Type": "application/json"})
                             response = conn.getresponse()
                             self.assertEqual(response.status, 404)

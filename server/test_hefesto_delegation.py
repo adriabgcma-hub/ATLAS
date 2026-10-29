@@ -53,6 +53,49 @@ class CancellingJournal(FakeJournal):
         return super().dispatch(peer, method, path, raw)
 
 
+class ControlJournal:
+    """Journal falso para el control remoto: status (GET) y control (POST)."""
+
+    def __init__(self, generation=3, suspended=False):
+        self.generation = generation
+        self.suspended = suspended
+        self.controls = []
+
+    def dispatch(self, peer, method, path, raw=b""):
+        operation = path.rsplit("/", 1)[-1]
+        if operation == "status":
+            return (200, {"protocolVersion": 1, "deviceId": peer.device_id,
+                          "generation": self.generation,
+                          "suspended": self.suspended})
+        if operation == "control":
+            body = json.loads(raw)
+            self.controls.append((body["action"], body["expectedGeneration"]))
+            if body["expectedGeneration"] != self.generation:
+                return (409, {"protocolVersion": 1, "error": "stale_generation"})
+            self.generation += 1
+            self.suspended = True
+            return (200, {"protocolVersion": 1, "deviceId": peer.device_id,
+                          "generation": self.generation, "suspended": True})
+        return (404, {"protocolVersion": 1, "error": "not_found"})
+
+
+class RacedControlJournal(ControlJournal):
+    """Simula un abort ajeno: el primer control choca con la generación."""
+
+    def __init__(self):
+        super().__init__(generation=3)
+        self.first_control = True
+
+    def dispatch(self, peer, method, path, raw=b""):
+        if path.endswith("control") and self.first_control:
+            self.first_control = False
+            body = json.loads(raw)
+            self.controls.append((body["action"], body["expectedGeneration"]))
+            self.generation += 1
+            return (409, {"protocolVersion": 1, "error": "stale_generation"})
+        return super().dispatch(peer, method, path, raw)
+
+
 def make_brain(data_dir):
     cfg = {
         "token": "", "allowed": set(), "groq_keys": [],
@@ -303,3 +346,44 @@ class TrackerTests(unittest.TestCase):
         brain.hefesto_start(FakeJournal(), None)
         self.assertIsNone(getattr(brain, "_hefesto_thread", None))
         self.assertNotIn("hefesto_echo", [t["id"] for t in brain.tool_defs()])
+
+
+class RemoteControlTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-delegation-")
+        self.addCleanup(self.temp.cleanup)
+
+    def test_status_sin_listener(self):
+        brain = make_brain(self.temp.name)
+        self.assertEqual(brain.hefesto_status(),
+                         {"configured": False, "deviceId": None,
+                          "suspended": None, "generation": None})
+
+    def test_status_con_listener(self):
+        brain = make_brain(self.temp.name)
+        brain._hefesto_journal = ControlJournal()
+        brain._hefesto_device = "mac-one"
+        self.assertEqual(brain.hefesto_status(),
+                         {"configured": True, "deviceId": "mac-one",
+                          "suspended": False, "generation": 3})
+
+    def test_suspend_envia_abort_con_la_generacion_actual(self):
+        brain = make_brain(self.temp.name)
+        fake = ControlJournal()
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        self.assertEqual(brain.hefesto_suspend(), {"ok": True, "suspended": True})
+        self.assertEqual(fake.controls, [("abort", 3)])
+
+    def test_suspend_sin_listener(self):
+        brain = make_brain(self.temp.name)
+        self.assertEqual(brain.hefesto_suspend(),
+                         {"ok": False, "error": "hefesto_disabled"})
+
+    def test_suspend_reintenta_si_la_generacion_queda_obsoleta(self):
+        brain = make_brain(self.temp.name)
+        fake = RacedControlJournal()
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        self.assertEqual(brain.hefesto_suspend(), {"ok": True, "suspended": True})
+        self.assertEqual(fake.controls, [("abort", 3), ("abort", 4)])

@@ -109,6 +109,12 @@ responding, completed, failed, cancelled`. Terminales: `idle/completed/failed/ca
 | `POST /v1/system/cancel_all` | cancela peticiones en vuelo (también doble confirmación) |
 | `GET /panel/*` | estático del panel (build Vite en `apps/panel/dist`) |
 
+- `GET /v1/hefesto/status` → `{configured, deviceId, suspended, generation}`
+  (estado del dispositivo Hefesto visto por el controlador; solo LAN).
+- `POST /v1/hefesto/suspend` (cuerpo `{}`) → `{ok: true, suspended: true}` o
+  `{ok: false, error}`. Suspende Hefesto por control remoto (solo invalida;
+  la reactivación es manual en la app). Latencia ~1 s (sondeo del dispositivo).
+
 CORS multi-origen: `RELAY_CORS_ORIGIN` admite lista separada por comas
 (`http://localhost:5173,http://localhost:5174`); se devuelve solo el Origin que
 hace la petición si está en la lista. Misma LAN indispensable.
