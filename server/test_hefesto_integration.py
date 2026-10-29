@@ -152,6 +152,53 @@ class ListenerLifecycleTests(unittest.TestCase):
         self.assertTrue(Path(fixture.root, "hefesto.sqlite").is_file())
 
 
+class ListenerYieldTests(unittest.TestCase):
+    def test_deshabilitado_devuelve_none(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with atlas_relay.hefesto_listener("127.0.0.1", "unused") as ctx:
+                self.assertIsNone(ctx)
+
+    def test_habilitado_entrega_journal_y_dispositivo_unico(self):
+        peers = {"a" * 64: atlas_relay.hefesto.Peer("device", "mac-one"),
+                 "b" * 64: atlas_relay.hefesto.Peer("controller", "mac-one")}
+        with patch.dict("os.environ", SETTINGS, clear=True), \
+                patch.object(atlas_relay, "log"), \
+                patch.object(atlas_relay.hefesto, "load_peers", return_value=peers), \
+                patch.object(atlas_relay.hefesto, "Journal") as journal, \
+                patch.object(atlas_relay.hefesto, "create_server") as create:
+            with atlas_relay.hefesto_listener("127.0.0.1", "unused") as ctx:
+                self.assertEqual(ctx, {"journal": journal.return_value,
+                                       "device_id": "mac-one"})
+            create.assert_called_once()
+
+    def test_sin_dispositivo_entrega_journal_con_device_none(self):
+        peers = {"a" * 64: atlas_relay.hefesto.Peer("controller", "mac-one")}
+        with patch.dict("os.environ", SETTINGS, clear=True), \
+                patch.object(atlas_relay, "log"), \
+                patch.object(atlas_relay.hefesto, "load_peers", return_value=peers), \
+                patch.object(atlas_relay.hefesto, "Journal") as journal, \
+                patch.object(atlas_relay.hefesto, "create_server") as create:
+            with atlas_relay.hefesto_listener("127.0.0.1", "unused") as ctx:
+                self.assertEqual(ctx, {"journal": journal.return_value,
+                                       "device_id": None})
+            create.assert_called_once()
+
+    def test_mas_de_un_dispositivo_falla_la_configuracion(self):
+        peers = {"a" * 64: atlas_relay.hefesto.Peer("device", "mac-one"),
+                 "b" * 64: atlas_relay.hefesto.Peer("device", "mac-two")}
+        with patch.dict("os.environ", SETTINGS, clear=True), \
+                patch.object(atlas_relay, "log"), \
+                patch.object(atlas_relay.hefesto, "load_peers", return_value=peers), \
+                patch.object(atlas_relay.hefesto, "Journal") as journal, \
+                patch.object(atlas_relay.hefesto, "create_server") as create:
+            with self.assertRaises(SystemExit) as error:
+                with atlas_relay.hefesto_listener("127.0.0.1", "unused"):
+                    self.fail("Multi-dispositivo debe fallar")
+            self.assertEqual(error.exception.code, 2)
+            journal.assert_not_called()
+            create.assert_not_called()
+
+
 class ExistingHttpBoundaryTests(unittest.TestCase):
     def test_http_cannot_register_control_or_submit_hefesto(self):
         brain = Mock(cfg={"cors_origin": ""})

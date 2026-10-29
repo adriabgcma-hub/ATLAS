@@ -1563,7 +1563,7 @@ def hefesto_listener(host: str, data_dir: str):
     names = ("HEFESTO_PORT", "HEFESTO_TLS_CERT", "HEFESTO_TLS_KEY",
              "HEFESTO_TLS_CA", "HEFESTO_PEERS_FILE")
     if not any(name in os.environ for name in names):
-        yield
+        yield None
         return
     if not all(os.environ.get(name, "").strip() for name in names):
         fail_config("Hefesto requiere puerto, certificado, clave, CA y registro de pares.")
@@ -1577,6 +1577,11 @@ def hefesto_listener(host: str, data_dir: str):
     with ExitStack() as resources:
         try:
             peers = hefesto.load_peers(os.environ["HEFESTO_PEERS_FILE"])
+            devices = {peer.device_id for peer in peers.values()
+                       if peer.role == "device"}
+            if len(devices) > 1:
+                fail_config("El registro de pares de Hefesto solo admite un dispositivo.")
+            device_id = next(iter(devices)) if devices else None
             journal = hefesto.Journal(os.path.join(data_dir, "hefesto.sqlite"))
             resources.callback(journal.close)
             server = hefesto.create_server(
@@ -1613,7 +1618,7 @@ def hefesto_listener(host: str, data_dir: str):
         resources.callback(stop)
         thread.start()
         log("Hefesto: listener mTLS habilitado (solo eco).")
-        yield
+        yield {"journal": journal, "device_id": device_id}
 
 
 def main() -> int:
