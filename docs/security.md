@@ -50,6 +50,7 @@ Desde 2026-10-28 el listener está activo en atlas-hub (8767, solo LAN) con una 
 de prueba fuera del repo; la app en dev se conecta con ella y se activa desde el
 indicador, sin enlace con Telegram. Sus credenciales y el journal contienen
 únicamente material de prueba.
+La operación `outcome` exige rol controller y es lectura pura: no muta estado.
 
 ## Datos
 

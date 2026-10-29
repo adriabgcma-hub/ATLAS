@@ -27,6 +27,7 @@ _FIELDS = {
     "register": {"instanceId"},
     "heartbeat": {"instanceId"},
     "control": {"action", "expectedGeneration"},
+    "outcome": {"invocationId"},
     "submit": {"submissionId", "requestId", "sessionId", "taskId", "toolId", "arguments"},
     "next": {"instanceId", "generation"},
     "result": {"instanceId", "generation", "invocationId", "output"},
@@ -220,7 +221,7 @@ class Journal:
                 try:
                     operation, data = _validate(method, path, body)
                     if ((operation in ("register", "heartbeat", "next", "result") and peer.role != "device")
-                            or (operation == "submit" and peer.role != "controller")):
+                            or (operation in ("submit", "outcome") and peer.role != "controller")):
                         raise _Rejected("forbidden", 403)
                     self._db.execute("INSERT OR IGNORE INTO devices(device_id) VALUES (?)", (peer.device_id,))
                     response = self._operate(peer, operation, data, now, wall)
@@ -334,6 +335,14 @@ class Journal:
                               data["arguments"]["text"], int(wall * 1000) + INVOCATION_SECONDS * 1000,
                               now + INVOCATION_SECONDS))
             return {"protocolVersion": 1, "invocationId": invocation_id, "state": "pending"}
+        if operation == "outcome":
+            invocation = self._db.execute(
+                "SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
+                (data["invocationId"], device_id)).fetchone()
+            if invocation is None:
+                raise _Rejected("invocation_not_found", 404)
+            return {"protocolVersion": 1, "invocationId": invocation["invocation_id"],
+                    "state": invocation["state"], "outputText": invocation["output_text"]}
         if operation == "next":
             self._live(device, data["instanceId"], data["generation"], ready=True)
             active = self._active(device_id)

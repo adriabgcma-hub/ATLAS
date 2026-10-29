@@ -137,13 +137,14 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | POST `/v1/hefesto/submit` | controller | `submissionId`, `requestId`, `sessionId`, `taskId`, `toolId: hefesto.echo`, `arguments: {text}` |
 | POST `/v1/hefesto/next` | device | `instanceId`, `generation` |
 | POST `/v1/hefesto/result` | device | `instanceId`, `generation`, `invocationId`, `output: {text}` |
+| POST `/v1/hefesto/outcome` | controller | `invocationId` |
 
 Estado: `{protocolVersion, deviceId, instanceId: string|null, generation,
 suspended, online, activeInvocationId: string|null}`. Estado inicial suspendido.
-`register`, `heartbeat`, `control` devuelven estado; `submit` devuelve
+`register`, `heartbeat`, `control` devuelven estado; `submit` y `result` devuelven
 `{protocolVersion, invocationId, state}`; `next` devuelve
-`{protocolVersion, invocation: Invocation|null}`; `result` devuelve
-`{protocolVersion, invocationId, state}`.
+`{protocolVersion, invocation: Invocation|null}`; `outcome` devuelve
+`{protocolVersion, invocationId, state, outputText: string|null}` (lectura pura).
 
 Invocation: `{protocolVersion, invocationId, requestId, sessionId, taskId,
 deviceId, instanceId, generation, toolId, arguments: {text}, expiresAtUnixMs}`.

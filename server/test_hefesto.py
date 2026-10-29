@@ -567,6 +567,36 @@ class JournalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^journal_unavailable$"):
             hefesto.Journal(str(Path(self.temp.name) / "missing" / "sensitive.sqlite"))
 
+    def test_outcome_exige_rol_controller(self):
+        self.ready()
+        self.send()
+        self.error("forbidden", "outcome", peer=DEVICE, invocationId="inv-1")
+
+    def test_outcome_devuelve_estado_y_resultado(self):
+        self.ready()
+        ack = self.send(text="héllo 世界")
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome, {"protocolVersion": 1, "invocationId": ack["invocationId"],
+                                   "state": "pending", "outputText": None})
+        invocation = self.next()
+        self.ok("result", peer=DEVICE, **self.result_fields(invocation))
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "succeeded")
+        self.assertEqual(outcome["outputText"], "héllo 世界")
+
+    def test_outcome_desconocido_devuelve_404(self):
+        self.error("invocation_not_found", "outcome", peer=CONTROLLER, invocationId="no-existe")
+
+    def test_outcome_exige_invocation_id(self):
+        self.error("invalid_fields", "outcome", peer=CONTROLLER)
+
+    def test_outcome_es_lectura_pura(self):
+        self.ready()
+        ack = self.send()
+        self.next()
+        self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(self.ok("status")["activeInvocationId"], ack["invocationId"])
+
 
 class RegistryTests(unittest.TestCase):
     def test_peer_validation(self):

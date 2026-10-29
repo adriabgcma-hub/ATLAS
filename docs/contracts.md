@@ -170,6 +170,10 @@ Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md
 No añade herramientas al catálogo del LLM. Usa `protocolVersion: 1`,
 IDs opacos, campos estrictos, cuerpo máximo 8 KiB y texto máximo 256 bytes UTF-8.
 
+Operación nueva del protocolo v1: `POST /v1/hefesto/outcome` (rol controller)
+`{invocationId}` → `{protocolVersion, invocationId, state, outputText|null}`.
+Lectura pura del journal.
+
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
 
