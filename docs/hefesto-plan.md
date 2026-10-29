@@ -365,3 +365,26 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   (gen 53) y el marcador quedó escrito. Al cerrar: `tauri dev` parado por
   tarea/PID, 5173 libre, sin procesos ni agentes Atlas en el Mac; el
   marcador de suspensión queda a propósito como último estado intencionado.
+- 2026-10-29, entrega 3 (delegación por intención) implementada y desplegada:
+  operación `outcome` de lectura (rol controller), el listener entrega el
+  journal y deriva el dispositivo, herramienta `hefesto_echo` con catálogo
+  dinámico, continuador persistente con cancelación, hilo de seguimiento con
+  recuperación tras reinicio, contratos `agent`/`taskId` (Rust y TS) y
+  etiqueta violeta HEFESTO. Commits `10f3ae1`…`616e16d` (baseline `855e035`,
+  valla de docs `313ac0e`). Pruebas: `python3 -m unittest discover -s server
+  -p 'test_hefesto*.py' -q` 87, `npm test` 37, `npm run build` y
+  `cargo check --workspace`.
+- 2026-10-29, prueba en vivo con el relay real desplegado: delegación local
+  con continuador violeta, delegación por Telegram con seguimiento
+  «Hefesto: …» al chat de origen, cancelación a mitad de turno y suspensión
+  con encargo en vuelo («El encargo a Hefesto se canceló.»), y reinicio del
+  relay con encargo en vuelo (recuperación → «estado desconocido»). El
+  tracker arranca con `device=mac-one` y el listener escucha en 8767.
+- 2026-10-29, dos defectos encontrados en la prueba en vivo y corregidos:
+  1) la cancelación a mitad de turno no cortaba la ejecución de herramientas
+  (el único control estaba en `_complete`); ahora `_handle_tool_call` y
+  `_delegate_echo` revalidan la cancelación (`0f7877b`). 2) el botón de
+  cancelar quedaba deshabilitado durante una petición en curso (InputBar
+  deshabilitaba input y botón justo cuando debían cancelar); corregido con
+  test de regresión (`b43a68d`). Bundle de Atlas reconstruido con Apple
+  Development, firma profunda válida, instalado en `/Applications/Atlas.app`.

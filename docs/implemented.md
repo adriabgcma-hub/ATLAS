@@ -289,6 +289,20 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 - **Descripción:** publica `AGENTS.md` y toda la documentación de Atlas (arquitectura, contratos, reglas de construcción, plan, implementado, seguridad, release y testing) y marca la Fase 1 — base visual estable — como completada. Verificación previa: `npm run build`, `npm run lint` y `cargo check --workspace` pasan sin errores.
 - **Documentación relacionada:** `docs/index.md`, `docs/architecture.md`, `docs/contracts.md`, `docs/construction-rules.md`, `docs/implementation-plan.md`, `docs/implemented.md`, `docs/security.md`, `docs/release.md`, `docs/testing.md`.
 
+### Delegación por intención a Hefesto (entrega 3)
+
+- **Commit:** `feat(hefesto): operación outcome de lectura para el controlador` … `feat(chat): etiqueta HEFESTO violeta para continuadores` (`10f3ae1`…`616e16d`)
+- **Fecha:** `2026-10-29`
+- **Descripción:** el Brain del relay delega encargos a Hefesto por intención del LLM sin bloquear el chat: operación `outcome` de lectura (rol controller) en el protocolo v1, el listener entrega el journal y deriva el dispositivo, herramienta `hefesto_echo` con catálogo dinámico, continuador persistente con cancelación, hilo de seguimiento con recuperación tras reinicio, contratos `agent`/`taskId` en los tres espejos (docs, Rust, TypeScript) y etiqueta violeta HEFESTO en la UI. Desplegado en atlas-hub y probado en vivo (local y Telegram, cancelación, suspensión y reinicio). Pruebas: 87 Python, 37 frontend, build y `cargo check --workspace`.
+- **Documentación relacionada:** `docs/hefesto-plan.md` §8, `docs/implementation-plan.md`, `docs/contracts.md`, `docs/superpowers/specs/2026-10-29-hefesto-delegacion-design.md`.
+
+### Cancelación a mitad de turno (dos arreglos)
+
+- **Commit:** `fix(hefesto): la cancelación a mitad de turno no ejecuta herramientas` y `fix(chat): el botón de cancelar queda activo durante la petición`
+- **Fecha:** `2026-10-29`
+- **Descripción:** la prueba en vivo de cancelación destapó dos defectos. En el relay, el único control de cancelación estaba al cierre del turno (`_complete`): si el usuario cancelaba mientras el LLM pensaba, la herramienta se ejecutaba igual y la delegación se registraba después, publicando el continuador; ahora `_handle_tool_call` y `_delegate_echo` revalidan la cancelación. En la app, `InputBar` deshabilitaba el input y el botón de enviar durante una petición en curso, de modo que ni Enter ni la X llegaban a `onCancel`; ambos quedan activos y el envío del formulario enruta a la cancelación. Tests de regresión añadidos en ambos lados.
+- **Documentación relacionada:** `docs/hefesto-plan.md` §8.
+
 ## Plantilla para futuras implementaciones
 
 ### Nombre exacto del commit

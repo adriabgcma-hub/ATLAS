@@ -147,7 +147,11 @@ de prueba autorizados por el usuario (2026-10-28).
       también tras reiniciar. Probado en vivo con el relay real.
 - [ ] Cerrar la entrega 2: atajo local, control desde Hub Panel y matriz completa de
       salida normal/crash/pérdida de red/suspensión/reinicios en la app.
-- [ ] Delegación no bloqueante, identidad visual y recuperación de tareas.
+- [x] Delegación no bloqueante, identidad visual y recuperación de tareas
+      (2026-10-29, entrega 3): operación `outcome` de lectura, herramienta
+      `hefesto_echo` con catálogo dinámico, continuador etiquetado HEFESTO con
+      `agent`/`taskId` en los contratos, persistencia y recuperación tras reinicio.
+      Desplegada en atlas-hub y probada en vivo (local y Telegram).
 - [ ] Archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
