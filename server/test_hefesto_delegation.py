@@ -184,3 +184,81 @@ class ContinuationTests(unittest.TestCase):
         self.delegate(brain1, fake, job={**JOB, "session_id": session_id})
         brain2 = make_brain(self.temp.name)
         self.assertIn("inv-1", brain2._delegations)
+
+
+class TrackerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-delegation-")
+        self.addCleanup(self.temp.cleanup)
+
+    def delegate(self, brain, fake, invocation_id="inv-1"):
+        fake.accept(invocation_id)
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        session_id = brain._active()["id"]
+        brain.execute_tool("hefesto_echo", {"text": "hola"},
+                           {**JOB, "session_id": session_id})
+        return session_id
+
+    def test_poll_resuelve_estados_terminales(self):
+        brain = make_brain(self.temp.name)
+        fake = FakeJournal()
+        session_id = self.delegate(brain, fake)
+        fake.outcomes["inv-1"] = {"state": "expired", "outputText": None}
+        brain._hefesto_poll()
+        last = brain.sessions[session_id]["messages"][-1]
+        self.assertEqual(last["agent"], "hefesto")
+        self.assertIn("caducó", last["content"])
+        self.assertNotIn("inv-1", brain._delegations)
+
+    def test_poll_no_toca_pendientes(self):
+        brain = make_brain(self.temp.name)
+        fake = FakeJournal()
+        session_id = self.delegate(brain, fake)
+        fake.outcomes["inv-1"] = {"state": "dispatched", "outputText": None}
+        brain._hefesto_poll()
+        self.assertIn("inv-1", brain._delegations)
+        self.assertEqual(brain.sessions[session_id]["messages"], [])
+
+    def test_poll_desconocido_y_cancelado_publican_continuador(self):
+        for state, needle in (("unknown", "desconocido"), ("cancelled", "canceló")):
+            with self.subTest(state=state):
+                temp = tempfile.TemporaryDirectory(prefix="atlas-delegation-")
+                self.addCleanup(temp.cleanup)
+                brain = make_brain(temp.name)
+                fake = FakeJournal()
+                session_id = self.delegate(brain, fake)
+                fake.outcomes["inv-1"] = {"state": state, "outputText": None}
+                brain._hefesto_poll()
+                last = brain.sessions[session_id]["messages"][-1]
+                self.assertIn(needle, last["content"])
+
+    def test_recuperacion_tras_reinicio_del_brain(self):
+        brain1 = make_brain(self.temp.name)
+        fake1 = FakeJournal()
+        self.delegate(brain1, fake1)
+        brain2 = make_brain(self.temp.name)
+        fake2 = FakeJournal()
+        brain2.hefesto_start(fake2, "mac-one")
+        try:
+            self.assertIn("inv-1", brain2._delegations)
+            fake2.outcomes["inv-1"] = {"state": "unknown", "outputText": None}
+            brain2._hefesto_poll()
+            self.assertNotIn("inv-1", brain2._delegations)
+        finally:
+            brain2.hefesto_stop()
+
+    def test_tracker_arranca_y_para_con_el_brain(self):
+        brain = make_brain(self.temp.name)
+        brain.hefesto_start(FakeJournal(), "mac-one")
+        try:
+            self.assertTrue(brain._hefesto_thread.is_alive())
+        finally:
+            brain.hefesto_stop()
+        self.assertFalse(brain._hefesto_thread.is_alive())
+
+    def test_sin_dispositivo_no_arranca_tracker(self):
+        brain = make_brain(self.temp.name)
+        brain.hefesto_start(FakeJournal(), None)
+        self.assertIsNone(getattr(brain, "_hefesto_thread", None))
+        self.assertNotIn("hefesto_echo", [t["id"] for t in brain.tool_defs()])

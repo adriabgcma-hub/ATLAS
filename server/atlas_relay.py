@@ -359,6 +359,8 @@ class Brain:
         self._hefesto_journal: hefesto.Journal | None = None
         self._hefesto_device: str | None = None
         self._delegations: dict[str, dict] = {}
+        self._hefesto_stop: threading.Event | None = None
+        self._hefesto_thread: threading.Thread | None = None
         self._load()
 
     # -- persistencia ----------------------------------------------------
@@ -898,6 +900,52 @@ class Brain:
                                 f"Hefesto: {content}"[:MAX_CONTENT_LEN])
         dlog(self, "HEFESTO", f"continuation invocation={entry['invocation_id']} "
                               f"state={state} session={entry['session_id']}")
+
+    def hefesto_start(self, journal, device_id: str | None) -> None:
+        with self.lock:
+            self._hefesto_journal = journal
+            self._hefesto_device = device_id
+        if device_id is None:
+            return
+        self._hefesto_stop = threading.Event()
+        self._hefesto_thread = threading.Thread(
+            target=self._hefesto_tracker, name="hefesto-tracker", daemon=True)
+        self._hefesto_thread.start()
+        dlog(self, "HEFESTO", f"tracker started device={device_id} "
+                              f"delegations={len(self._delegations)}")
+
+    def hefesto_stop(self) -> None:
+        stop = self._hefesto_stop
+        if stop is not None:
+            stop.set()
+        thread = self._hefesto_thread
+        if thread is not None and thread.ident is not None:
+            thread.join(timeout=2)
+
+    def _hefesto_tracker(self) -> None:
+        while not self._hefesto_stop.wait(1.0):
+            self._hefesto_poll()
+
+    def _hefesto_poll(self) -> None:
+        with self.lock:
+            journal, device_id = self._hefesto_journal, self._hefesto_device
+            entries = [dict(entry) for entry in self._delegations.values()]
+        if journal is None or device_id is None or not entries:
+            return
+        peer = hefesto.Peer("controller", device_id)
+        for entry in entries:
+            status, response = journal.dispatch(
+                peer, "POST", "/v1/hefesto/outcome",
+                json.dumps({"protocolVersion": 1,
+                            "invocationId": entry["invocation_id"]}).encode("utf-8"))
+            if status != 200:
+                dlog(self, "HEFESTO",
+                     f"outcome error={response.get('error')} "
+                     f"invocation={entry['invocation_id']}")
+                continue
+            if response.get("state") in ("succeeded", "expired", "cancelled", "unknown"):
+                self._hefesto_finish(entry, response["state"],
+                                     response.get("outputText"))
 
     def _execute_write(self, args: dict) -> str:
         action = args.get("action")
@@ -1800,7 +1848,9 @@ def main() -> int:
 
     with ThreadingHTTPServer((host, cfg["port"]),
                              make_handler(brain, network, status, sysmon)) as server:
-        with hefesto_listener(host, cfg["data_dir"]):
+        with hefesto_listener(host, cfg["data_dir"]) as hefesto_ctx:
+            if hefesto_ctx is not None:
+                brain.hefesto_start(hefesto_ctx["journal"], hefesto_ctx["device_id"])
             threading.Thread(target=brain.worker, daemon=True, name="brain-worker").start()
             if cfg["token"]:
                 threading.Thread(target=brain.telegram_loop, daemon=True,
@@ -1811,6 +1861,8 @@ def main() -> int:
                 server.serve_forever()
             except KeyboardInterrupt:
                 pass
+            finally:
+                brain.hefesto_stop()
     return 0
 
 
