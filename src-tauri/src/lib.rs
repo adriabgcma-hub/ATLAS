@@ -530,6 +530,22 @@ fn hefesto_abort(hefesto: State<'_, Hefesto>) {
     hefesto.send(HefestoCommand::Abort);
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VisibilityAction {
+    Show,
+    Hide,
+}
+
+/// El atajo alterna: oculta solo si la ventana está visible y enfocada;
+/// en cualquier otro caso la trae al frente.
+fn next_visibility(visible: bool, focused: bool) -> VisibilityAction {
+    if visible && focused {
+        VisibilityAction::Hide
+    } else {
+        VisibilityAction::Show
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     use tauri_plugin_global_shortcut::ShortcutState;
@@ -563,14 +579,18 @@ pub fn run() {
                         return;
                     }
                     if let Some(window) = app.get_webview_window("main") {
-                        let visible = window.is_visible().unwrap_or(false);
-                        let focused = window.is_focused().unwrap_or(false);
-                        if visible && focused {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
+                        match next_visibility(
+                            window.is_visible().unwrap_or(false),
+                            window.is_focused().unwrap_or(false),
+                        ) {
+                            VisibilityAction::Hide => {
+                                let _ = window.hide();
+                            }
+                            VisibilityAction::Show => {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                 })
@@ -660,5 +680,26 @@ mod tests {
         assert!(hefesto_is_suspended(Some(&path)));
         hefesto_clear_suspended(Some(&path));
         assert!(!hefesto_is_suspended(Some(&path)));
+    }
+
+    #[test]
+    fn el_atajo_oculta_solo_si_esta_visible_y_en_foco() {
+        use super::{next_visibility, VisibilityAction};
+        assert!(matches!(
+            next_visibility(true, true),
+            VisibilityAction::Hide
+        ));
+        assert!(matches!(
+            next_visibility(true, false),
+            VisibilityAction::Show
+        ));
+        assert!(matches!(
+            next_visibility(false, true),
+            VisibilityAction::Show
+        ));
+        assert!(matches!(
+            next_visibility(false, false),
+            VisibilityAction::Show
+        ));
     }
 }
