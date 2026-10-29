@@ -111,6 +111,19 @@ export interface Health {
   bot?: { id?: number; username?: string; first_name?: string }
 }
 
+export interface HefestoStatus {
+  configured: boolean
+  deviceId: string | null
+  suspended: boolean | null
+  generation: number | null
+}
+
+export const fetchHefestoStatus = () =>
+  j<HefestoStatus>('/v1/hefesto/status')
+
+export const suspendHefesto = () =>
+  post<{ ok: boolean; suspended?: boolean; error?: string }>('/v1/hefesto/suspend', {})
+
 export interface Msg {
   requestId: string
   role: string

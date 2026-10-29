@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
-  IN_TAURI, clearPendingRestart, fmtDuration, gb, hasPendingRestart, j, post,
-  restartRelay, usePoll,
-  type Health, type LogsResp, type OpResp, type SessionResp, type Snapshot, type Stats,
+  IN_TAURI, clearPendingRestart, fetchHefestoStatus, fmtDuration, gb,
+  hasPendingRestart, j, post, restartRelay, suspendHefesto, usePoll,
+  type HefestoStatus, type Health, type LogsResp, type OpResp,
+  type SessionResp, type Snapshot, type Stats,
 } from './api'
 import {
-  Card, ConfirmCard, LogsCard, PeticionesCard,
+  Card, ConfirmCard, HefestoCard, LogsCard, PeticionesCard,
   PortsCard, RelayCard, RestartCard, UnitsCard,
 } from './components/Cards'
 
@@ -42,6 +43,7 @@ export default function App() {
   const { data: stats } = usePoll<Stats>(() => j<Stats>('/v1/stats'), 5000)
   const { data: logs } = usePoll<{ lines: string[]; total: number }>(
     () => j<LogsResp>('/v1/logs?tail=140'), 2000)
+  const { data: hefesto } = usePoll<HefestoStatus>(() => fetchHefestoStatus(), 2000)
 
   const [pending, setPending] = useState<Pending | null>(null)
   const [resolving, setResolving] = useState(false)
@@ -52,6 +54,21 @@ export default function App() {
     const id = setTimeout(() => setToast(null), 6000)
     return () => clearTimeout(id)
   }, [toast])
+
+  // Suspensión de Hefesto (control remoto vía relay; solo invalida, no reactiva).
+  const [suspending, setSuspending] = useState(false)
+  const doSuspend = useCallback(async () => {
+    setSuspending(true)
+    try {
+      const res = await suspendHefesto()
+      if (res.ok) flash('Hefesto suspendido.')
+      else flash(`No se pudo suspender: ${res.error ?? 'sin detalle'}`, true)
+    } catch (exc) {
+      flash((exc as Error).message, true)
+    } finally {
+      setSuspending(false)
+    }
+  }, [flash])
 
   // Reinicio del relay (solo app macOS). El menú de la barra emite este evento
   // para abrir la confirmación; la acción real la ejecuta Rust por SSH.
@@ -136,6 +153,7 @@ export default function App() {
             servicios/puertos y la actividad, y al final el log. Los datos del
             Mac viven en los KPIs: no se duplican en una tarjeta. */}
         <RelayCard health={health} stats={stats} relayUnit={relayUnit} />
+        <HefestoCard status={hefesto} busy={suspending} onSuspend={doSuspend} />
         <UnitsCard snap={snap} onAct={(unit, verb) => ask('service', { unit, verb })} />
         <PortsCard snap={snap} />
         <PeticionesCard health={health} session={session}
@@ -143,7 +161,7 @@ export default function App() {
         <LogsCard lines={logs?.lines ?? []} total={logs?.total ?? 0} />
       </>
     )
-  }, [snap, sysErr, health, stats, session, logs, ask])
+  }, [snap, sysErr, health, stats, session, logs, hefesto, ask, suspending, doSuspend])
 
   const units = snap?.units ?? []
   const res = snap?.resources

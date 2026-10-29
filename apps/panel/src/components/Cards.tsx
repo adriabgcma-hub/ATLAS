@@ -1,4 +1,4 @@
-import type { Health, Snapshot, Stats, Unit } from '../api'
+import type { Health, HefestoStatus, Snapshot, Stats, Unit } from '../api'
 
 /* Léxico visual: tarjetas sueltas; nada de framework (tokens en panel.css). */
 
@@ -206,5 +206,35 @@ export function RestartCard({ step, busy, onCancel, onNext, onRestart }: {
         )}
       </div>
     </div>
+  )
+}
+
+/** Estado de Hefesto y suspensión remota (el relay invalida; no reactiva). */
+export function HefestoCard({ status, busy, onSuspend }: {
+  status: HefestoStatus | null
+  busy: boolean
+  onSuspend: () => void
+}) {
+  const configured = status?.configured ?? false
+  const suspended = status?.suspended
+  const label = !status
+    ? 'Consultando…'
+    : !configured
+      ? 'Sin configurar'
+      : suspended
+        ? 'Suspendido'
+        : 'Activo'
+  return (
+    <Card title="Hefesto" badge={configured ? (status!.deviceId ?? '') : '—'}>
+      <div className="kpi-row">
+        <span className={`relay-led${suspended === false ? ' on' : ''}`} aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      {configured && suspended === false && (
+        <button className="btn danger" onClick={onSuspend} disabled={busy}>
+          {busy ? 'Suspendiendo…' : 'Suspender'}
+        </button>
+      )}
+    </Card>
   )
 }
