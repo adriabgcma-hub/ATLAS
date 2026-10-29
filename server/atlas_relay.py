@@ -165,15 +165,34 @@ TOOL_DEFS = [
 ]
 
 
+HEFESTO_TOOL = {
+    "id": "hefesto_echo",
+    "risk": "external",
+    "requiresConfirmation": False,
+    "description": ("Encarga una tarea a Hefesto, el especialista del Mac de Atlas, "
+                    "y vuelve al instante con el estado de la delegación. Si el "
+                    "encargo se acepta, díselo al usuario y no inventes el "
+                    "resultado: llegará aparte como mensaje de Hefesto."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string",
+                     "description": "tarea para Hefesto (máx. 256 bytes)"},
+        },
+        "required": ["text"],
+    },
+}
+
+
 def norm_name(name: str) -> str:
     return name.strip().casefold()
 
 
-def tool_payload() -> list[dict]:
+def tool_payload(defs: list[dict] = TOOL_DEFS) -> list[dict]:
     """Catálogo en formato OpenAI function calling para Groq."""
     return [{"type": "function",
              "function": {"name": t["id"], "description": t["description"],
-                          "parameters": t["schema"]}} for t in TOOL_DEFS]
+                          "parameters": t["schema"]}} for t in defs]
 
 
 def log(message: str) -> None:
@@ -336,6 +355,10 @@ class Brain:
         self.log_path = os.path.join(cfg["data_dir"], "relay.log")
         self.token_usage = {"prompt": 0, "completion": 0, "total": 0,
                             "calls": 0, "by_model": {}}
+        # Hefesto: journal/controlador en proceso y delegaciones en vuelo.
+        self._hefesto_journal: hefesto.Journal | None = None
+        self._hefesto_device: str | None = None
+        self._delegations: dict[str, dict] = {}
         self._load()
 
     # -- persistencia ----------------------------------------------------
@@ -723,8 +746,13 @@ class Brain:
                 f"Canal actual: {canal}.")
 
     # -- herramientas ----------------------------------------------------
+    def tool_defs(self) -> list[dict]:
+        if self._hefesto_journal is not None and self._hefesto_device is not None:
+            return TOOL_DEFS + [HEFESTO_TOOL]
+        return TOOL_DEFS
+
     def _tool_def(self, tool_id: str) -> dict | None:
-        return next((t for t in TOOL_DEFS if t["id"] == tool_id), None)
+        return next((t for t in self.tool_defs() if t["id"] == tool_id), None)
 
     def _resolve_calendar(self, name: str) -> dict | None:
         """Calendario por nombre (insensible a mayúsculas/espacios) o por id."""
@@ -740,8 +768,10 @@ class Brain:
                 return cal
         return None
 
-    def execute_tool(self, tool_id: str, args: dict) -> str:
+    def execute_tool(self, tool_id: str, args: dict, job: dict) -> str:
         """Ejecuta una herramienta. Devuelve texto para el modelo."""
+        if tool_id == "hefesto_echo":
+            return self._delegate_echo(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -763,6 +793,45 @@ class Brain:
         if tool_id == "calendar_write":
             return self._execute_write(args)
         return "herramienta desconocida"
+
+    def _delegate_echo(self, job: dict, args: dict) -> str:
+        journal, device_id = self._hefesto_journal, self._hefesto_device
+        if journal is None or device_id is None:
+            return "Hefesto no está disponible (desactivado)"
+        text = str(args.get("text", "")).strip()
+        if not text:
+            return "delegación rechazada: texto vacío"
+        if len(text.encode("utf-8")) > 256:
+            return "delegación rechazada: texto demasiado largo (máx. 256 bytes)"
+        submission = {
+            "protocolVersion": 1,
+            "submissionId": new_id("sub"),
+            "requestId": job["request_id"],
+            "sessionId": job["session_id"],
+            "taskId": new_id("tsk"),
+            "toolId": "hefesto.echo",
+            "arguments": {"text": text},
+        }
+        status, response = journal.dispatch(
+            hefesto.Peer("controller", device_id), "POST",
+            "/v1/hefesto/submit", json.dumps(submission).encode("utf-8"))
+        if status != 200:
+            dlog(self, "HEFESTO",
+                 f"submit rejected error={response.get('error')} request={job['request_id']}")
+            return f"Hefesto no está disponible ({response.get('error', 'desconocido')})"
+        invocation_id = response["invocationId"]
+        with self.lock:
+            self._delegations[invocation_id] = {
+                "invocation_id": invocation_id,
+                "request_id": job["request_id"],
+                "session_id": job["session_id"],
+                "task_id": submission["taskId"],
+                "source": job.get("source", "local"),
+                "chat_id": job.get("chat_id"),
+            }
+        dlog(self, "HEFESTO", f"delegated invocation={invocation_id} "
+                              f"request={job['request_id']} task={submission['taskId']}")
+        return f"delegado a Hefesto ({invocation_id})"
 
     def _execute_write(self, args: dict) -> str:
         action = args.get("action")
@@ -953,7 +1022,7 @@ class Brain:
             "model": self.cfg["groq_model"],
             "temperature": self.cfg["groq_temperature"],
             "messages": messages,
-            "tools": tool_payload(),
+            "tools": tool_payload(self.tool_defs()),
             "tool_choice": "auto",
         }).encode("utf-8")
         last_err = "unknown"
@@ -1069,7 +1138,7 @@ class Brain:
             if decision != "allow_once":
                 return ("denegada por el usuario"
                         if decision == "deny" else "caducada sin respuesta")
-        return self.execute_tool(name, args)
+        return self.execute_tool(name, args, job)
 
     def _process(self, job: dict) -> None:
         request_id = job["request_id"]
