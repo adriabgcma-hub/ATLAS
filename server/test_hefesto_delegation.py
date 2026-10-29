@@ -41,6 +41,18 @@ class FakeJournal:
         self.submit_results.append((409, {"protocolVersion": 1, "error": code}))
 
 
+class CancellingJournal(FakeJournal):
+    """Journal que cancela el turno mientras se despacha el submit."""
+
+    def __init__(self, brain):
+        super().__init__()
+        self.brain = brain
+
+    def dispatch(self, peer, method, path, raw):
+        self.brain.cancel("req-1")
+        return super().dispatch(peer, method, path, raw)
+
+
 def make_brain(data_dir):
     cfg = {
         "token": "", "allowed": set(), "groq_keys": [],
@@ -166,6 +178,29 @@ class ContinuationTests(unittest.TestCase):
         self.assertEqual(brain._delegations, {})
         self.assertEqual(
             brain._load_delegations(), {})
+
+    def test_cancelar_antes_de_la_herramienta_no_ejecuta(self):
+        brain = make_brain(self.temp.name)
+        fake = FakeJournal()
+        fake.accept()
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        brain.cancel("req-1")
+        result = brain._handle_tool_call(
+            JOB, {"function": {"name": "hefesto_echo",
+                               "arguments": json.dumps({"text": "hola"})}})
+        self.assertEqual(result, "cancelada a mitad de turno")
+        self.assertEqual(fake.submits, [])
+
+    def test_cancelar_durante_el_envio_no_registra(self):
+        brain = make_brain(self.temp.name)
+        fake = CancellingJournal(brain)
+        fake.accept()
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        result = brain.execute_tool("hefesto_echo", {"text": "hola"}, JOB)
+        self.assertIn("cancelada", result)
+        self.assertEqual(brain._delegations, {})
 
     def test_continuador_de_sesion_abandonada_se_descarta(self):
         brain = make_brain(self.temp.name)

@@ -848,6 +848,8 @@ class Brain:
             return f"Hefesto no está disponible ({response.get('error', 'desconocido')})"
         invocation_id = response["invocationId"]
         with self.lock:
+            if job["request_id"] in self.cancelled:
+                return "cancelada a mitad de turno"
             self._delegations[invocation_id] = {
                 "invocation_id": invocation_id,
                 "request_id": job["request_id"],
@@ -1244,6 +1246,8 @@ class Brain:
         tool = self._tool_def(name)
         if tool is None:
             return "herramienta desconocida"
+        if job.get("request_id") in self.cancelled:
+            return "cancelada a mitad de turno"
         if tool["requiresConfirmation"]:
             # El tiempo del usuario no consume el plazo de la operación.
             job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
