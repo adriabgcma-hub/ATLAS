@@ -1117,7 +1117,6 @@ la cadencia visual es idéntica en ambos canales. Un continuador de Hefesto lleg
 como `message_appended` con `agent: 'hefesto'` y **requestId propio** (nunca
 reutiliza el del turno): el interino y el resultado no colisionan. Los
 continuadores no emiten eventos de estado de sesión.
-```
 
 - [ ] **Step 6: Commit (solo con permiso explícito del usuario)**
 
