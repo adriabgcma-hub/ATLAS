@@ -1,4 +1,4 @@
-"""Isolated, authenticated Hefesto v2 journal (echo and read-only tools) and HTTPS listener."""
+"""Isolated, authenticated Hefesto v3 journal (echo, read-only and write tools) and HTTPS listener."""
 
 from __future__ import annotations
 
@@ -97,6 +97,16 @@ def load_peers(path):
         raise ValueError("invalid_peer_registry") from None
 
 
+def _validate_path(value):
+    if type(value) is not str:
+        raise _Rejected("invalid_path")
+    try:
+        if not value.startswith("/") or "\x00" in value or len(value.encode("utf-8")) > 1024:
+            raise _Rejected("invalid_path")
+    except UnicodeError:
+        raise _Rejected("invalid_path") from None
+
+
 def _validate(method, path, raw):
     if type(raw) is not bytes:
         raise _Rejected("invalid_body")
@@ -126,36 +136,67 @@ def _validate(method, path, raw):
             raise _Rejected("invalid_generation")
     if operation == "control" and (type(body["action"]) is not str or body["action"] not in ("resume", "abort")):
         raise _Rejected("invalid_action")
-    if operation == "submit" and body["toolId"] not in ("hefesto.echo", "hefesto.list_dir", "hefesto.read_file"):
+    if operation == "submit" and body["toolId"] not in (
+            "hefesto.echo", "hefesto.list_dir", "hefesto.read_file",
+            "hefesto.write_file", "hefesto.rename", "hefesto.file_info"):
         raise _Rejected("unsupported_tool")
     if operation == "submit":
         args = body["arguments"]
+        if type(args) is not dict:
+            raise _Rejected("invalid_fields")
         if body["toolId"] == "hefesto.echo":
-            if type(args) is not dict or set(args) != {"text"} or type(args["text"]) is not str:
+            if set(args) != {"text"} or type(args["text"]) is not str:
                 raise _Rejected("invalid_text")
             try:
                 if len(args["text"].encode("utf-8")) > 256:
                     raise _Rejected("invalid_text")
             except UnicodeError:
                 raise _Rejected("invalid_text") from None
-        else:
-            if type(args) is not dict or set(args) != {"path"} or type(args["path"]) is not str:
-                raise _Rejected("invalid_path")
-            path = args["path"]
+        elif body["toolId"] == "hefesto.write_file":
+            if set(args) != {"path", "content", "expectedHash"}:
+                raise _Rejected("invalid_fields")
+            _validate_path(args["path"])
+            if type(args["content"]) is not str:
+                raise _Rejected("invalid_text")
             try:
-                if not path.startswith("/") or "\x00" in path or len(path.encode("utf-8")) > 1024:
-                    raise _Rejected("invalid_path")
+                if "\x00" in args["content"] or len(args["content"].encode("utf-8")) > 16 * 1024:
+                    raise _Rejected("invalid_text")
             except UnicodeError:
-                raise _Rejected("invalid_path") from None
+                raise _Rejected("invalid_text") from None
+            expected = args["expectedHash"]
+            if expected is not None and (type(expected) is not str
+                                         or len(expected) != 64
+                                         or any(c not in "0123456789abcdef" for c in expected)):
+                raise _Rejected("invalid_hash")
+        elif body["toolId"] == "hefesto.rename":
+            if set(args) != {"from", "to"}:
+                raise _Rejected("invalid_fields")
+            _validate_path(args["from"])
+            _validate_path(args["to"])
+        else:
+            if set(args) != {"path"}:
+                raise _Rejected("invalid_fields")
+            _validate_path(args["path"])
     if "output" in body:
         value = body["output"]
-        if type(value) is not dict or set(value) != {"text"} or type(value["text"]) is not str:
-            raise _Rejected("invalid_text")
-        try:
-            if len(value["text"].encode("utf-8")) > 64 * 1024:
-                raise _Rejected("invalid_text")
-        except UnicodeError:
-            raise _Rejected("invalid_text") from None
+        if type(value) is dict and set(value) == {"text"} and type(value["text"]) is str:
+            try:
+                if len(value["text"].encode("utf-8")) > 64 * 1024:
+                    raise _Rejected("invalid_text")
+            except UnicodeError:
+                raise _Rejected("invalid_text") from None
+        elif (type(value) is dict and set(value) == {"exists", "size", "sha256"}
+              and type(value["exists"]) is bool):
+            size, digest = value["size"], value["sha256"]
+            ok_size = (size is None) if not value["exists"] else (
+                type(size) is int and 0 <= size <= 2**63 - 1)
+            ok_hash = (digest is None) if not value["exists"] else (
+                type(digest) is str and len(digest) == 64
+                and all(c in "0123456789abcdef" for c in digest))
+            if not ok_size or not ok_hash:
+                raise _Rejected("invalid_output")
+        else:
+            raise _Rejected("invalid_output")
     return operation, body
 
 
@@ -201,6 +242,7 @@ class Journal:
         self._lock = threading.RLock()
         self._monotonic = monotonic
         self._wall_time = wall_time
+        self._contents = {}
         self._db = None
         try:
             self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
@@ -253,9 +295,14 @@ class Journal:
                 return 503, _error("journal_unavailable")
 
     def _cancel_active(self, device_id):
+        ids = [row["invocation_id"] for row in self._db.execute(
+            "SELECT invocation_id FROM invocations WHERE device_id=? AND state IN ('pending','dispatched')",
+            (device_id,)).fetchall()]
         self._db.execute("""UPDATE invocations SET state=CASE state
                          WHEN 'pending' THEN 'cancelled' ELSE 'unknown' END
                          WHERE device_id=? AND state IN ('pending','dispatched')""", (device_id,))
+        for invocation_id in ids:
+            self._contents.pop(invocation_id, None)
 
     def _sweep(self, now, wall):
         for device in self._db.execute(
@@ -263,10 +310,15 @@ class Journal:
             self._cancel_active(device["device_id"])
             self._db.execute("""UPDATE devices SET instance_id=NULL, lease_mono=NULL,
                              generation=generation+1, suspended=1 WHERE device_id=?""", (device["device_id"],))
+        expired = [row["invocation_id"] for row in self._db.execute(
+            "SELECT invocation_id FROM invocations WHERE state IN ('pending','dispatched') "
+            "AND (deadline_mono<=? OR expires_ms<=?)", (now, wall * 1000)).fetchall()]
         self._db.execute("""UPDATE invocations SET state=CASE state
                          WHEN 'pending' THEN 'expired' ELSE 'unknown' END
                          WHERE state IN ('pending','dispatched') AND (deadline_mono<=? OR expires_ms<=?)""",
                          (now, wall * 1000))
+        for invocation_id in expired:
+            self._contents.pop(invocation_id, None)
 
     def _device(self, device_id):
         return self._db.execute("SELECT * FROM devices WHERE device_id=?", (device_id,)).fetchone()
@@ -332,7 +384,15 @@ class Journal:
                              (int(data["action"] == "abort"), device_id))
             return self._status(device_id)
         if operation == "submit":
-            submission = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            arguments = data["arguments"]
+            redacted = {key: value for key, value in data.items() if key != "arguments"}
+            redacted["arguments"] = {key: value for key, value in arguments.items()
+                                     if key != "content"}
+            if "content" in arguments:
+                encoded_content = arguments["content"].encode("utf-8")
+                redacted["arguments"]["contentBytes"] = len(encoded_content)
+                redacted["arguments"]["contentSha256"] = hashlib.sha256(encoded_content).hexdigest()
+            submission = json.dumps(redacted, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
             previous = self._db.execute("SELECT * FROM invocations WHERE device_id=? AND submission_id=?",
                                         (device_id, data["submissionId"])).fetchone()
             if previous is not None:
@@ -351,6 +411,8 @@ class Journal:
                               device["generation"], data["requestId"], data["sessionId"], data["taskId"],
                               data["arguments"].get("text", ""), int(wall * 1000) + INVOCATION_SECONDS * 1000,
                               now + INVOCATION_SECONDS))
+            if "content" in data["arguments"]:
+                self._contents[invocation_id] = data["arguments"]
             return {"protocolVersion": 3, "invocationId": invocation_id, "state": "pending"}
         if operation == "outcome":
             invocation = self._db.execute(
@@ -358,21 +420,37 @@ class Journal:
                 (data["invocationId"], device_id)).fetchone()
             if invocation is None:
                 raise _Rejected("invocation_not_found", 404)
+            output = None
+            if invocation["output_text"] is not None:
+                try:
+                    output = json.loads(invocation["output_text"])
+                except ValueError:
+                    output = {"text": invocation["output_text"]}
             return {"protocolVersion": 3, "invocationId": invocation["invocation_id"],
-                    "state": invocation["state"], "outputText": invocation["output_text"]}
+                    "state": invocation["state"], "output": output}
         if operation == "next":
             self._live(device, data["instanceId"], data["generation"], ready=True)
             active = self._active(device_id)
             invocation = None
             if active is not None:
                 submitted = json.loads(active["submission"])
+                arguments = submitted["arguments"]
+                if submitted["toolId"] == "hefesto.write_file":
+                    # El contenido no persiste: si el proceso se reinició entre
+                    # submit y next, la escritura queda `unknown` y no se entrega.
+                    arguments = self._contents.get(active["invocation_id"])
+                    if arguments is None:
+                        self._db.execute(
+                            "UPDATE invocations SET state='unknown' WHERE invocation_id=?",
+                            (active["invocation_id"],))
+                        return {"protocolVersion": 3, "invocation": None}
                 self._db.execute("UPDATE invocations SET state='dispatched' WHERE invocation_id=?",
                                  (active["invocation_id"],))
                 invocation = {"protocolVersion": 3, "invocationId": active["invocation_id"],
                               "requestId": active["request_id"], "sessionId": active["session_id"],
                               "taskId": active["task_id"], "deviceId": device_id,
                               "instanceId": active["instance_id"], "generation": active["generation"],
-                              "toolId": submitted["toolId"], "arguments": submitted["arguments"],
+                              "toolId": submitted["toolId"], "arguments": arguments,
                               "expiresAtUnixMs": active["expires_ms"]}
             return {"protocolVersion": 3, "invocation": invocation}
         invocation = self._db.execute("SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
@@ -384,18 +462,33 @@ class Journal:
         if data["generation"] != invocation["generation"]:
             raise _Rejected("stale_generation", 409)
         submitted = json.loads(invocation["submission"])
-        if submitted["toolId"] == "hefesto.echo" and data["output"]["text"] != invocation["text"]:
+        tool = submitted["toolId"]
+        output = data["output"]
+        if tool == "hefesto.file_info":
+            # La info puede degradar a texto cuando el dispositivo rechaza la
+            # ruta o el archivo; el relay lo interpreta como error del plan.
+            info_shape = set(output) == {"exists", "size", "sha256"}
+            text_shape = set(output) == {"text"} and type(output["text"]) is str
+            if not (info_shape or text_shape):
+                raise _Rejected("invalid_output")
+        elif set(output) != {"text"}:
+            raise _Rejected("invalid_text")
+        if tool == "hefesto.echo" and output["text"] != invocation["text"]:
             raise _Rejected("result_conflict", 409)
+        # Mismo JSON canónico que se persiste, o un reintento tras ACK perdido
+        # compararía formatos distintos y daría conflicto.
+        canonical = json.dumps(output, sort_keys=True, separators=(",", ":"))
         # A committed success survives ACK loss, expiry, abort and relay restart.
         if invocation["state"] == "succeeded":
-            if data["output"]["text"] != invocation["output_text"]:
+            if canonical != invocation["output_text"]:
                 raise _Rejected("result_conflict", 409)
             return self._ack(invocation)
         if invocation["state"] != "dispatched":
             raise _Rejected("invocation_not_dispatched", 409)
         self._live(device, data["instanceId"], data["generation"], ready=True)
         self._db.execute("UPDATE invocations SET state='succeeded', output_text=? WHERE invocation_id=?",
-                         (data["output"]["text"], invocation["invocation_id"]))
+                         (canonical, invocation["invocation_id"]))
+        self._contents.pop(invocation["invocation_id"], None)
         return {"protocolVersion": 3, "invocationId": invocation["invocation_id"], "state": "succeeded"}
 
 

@@ -526,12 +526,15 @@ class JournalTests(unittest.TestCase):
         for text in ("a" * 257, "é" * 129, "\U0001f600" * 65, "\ud800", 1, True, None, [], {}):
             with self.subTest(text_type=type(text)):
                 self.error("invalid_text", "submit", CONTROLLER, **submission(text=text))
-        for text in ("\ud800", 1, True, None, [], {}):
+        for text, code in (("\ud800", "invalid_text"), (1, "invalid_output"), (True, "invalid_output"),
+                           (None, "invalid_output"), ([], "invalid_output"), ({}, "invalid_output")):
             with self.subTest(output_type=type(text)):
-                self.error("invalid_text", "result", instanceId="i", generation=2, invocationId="v",
+                self.error(code, "result", instanceId="i", generation=2, invocationId="v",
                            output={"text": text})
-        for arguments in ({}, {"text": "hi", "extra": 1}, [], None, "text"):
+        for arguments in ({}, {"text": "hi", "extra": 1}):
             self.error("invalid_text", "submit", CONTROLLER, **submission(arguments=arguments))
+        for arguments in ([], None, "text"):
+            self.error("invalid_fields", "submit", CONTROLLER, **submission(arguments=arguments))
 
     def test_raw_json_duplicates_invalid_encoding_and_body_limit(self):
         cases = (b'{"protocolVersion":3,"protocolVersion":3,"instanceId":"i"}',
@@ -582,12 +585,12 @@ class JournalTests(unittest.TestCase):
         ack = self.send(text="héllo 世界")
         outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
         self.assertEqual(outcome, {"protocolVersion": 3, "invocationId": ack["invocationId"],
-                                   "state": "pending", "outputText": None})
+                                   "state": "pending", "output": None})
         invocation = self.next()
         self.ok("result", peer=DEVICE, **self.result_fields(invocation))
         outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
         self.assertEqual(outcome["state"], "succeeded")
-        self.assertEqual(outcome["outputText"], "héllo 世界")
+        self.assertEqual(outcome["output"], {"text": "héllo 世界"})
 
     def test_outcome_desconocido_devuelve_404(self):
         self.error("invocation_not_found", "outcome", peer=CONTROLLER, invocationId="no-existe")
@@ -624,8 +627,8 @@ class ReadToolTests(JournalTests):
 
     def test_read_con_argumento_text_rechazado(self):
         self.ready()
-        # toolId de lectura con arguments {text} (shape de eco) => invalid_path
-        self.error("invalid_path", "submit", CONTROLLER,
+        # toolId de lectura con arguments {text} (shape de eco) => invalid_fields
+        self.error("invalid_fields", "submit", CONTROLLER,
                    **submission(toolId="hefesto.read_file"))
 
     def test_read_con_ruta_relativa_rechazada(self):
@@ -656,6 +659,89 @@ class ReadToolTests(JournalTests):
         invocation = self.next()
         self.error("result_conflict", "result",
                    **self.result_fields(invocation, output={"text": "distinto"}))
+
+
+WRITE = {"submissionId": "submission-w", "requestId": "request-1", "sessionId": "session-1",
+         "taskId": "task-1", "toolId": "hefesto.write_file",
+         "arguments": {"path": "/Users/x/Documents/n.txt", "content": "hola",
+                       "expectedHash": None}}
+RENAME = {"submissionId": "submission-r", "requestId": "request-1", "sessionId": "session-1",
+          "taskId": "task-2", "toolId": "hefesto.rename",
+          "arguments": {"from": "/Users/x/Documents/a.txt", "to": "/Users/x/Documents/b.txt"}}
+INFO = {"submissionId": "submission-i", "requestId": "request-1", "sessionId": "session-1",
+        "taskId": "task-3", "toolId": "hefesto.file_info",
+        "arguments": {"path": "/Users/x/Documents/a.txt"}}
+
+
+class WriteJournalTests(JournalTests):
+    def test_el_contenido_no_se_guarda_en_sqlite(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **WRITE)
+        invocation = self.next()
+        self.assertEqual(invocation["arguments"]["content"], "hola")
+        with sqlite3.connect(self.path) as db:
+            raw = db.execute("SELECT submission FROM invocations").fetchone()[0]
+        self.assertNotIn("hola", raw)
+        self.assertIn("contentSha256", raw)
+
+    def test_reinicio_sin_contenido_deja_unknown_y_no_reenvia(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **WRITE)
+        self.next()
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+
+    def test_write_valida_argumentos_y_salida(self):
+        self.ready()
+        broken = json.loads(json.dumps(WRITE))
+        broken["arguments"]["expectedHash"] = "XYZ"
+        self.error("invalid_hash", "submit", peer=CONTROLLER, **broken)
+        self.ok("submit", peer=CONTROLLER, **WRITE)
+        invocation = self.next()
+        value = self.ok(
+            "result",
+            **self.result_fields(invocation, output={"text": "Escrito «x» (4 B, sha256 abc)"}))
+        self.assertEqual(value["state"], "succeeded")
+
+    def test_file_info_admite_info_o_texto_de_rechazo(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **INFO)
+        invocation = self.next()
+        self.ok("result",
+                **self.result_fields(invocation, output={"exists": True, "size": 3,
+                                                         "sha256": "0" * 64}))
+        value = self.ok("outcome", peer=CONTROLLER,
+                        invocationId=invocation["invocationId"])
+        self.assertEqual(value["output"]["size"], 3)
+        self.ok("submit", peer=CONTROLLER,
+                **{**INFO, "submissionId": "submission-i2", "taskId": "task-4"})
+        rejection = self.next()
+        self.ok("result", **self.result_fields(
+            rejection, output={"text": "fuera de las raíces autorizadas"}))
+
+    def test_write_rechaza_la_salida_de_info(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **WRITE)
+        invocation = self.next()
+        self.error("invalid_text", "result",
+                   **self.result_fields(invocation, output={"exists": True, "size": 3,
+                                                            "sha256": "0" * 64}))
+
+    def test_submit_idempotente_no_duplica_y_conflicta_si_cambia_el_contenido(self):
+        self.ready()
+        first = self.ok("submit", peer=CONTROLLER, **WRITE)
+        self.assertEqual(self.ok("submit", peer=CONTROLLER, **WRITE), first)
+        changed = json.loads(json.dumps(WRITE))
+        changed["arguments"]["content"] = "otro"
+        self.error("submission_conflict", "submit", peer=CONTROLLER, **changed)
+
+    def test_rename_valida_rutas(self):
+        self.ready()
+        broken = json.loads(json.dumps(RENAME))
+        broken["arguments"]["to"] = "relativo"
+        self.error("invalid_path", "submit", peer=CONTROLLER, **broken)
+        self.ok("submit", peer=CONTROLLER, **RENAME)
 
 
 class RegistryTests(unittest.TestCase):
