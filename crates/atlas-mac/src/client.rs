@@ -4,6 +4,8 @@ use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::{Certificate, Identity, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use std::io::Read;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::sync::mpsc;
 use std::time::Duration;
 
 pub struct HefestoClient {
@@ -27,7 +29,14 @@ impl HefestoClient {
             return Err(Error::InvalidCredentials);
         }
         let identity = Identity::from_pem(identity_pem).map_err(|_| Error::InvalidCredentials)?;
-        let mut builder = Client::builder()
+        // mDNS anuncia la IPv6 link-local antes que la IPv4 y esa dirección no
+        // responde fuera del enlace: sin ordenar, el primer intento consume el
+        // timeout completo y la petición nunca llega a la IPv4.
+        let mut builder = Client::builder();
+        if let Some((host, addrs)) = ipv4_first_resolution(&base_url, timeout) {
+            builder = builder.resolve_to_addrs(&host, &addrs);
+        }
+        let mut builder = builder
             .use_rustls_tls()
             .https_only(true)
             .no_proxy()
@@ -139,6 +148,37 @@ impl HefestoClient {
     }
 }
 
+/// Resuelve el nombre del relay con un tope de tiempo y deja las IPv4 delante,
+/// conservando el orden dentro de cada familia. `None` deja la resolución a
+/// reqwest (IP literal, fallo o nombre sin resultados).
+fn ipv4_first_resolution(base_url: &Url, timeout: Duration) -> Option<(String, Vec<SocketAddr>)> {
+    let host = base_url.host_str()?.to_string();
+    if host.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    let port = base_url.port_or_known_default()?;
+    let (sender, receiver) = mpsc::channel();
+    let probe = host.clone();
+    let worker = std::thread::Builder::new()
+        .name("hefesto-resolve".to_string())
+        .spawn(move || {
+            let addrs = (probe.as_str(), port)
+                .to_socket_addrs()
+                .map(ipv4_first)
+                .ok();
+            let _ = sender.send(addrs);
+        })
+        .ok()?;
+    let addrs = receiver.recv_timeout(timeout).ok().flatten();
+    drop(worker);
+    addrs.filter(|addrs| !addrs.is_empty()).map(|a| (host, a))
+}
+
+fn ipv4_first(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
+    let (v4, v6): (Vec<_>, Vec<_>) = addrs.into_iter().partition(|addr| addr.is_ipv4());
+    v4.into_iter().chain(v6).collect()
+}
+
 fn private_base_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(|_| Error::InvalidUrl)?;
     if url.scheme() != "https"
@@ -196,6 +236,32 @@ mod tests {
             assert_eq!(private_base_url(value), Err(Error::InvalidUrl));
         }
         assert!(private_base_url("https://localhost:9443/").is_ok());
+    }
+
+    #[test]
+    fn resolution_puts_ipv4_first_without_reordering_families() {
+        use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+        let v4 = |last| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 100, last)), 8767);
+        let v6 = |last: u16| SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), last);
+        assert_eq!(
+            ipv4_first(vec![v6(1), v4(26), v6(2), v4(27)]),
+            vec![v4(26), v4(27), v6(1), v6(2)]
+        );
+        assert_eq!(ipv4_first(vec![v6(1)]), vec![v6(1)]);
+        assert_eq!(ipv4_first(vec![v4(26)]), vec![v4(26)]);
+        assert!(ipv4_first(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn resolution_skips_ip_literals_and_prefers_ipv4_for_names() {
+        let timeout = Duration::from_secs(2);
+        let literal = private_base_url("https://192.168.100.26:8767/").unwrap();
+        assert_eq!(ipv4_first_resolution(&literal, timeout), None);
+        let named = private_base_url("https://localhost:8767/").unwrap();
+        let (host, addrs) = ipv4_first_resolution(&named, timeout).unwrap();
+        assert_eq!(host, "localhost");
+        assert!(addrs.iter().all(|addr| addr.ip().is_loopback()));
+        assert_eq!(addrs[0].port(), 8767);
     }
 
     #[test]
