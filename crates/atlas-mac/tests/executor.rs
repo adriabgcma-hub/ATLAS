@@ -39,13 +39,17 @@ fn invocation() -> Invocation {
         instance_id: id("instance"),
         generation: generation(2),
         tool_id: ToolId::Echo,
-        arguments: EchoPayload::new("hello").unwrap(),
+        arguments: ToolArguments::Echo(EchoPayload::new("hello").unwrap()),
         expires_at_unix_ms: UnixMillis::new(WALL + 15_000).unwrap(),
     }
 }
 
-fn registered() -> EchoExecutor {
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+fn registered() -> Executor {
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let attempt = executor.prepare_registration(at(0)).unwrap();
     executor
         .acknowledge_registration(attempt, &status(1, true), at(0))
@@ -53,7 +57,7 @@ fn registered() -> EchoExecutor {
     executor
 }
 
-fn ready() -> EchoExecutor {
+fn ready() -> Executor {
     let mut executor = registered();
     let attempt = executor.prepare_resume(at(1)).unwrap();
     assert_eq!(attempt.request().action, ControlAction::Resume);
@@ -66,7 +70,11 @@ fn ready() -> EchoExecutor {
 
 #[test]
 fn starts_suspended_and_only_manual_acknowledgement_enables_echo() {
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     assert!(executor.is_suspended());
     assert_eq!(executor.execute(&invocation(), at(0)), Err(Error::Offline));
     assert!(executor.prepare_resume(at(0)).is_err());
@@ -90,15 +98,17 @@ fn starts_suspended_and_only_manual_acknowledgement_enables_echo() {
         .unwrap();
     let mut task = invocation();
     task.generation = generation(3);
-    assert_eq!(
-        executor.execute(&task, at(7)).unwrap().output,
-        task.arguments
-    );
+    let result = executor.execute(&task, at(7)).unwrap();
+    assert_eq!(result.output.text.as_str(), "hello");
 }
 
 #[test]
 fn registration_must_be_suspended_and_cannot_be_reused() {
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let attempt = executor.prepare_registration(at(0)).unwrap();
     assert_eq!(
         executor.acknowledge_registration(attempt, &status(1, false), at(0)),
@@ -172,7 +182,11 @@ fn wrong_status_identity_regression_and_semantics_fail_closed() {
 
 #[test]
 fn registration_rejects_mismatched_identity() {
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let mut wrong = status(1, true);
     wrong.device_id = id("other");
     let attempt = executor.prepare_registration(at(0)).unwrap();
@@ -193,7 +207,7 @@ fn identical_delivery_returns_exact_cached_result_without_reexecution() {
         assert_eq!(executor.execute(&task, at(time)).unwrap(), first);
         assert_eq!(executor.completed_count(), 1);
     }
-    assert_eq!(first.output, task.arguments);
+    assert_eq!(first.output.text.as_str(), "hello");
     assert_eq!(first.instance_id, task.instance_id);
     assert_eq!(first.generation, task.generation);
     assert_eq!(first.invocation_id, task.invocation_id);
@@ -207,7 +221,7 @@ fn same_id_with_any_changed_payload_is_rejected_without_losing_result() {
         let result = executor.execute(&original, at(10)).unwrap();
         let mut changed = original.clone();
         match field {
-            "text" => changed.arguments = EchoPayload::new("mutated").unwrap(),
+            "text" => changed.arguments = ToolArguments::Echo(EchoPayload::new("mutated").unwrap()),
             "request" => changed.request_id = id("other"),
             "session" => changed.session_id = id("other"),
             "task" => changed.task_id = id("other"),
@@ -461,7 +475,11 @@ fn expiration_permanently_retires_instance_even_with_new_online_ack() {
 
 #[test]
 fn late_registration_ack_is_not_a_fresh_lease() {
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let attempt = executor.prepare_registration(at(0)).unwrap();
     assert_eq!(
         executor.acknowledge_registration(attempt, &status(1, true), at(15_000)),
@@ -475,7 +493,11 @@ fn late_registration_ack_is_not_a_fresh_lease() {
 
 #[test]
 fn lost_registration_ack_retry_cannot_extend_the_initial_lease() {
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     // First register sent at t=0; its ACK is lost, so the caller retries at t=10.
     // The relay anchored the lease at the first registration (t=0 -> 15) and never
     // renews a still-live ID, so the retry must not extend the local lease past 15.
@@ -627,7 +649,11 @@ fn invalid_clock_and_integer_overflow_cannot_grant_a_lease() {
         Err(Error::InvalidClock)
     );
     assert!(executor.is_suspended());
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let now = wall_at(MAX_WIRE_INTEGER, 0);
     let attempt = executor.prepare_registration(now).unwrap();
     assert_eq!(
@@ -635,14 +661,22 @@ fn invalid_clock_and_integer_overflow_cannot_grant_a_lease() {
         Err(Error::InvalidExpiration)
     );
     assert!(executor.is_suspended());
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let now = Clock::new(WALL, Duration::MAX).unwrap();
     let attempt = executor.prepare_registration(now).unwrap();
     assert_eq!(
         executor.acknowledge_registration(attempt, &status(1, true), now),
         Err(Error::InvalidClock)
     );
-    let mut executor = EchoExecutor::new(id("device"), id("instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let attempt = executor.prepare_registration(at(0)).unwrap();
     executor
         .acknowledge_registration(attempt, &status(MAX_WIRE_INTEGER, true), at(0))
@@ -693,8 +727,66 @@ fn offline_status_retires_instance_and_relay_restart_is_rejected() {
 }
 
 #[test]
+fn dispatcher_routes_read_tools_and_rejects_mismatches() {
+    let dir = std::env::temp_dir().join(format!(
+        "atlas-mac-exec-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("greet.txt"), "hola mundo").unwrap();
+
+    let mut executor = Executor::new(id("device"), id("instance"), Roots::new(vec![dir.clone()]));
+    let attempt = executor.prepare_registration(at(0)).unwrap();
+    executor
+        .acknowledge_registration(attempt, &status(1, true), at(0))
+        .unwrap();
+    let attempt = executor.prepare_resume(at(1)).unwrap();
+    executor
+        .acknowledge_resume(attempt, &status(2, false), at(2))
+        .unwrap();
+
+    let mut read = invocation();
+    read.invocation_id = id("read");
+    read.tool_id = ToolId::ReadFile;
+    read.arguments = ToolArguments::Path(PathPayload {
+        path: ToolPath::new(dir.join("greet.txt").to_str().unwrap()).unwrap(),
+    });
+    let result = executor.execute(&read, at(3)).unwrap();
+    assert_eq!(result.output.text.as_str(), "hola mundo");
+
+    let mut list = invocation();
+    list.invocation_id = id("list");
+    list.tool_id = ToolId::ListDir;
+    list.arguments = ToolArguments::Path(PathPayload {
+        path: ToolPath::new(dir.to_str().unwrap()).unwrap(),
+    });
+    let result = executor.execute(&list, at(4)).unwrap();
+    assert!(result.output.text.as_str().contains("greet.txt"));
+
+    let mut mismatch = invocation();
+    mismatch.invocation_id = id("mismatch");
+    mismatch.arguments = ToolArguments::Path(PathPayload {
+        path: ToolPath::new(dir.to_str().unwrap()).unwrap(),
+    });
+    assert_eq!(
+        executor.execute(&mismatch, at(5)),
+        Err(Error::InvalidArguments)
+    );
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn restart_uses_new_instance_and_never_accepts_old_delivery() {
-    let mut executor = EchoExecutor::new(id("device"), id("new_instance"));
+    let mut executor = Executor::new(
+        id("device"),
+        id("new_instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
     let mut new_status = status(3, true);
     new_status.instance_id = Some(id("new_instance"));
     let attempt = executor.prepare_registration(at(0)).unwrap();

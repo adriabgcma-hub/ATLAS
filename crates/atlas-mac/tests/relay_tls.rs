@@ -151,11 +151,15 @@ fn submission(value: &str) -> SubmitRequest {
         session_id: id("session-cross"),
         task_id: id("task-cross"),
         tool_id: ToolId::Echo,
-        arguments: EchoPayload::new("héllo 世界").unwrap(),
+        arguments: ToolArguments::Echo(EchoPayload::new("héllo 世界").unwrap()),
     }
 }
 
-fn resume(executor: &mut EchoExecutor, client: &HefestoClient, start: Instant) {
+fn test_roots() -> Roots {
+    Roots::new(vec![std::env::temp_dir()])
+}
+
+fn resume(executor: &mut Executor, client: &HefestoClient, start: Instant) {
     let attempt = executor.prepare_resume(clock(start)).unwrap();
     let status = client.control(attempt.request()).unwrap();
     executor
@@ -196,7 +200,7 @@ fn python_rust_mtls_echo_abort_and_restart() {
     let start = Instant::now();
     let instance = id("rust-instance");
     let registration = RegisterRequest::new(instance.clone());
-    let mut executor = EchoExecutor::new(id("mac-one"), instance.clone());
+    let mut executor = Executor::new(id("mac-one"), instance.clone(), test_roots());
     let attempt = executor.prepare_registration(clock(start)).unwrap();
     let registered = device.register(&registration).unwrap();
     executor
@@ -216,13 +220,15 @@ fn python_rust_mtls_echo_abort_and_restart() {
     assert_eq!(executor.execute(&duplicate, clock(start)).unwrap(), result);
     assert_eq!(executor.completed_count(), 1);
     let mut changed = invocation.clone();
-    changed.arguments = EchoPayload::new("changed").unwrap();
+    changed.arguments = ToolArguments::Echo(EchoPayload::new("changed").unwrap());
     assert_eq!(
         executor.execute(&changed, clock(start)),
         Err(Error::InvocationConflict)
     );
     let mut changed_result = result.clone();
-    changed_result.output = changed.arguments;
+    changed_result.output = OutputPayload {
+        text: TextOutput::new("changed").unwrap(),
+    };
     assert_eq!(device.result(&changed_result), Err(Error::RemoteRejected));
     let succeeded = device.result(&result).unwrap();
     assert_eq!(succeeded.state, InvocationState::Succeeded);
@@ -280,7 +286,7 @@ fn python_rust_mtls_echo_abort_and_restart() {
     );
 
     let fresh_instance = id("rust-new-instance");
-    let mut fresh = EchoExecutor::new(id("mac-one"), fresh_instance.clone());
+    let mut fresh = Executor::new(id("mac-one"), fresh_instance.clone(), test_roots());
     let attempt = fresh.prepare_registration(clock(start)).unwrap();
     let registered = device
         .register(&RegisterRequest::new(fresh_instance.clone()))

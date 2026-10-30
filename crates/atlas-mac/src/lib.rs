@@ -7,8 +7,9 @@ pub mod tools;
 pub mod wire;
 
 pub use client::HefestoClient;
-pub use executor::{Clock, EchoExecutor, RegistrationAttempt, ResumeAttempt};
+pub use executor::{Clock, Executor, RegistrationAttempt, ResumeAttempt};
 pub use runtime::{Phase, Runtime, Snapshot, Transport};
+pub use tools::Roots;
 pub use wire::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,6 +20,7 @@ pub enum Error {
     InvalidExpiration,
     InvalidText,
     InvalidPath,
+    InvalidArguments,
     InvalidState,
     InvalidErrorCode,
     InvalidJson,
@@ -51,6 +53,7 @@ impl Error {
             Self::InvalidExpiration => "invalid_expiration",
             Self::InvalidText => "invalid_text",
             Self::InvalidPath => "invalid_path",
+            Self::InvalidArguments => "invalid_arguments",
             Self::InvalidState => "invalid_state",
             Self::InvalidErrorCode => "invalid_error_code",
             Self::InvalidJson => "invalid_json",

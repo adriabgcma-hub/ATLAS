@@ -69,16 +69,17 @@ pub struct RegistrationAttempt {
     instance_id: OpaqueId,
 }
 
-struct CompletedEcho {
+struct CompletedInvocation {
     invocation: Invocation,
     result: ResultRequest,
     deadline: Deadline,
     revision: u64,
 }
 
-pub struct EchoExecutor {
+pub struct Executor {
     device_id: OpaqueId,
     instance_id: OpaqueId,
+    roots: crate::tools::Roots,
     generation: Option<Generation>,
     suspended: bool,
     online: bool,
@@ -91,15 +92,16 @@ pub struct EchoExecutor {
     revision: u64,
     pending_resume: Option<u64>,
     barred_resume_through: Option<Generation>,
-    completed: HashMap<OpaqueId, CompletedEcho>,
+    completed: HashMap<OpaqueId, CompletedInvocation>,
 }
 
-impl EchoExecutor {
+impl Executor {
     // The owner supplies a fresh instance ID for each process lifetime.
-    pub fn new(device_id: OpaqueId, instance_id: OpaqueId) -> Self {
+    pub fn new(device_id: OpaqueId, instance_id: OpaqueId, roots: crate::tools::Roots) -> Self {
         Self {
             device_id,
             instance_id,
+            roots,
             generation: None,
             suspended: true,
             online: false,
@@ -321,16 +323,29 @@ impl EchoExecutor {
             .filter(|remaining| *remaining > 0)
             .ok_or(Error::InvocationExpired)?;
         let deadline = Deadline::from_start(now, remaining.min(LEASE_MILLIS))?;
+        let text = match (&invocation.tool_id, &invocation.arguments) {
+            (ToolId::Echo, ToolArguments::Echo(payload)) => payload.text.as_str().to_string(),
+            (ToolId::ListDir, ToolArguments::Path(payload)) => {
+                crate::tools::list_dir(&self.roots, payload.path.as_str())
+            }
+            (ToolId::ReadFile, ToolArguments::Path(payload)) => {
+                crate::tools::read_file(&self.roots, payload.path.as_str())
+            }
+            _ => return Err(Error::InvalidArguments),
+        };
+        let output = OutputPayload {
+            text: TextOutput::new(text)?,
+        };
         let result = ResultRequest {
             protocol_version: ProtocolVersion,
             instance_id: self.instance_id.clone(),
             generation: invocation.generation,
             invocation_id: invocation.invocation_id.clone(),
-            output: invocation.arguments.clone(),
+            output,
         };
         self.completed.insert(
             invocation.invocation_id.clone(),
-            CompletedEcho {
+            CompletedInvocation {
                 invocation: invocation.clone(),
                 result: result.clone(),
                 deadline,

@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use atlas_core::{AtlasError, Source, codes, get_events, get_session, post_cancel, post_send};
-use atlas_mac::{Clock, HefestoClient, OpaqueId, Phase, Runtime, Snapshot};
+use atlas_core::{codes, get_events, get_session, post_cancel, post_send, AtlasError, Source};
+use atlas_mac::{Clock, HefestoClient, OpaqueId, Phase, Roots, Runtime, Snapshot};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 /// URL del cerebro en la red local. No es un secreto. Por nombre (.local):
@@ -321,6 +321,9 @@ impl Hefesto {
             }
         };
         self.store(Snapshot::connecting(&device_id));
+        // Si las raíces estándar no se pudieran resolver, el dispositivo sigue
+        // vivo (eco y latido) pero toda lectura se rechaza por falta de raíces.
+        let roots = Roots::macos_default().unwrap_or_else(|_| Roots::new(Vec::new()));
         let marker = app
             .path()
             .app_data_dir()
@@ -332,7 +335,7 @@ impl Hefesto {
             .name("hefesto".to_string())
             .spawn(move || {
                 hefesto_loop(
-                    Runtime::new(client, device_id),
+                    Runtime::new(client, device_id, roots),
                     Instant::now(),
                     snapshot,
                     commands,

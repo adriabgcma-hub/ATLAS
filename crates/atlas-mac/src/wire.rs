@@ -1,8 +1,10 @@
 use crate::{Error, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const MAX_BODY_BYTES: usize = 8 * 1024;
+pub const MAX_BODY_BYTES: usize = 128 * 1024;
 pub const MAX_ECHO_BYTES: usize = 256;
+pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+pub const MAX_PATH_BYTES: usize = 1024;
 pub const LEASE_MILLIS: u64 = 15_000;
 pub const MAX_WIRE_INTEGER: u64 = i64::MAX as u64;
 
@@ -179,10 +181,100 @@ impl EchoPayload {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ToolPath(String);
+
+impl ToolPath {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        if value.is_empty()
+            || value.len() > MAX_PATH_BYTES
+            || !value.starts_with('/')
+            || value.contains('\0')
+            || value.chars().any(char::is_control)
+        {
+            return Err(Error::InvalidPath);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ToolPath {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl From<ToolPath> for String {
+    fn from(value: ToolPath) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PathPayload {
+    pub path: ToolPath,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolArguments {
+    Echo(EchoPayload),
+    Path(PathPayload),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct TextOutput(String);
+
+impl TextOutput {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        if value.len() > MAX_OUTPUT_BYTES {
+            return Err(Error::InvalidText);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for TextOutput {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl From<TextOutput> for String {
+    fn from(value: TextOutput) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutputPayload {
+    pub text: TextOutput,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ToolId {
     #[serde(rename = "hefesto.echo")]
     Echo,
+    #[serde(rename = "hefesto.list_dir")]
+    ListDir,
+    #[serde(rename = "hefesto.read_file")]
+    ReadFile,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -248,7 +340,7 @@ pub struct SubmitRequest {
     pub session_id: OpaqueId,
     pub task_id: OpaqueId,
     pub tool_id: ToolId,
-    pub arguments: EchoPayload,
+    pub arguments: ToolArguments,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -276,7 +368,7 @@ pub struct ResultRequest {
     pub instance_id: OpaqueId,
     pub generation: Generation,
     pub invocation_id: OpaqueId,
-    pub output: EchoPayload,
+    pub output: OutputPayload,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -291,7 +383,7 @@ pub struct Invocation {
     pub instance_id: OpaqueId,
     pub generation: Generation,
     pub tool_id: ToolId,
-    pub arguments: EchoPayload,
+    pub arguments: ToolArguments,
     pub expires_at_unix_ms: UnixMillis,
 }
 

@@ -1,11 +1,12 @@
-//! Device runtime: keeps the Mac registered, renews the lease and executes echoes.
+//! Device runtime: keeps the Mac registered, renews the lease and executes
+//! invocations (echo plus the read-only tools).
 //!
 //! The executor owns the protocol state machine; this module owns the pacing
 //! (heartbeat, polling, retries) and exposes a snapshot for the UI. It never
 //! starts a task the executor has not authorized.
 
 use crate::client::HefestoClient;
-use crate::executor::{Clock, EchoExecutor};
+use crate::executor::{Clock, Executor};
 use crate::wire::*;
 use crate::{Error, Result};
 use serde::Serialize;
@@ -122,7 +123,7 @@ type Step<T> = std::result::Result<T, Failure>;
 
 struct Session {
     instance: OpaqueId,
-    executor: EchoExecutor,
+    executor: Executor,
 }
 
 impl Session {
@@ -191,14 +192,19 @@ impl Session {
             Err(Error::InvocationExpired) => return Ok(None),
             Err(error) => return Err(classify(error)),
         };
+        let badge = match &invocation.arguments {
+            ToolArguments::Echo(payload) => Some(payload.text.as_str().to_string()),
+            ToolArguments::Path(_) => None,
+        };
         transport.result(&result).map_err(classify)?;
-        Ok(Some(invocation.arguments.text.as_str().to_string()))
+        Ok(badge)
     }
 }
 
 pub struct Runtime<T: Transport> {
     transport: T,
     device_id: OpaqueId,
+    roots: crate::tools::Roots,
     session: Option<Session>,
     phase: Phase,
     detail: Option<&'static str>,
@@ -213,10 +219,11 @@ pub struct Runtime<T: Transport> {
 }
 
 impl<T: Transport> Runtime<T> {
-    pub fn new(transport: T, device_id: OpaqueId) -> Self {
+    pub fn new(transport: T, device_id: OpaqueId, roots: crate::tools::Roots) -> Self {
         Self {
             transport,
             device_id,
+            roots,
             session: None,
             phase: Phase::Connecting,
             detail: None,
@@ -333,7 +340,7 @@ impl<T: Transport> Runtime<T> {
             now.unix_ms().get(),
             self.sequence
         ))?;
-        let executor = EchoExecutor::new(self.device_id.clone(), instance.clone());
+        let executor = Executor::new(self.device_id.clone(), instance.clone(), self.roots.clone());
         self.session = Some(Session { instance, executor });
         self.registered = false;
         self.last_heartbeat = None;
@@ -653,7 +660,7 @@ mod tests {
                     instance_id: instance,
                     generation: request.generation,
                     tool_id: ToolId::Echo,
-                    arguments: EchoPayload::new(text).unwrap(),
+                    arguments: ToolArguments::Echo(EchoPayload::new(text).unwrap()),
                     expires_at_unix_ms: expires,
                 }),
             })
@@ -682,7 +689,11 @@ mod tests {
     }
 
     fn runtime() -> Runtime<Fake> {
-        Runtime::new(Fake::new(), OpaqueId::new(DEVICE).unwrap())
+        Runtime::new(
+            Fake::new(),
+            OpaqueId::new(DEVICE).unwrap(),
+            crate::tools::Roots::new(vec![std::env::temp_dir()]),
+        )
     }
 
     fn instance(runtime: &Runtime<Fake>) -> OpaqueId {

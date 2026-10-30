@@ -21,8 +21,17 @@ impl Roots {
     }
 
     pub fn macos_default() -> Result<Self> {
-        let home = std::env::var_os("HOME").map(PathBuf::from).ok_or(Error::InvalidPath)?;
-        let names = ["Documents", "Desktop", "Downloads", "Pictures", "Music", "Movies"];
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or(Error::InvalidPath)?;
+        let names = [
+            "Documents",
+            "Desktop",
+            "Downloads",
+            "Pictures",
+            "Music",
+            "Movies",
+        ];
         let mut entries = Vec::new();
         for name in names {
             let dir = home.join(name);
@@ -82,7 +91,11 @@ pub fn read_file(roots: &Roots, path: &str) -> String {
         return "no es un archivo regular".to_string();
     }
     if meta.len() > READ_MAX_BYTES {
-        return format!("demasiado grande: {} bytes (máximo {})", meta.len(), READ_MAX_BYTES);
+        return format!(
+            "demasiado grande: {} bytes (máximo {})",
+            meta.len(),
+            READ_MAX_BYTES
+        );
     }
     let Ok(bytes) = std::fs::read(&file) else {
         return "no se pudo leer".to_string();
@@ -167,11 +180,8 @@ mod tests {
         let dir = TempDir::new("link");
         let outside = TempDir::new("linkout");
         std::fs::write(outside.path().join("s.txt"), "secreto").unwrap();
-        std::os::unix::fs::symlink(
-            outside.path().join("s.txt"),
-            dir.path().join("link.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(outside.path().join("s.txt"), dir.path().join("link.txt"))
+            .unwrap();
         let roots = Roots::new(vec![dir.path().to_path_buf()]);
         assert_eq!(
             read_file(&roots, dir.path().join("link.txt").to_str().unwrap()),
@@ -205,6 +215,9 @@ mod tests {
     fn ruta_relativa_se_rechaza() {
         let dir = TempDir::new("rel");
         let roots = Roots::new(vec![dir.path().to_path_buf()]);
-        assert_eq!(read_file(&roots, "f.txt"), "fuera de las raíces autorizadas");
+        assert_eq!(
+            read_file(&roots, "f.txt"),
+            "fuera de las raíces autorizadas"
+        );
     }
 }
