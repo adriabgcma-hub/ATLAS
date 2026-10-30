@@ -1,4 +1,4 @@
-"""Isolated, authenticated Hefesto v1 echo journal and HTTPS listener."""
+"""Isolated, authenticated Hefesto v2 journal (echo and read-only tools) and HTTPS listener."""
 
 from __future__ import annotations
 

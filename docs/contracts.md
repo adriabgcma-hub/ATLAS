@@ -173,13 +173,17 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v1 — base de eco
+## Hefesto v2 — eco y lectura
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-de-base-v1-solo-eco).
-No añade herramientas al catálogo del LLM. Usa `protocolVersion: 1`,
-IDs opacos, campos estrictos, cuerpo máximo 8 KiB y texto máximo 256 bytes UTF-8.
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v2-eco-y-lectura).
+Usa `protocolVersion: 2`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output.text` máximo 64 KiB. Tres herramientas sobre el mismo protocolo: `hefesto.echo`
+(`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file` (`{path}` absoluto, raíces
+autorizadas Documents/Desktop/Downloads/Pictures/Music/Movies). El relay expone
+`hefesto_echo` (asíncrono), `hefesto_list_dir` y `hefesto_read_file` (lectura síncrona,
+con confirmación por operación) al modelo.
 
-Operación nueva del protocolo v1: `POST /v1/hefesto/outcome` (rol controller)
+Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
 `{invocationId}` → `{protocolVersion, invocationId, state, outputText|null}`.
 Lectura pura del journal.
 

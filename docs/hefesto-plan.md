@@ -115,15 +115,16 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo de base v1 (solo eco)
+## 5. Protocolo v2 (eco y lectura)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 1` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 2` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 1, error: "codigo_estable"}`, nunca rutas/certificados.
-Cuerpo máximo 8 KiB; strings del eco limitados a 256 bytes UTF-8. Campos desconocidos,
-bool por entero, versiones o tipos incorrectos se rechazan. Generaciones entre 0 y
-`2^63-1`: cero representa un dispositivo aún no registrado, nunca una instancia viva.
-La expiración usa milisegundos Unix positivos hasta `2^63-1`.
+Errores `{protocolVersion: 2, error: "codigo_estable"}`, nunca rutas/certificados.
+Cuerpo máximo 128 KiB (para transportar lecturas de hasta 16 KiB con escape JSON);
+strings del eco limitados a 256 bytes UTF-8 y `output.text` a 64 KiB. Campos
+desconocidos, bool por entero, versiones o tipos incorrectos se rechazan.
+Generaciones entre 0 y `2^63-1`: cero representa un dispositivo aún no registrado,
+nunca una instancia viva. La expiración usa milisegundos Unix positivos hasta `2^63-1`.
 
 Cada certificado está ligado a un solo dispositivo; **no se acepta deviceId en las
 solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
@@ -134,7 +135,7 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | POST `/v1/hefesto/register` | device | `instanceId` |
 | POST `/v1/hefesto/heartbeat` | device | `instanceId` |
 | POST `/v1/hefesto/control` | Ambos | `action: resume/abort`, `expectedGeneration` |
-| POST `/v1/hefesto/submit` | controller | `submissionId`, `requestId`, `sessionId`, `taskId`, `toolId: hefesto.echo`, `arguments: {text}` |
+| POST `/v1/hefesto/submit` | controller | `submissionId`, `requestId`, `sessionId`, `taskId`, `toolId: hefesto.echo\|hefesto.list_dir\|hefesto.read_file`, `arguments: {text}` (eco) o `{path}` (lectura/listado) |
 | POST `/v1/hefesto/next` | device | `instanceId`, `generation` |
 | POST `/v1/hefesto/result` | device | `instanceId`, `generation`, `invocationId`, `output: {text}` |
 | POST `/v1/hefesto/outcome` | controller | `invocationId` |
@@ -147,8 +148,17 @@ suspended, online, activeInvocationId: string|null}`. Estado inicial suspendido.
 `{protocolVersion, invocationId, state, outputText: string|null}` (lectura pura).
 
 Invocation: `{protocolVersion, invocationId, requestId, sessionId, taskId,
-deviceId, instanceId, generation, toolId, arguments: {text}, expiresAtUnixMs}`.
+deviceId, instanceId, generation, toolId, arguments, expiresAtUnixMs}`, donde
+`arguments` es `{text}` (eco) o `{path}` (lectura/listado).
 No se considera autorización ni se ejecuta por recibir un mensaje de chat.
+
+`path` es absoluto (empieza por `/`), ≤1024 bytes UTF-8, sin NUL; el dispositivo
+resuelve la ruta canónica y verifica que queda dentro de una raíz autorizada
+(Documents, Desktop, Downloads, Pictures, Music, Movies), rechazando enlaces que
+escapan. `read_file` devuelve hasta 16 KiB de texto; `list_dir` hasta 100 entradas;
+los binarios se rechazan como «no legible». Los errores de lectura (fuera de raíz,
+demasiado grande, binario, sin permisos) vuelven como `succeeded` con el mensaje en
+`output.text` (el protocolo no tiene estado `failed` para resultados).
 
 ### Estado, duplicados y fallos
 
