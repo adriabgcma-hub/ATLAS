@@ -19,8 +19,10 @@ pequeños) y reorganizar archivos existentes dentro de lo autorizado.
 ## 2. Requisitos
 
 1. Dos herramientas nuevas en el catálogo del LLM:
-   - `hefesto.write_file` — `{path, content, expectedHash}`: sin hash crea (falla si
-     existe); con hash sobrescribe solo si el archivo sigue teniendo ese sha256.
+   - `hefesto.write_file` — `{path, content, mode}` con `mode: create|overwrite`:
+     `create` falla si existe; `overwrite` reemplaza. El modelo no maneja hashes: el
+     relay obtiene el sha256 actual con `file_info` y lo inyecta como `expectedHash`
+     al enviar la escritura (el dispositivo solo sobrescribe si coincide).
    - `hefesto.rename` — `{from, to}`: mover o renombrar; el destino no puede existir.
 2. Una operación interna del dispositivo, **no visible al LLM**:
    `hefesto.file_info` — `{path}` → existencia, tamaño y sha256, sin contenido. La usan
@@ -48,16 +50,17 @@ pequeños) y reorganizar archivos existentes dentro de lo autorizado.
 
 ### 3.1 Herramientas y esquema de argumentos
 
-| toolId | Catálogo Groq | `arguments` | `output` |
+| toolId | Catálogo Groq | `arguments` en el journal | `output` |
 | --- | --- | --- | --- |
-| `hefesto.write_file` | `hefesto_write_file` | `{path, content, expectedHash\|null}` | `{text}` resumen |
+| `hefesto.write_file` | `hefesto_write_file` (`mode`) | `{path, content, expectedHash\|null}` | `{text}` resumen |
 | `hefesto.rename` | `hefesto_rename` | `{from, to}` | `{text}` resumen |
-| `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` |
+| `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si se rechaza |
 
 - `path`/`from`/`to`: cadena no vacía, ≤1024 bytes UTF-8, sin NUL, **absoluta**. La
   contención la decide el dispositivo (autoritativo); el relay solo valida forma.
 - `content`: cadena UTF-8 ≤16 KiB (16 384 bytes), sin NUL. Solo texto.
-- `expectedHash`: `null` o 64 hex minúscula (sha256). `null` = crear (exclusivo).
+- `expectedHash` (solo journal/dispositivo): `null` o 64 hex minúscula (sha256).
+  `null` = crear (exclusivo); el relay lo rellena con el hash del plan al sobrescribir.
 - Resúmenes de salida (texto, sin contenido):
   - escritura: `Escrito «<path>» (<N> B, sha256 <12 hex>)`.
   - renombrado: `Movido «<from>» → «<to>» (<N> B)`.
@@ -70,7 +73,9 @@ pequeños) y reorganizar archivos existentes dentro de lo autorizado.
   `hefesto.read_file`, `hefesto.write_file`, `hefesto.rename`, `hefesto.file_info`.
 - `output` pasa a una unión validada por herramienta:
   - `{text}` (≤64 KiB) para eco, list_dir, read_file, write_file y rename.
-  - `{exists, size, sha256}` para file_info (`size`/`sha256` `null` si no existe).
+  - `{exists, size, sha256}` para file_info (`size`/`sha256` `null` si no existe);
+    un rechazo del dispositivo (fuera de raíces, demasiado grande) vuelve como
+    `{text}` y el relay lo entrega al modelo sin abrir tarjeta.
 - `file_info` es una invocación normal del journal (submit → next → result → outcome),
   pero el relay no la expone al modelo. No requiere confirmación.
 - El journal valida argumentos por herramienta y rechaza campos desconocidos.
@@ -91,20 +96,19 @@ pequeños) y reorganizar archivos existentes dentro de lo autorizado.
 
 1. El modelo llama `hefesto_write_file` o `hefesto_rename`. El relay valida forma.
 2. Plan (`file_info` interno, espera ≤5 s con sondeo 0,5 s):
-   - `write_file` con `expectedHash: null`:
-     - no existe → tarjeta «Crear «path» (N B)».
-     - existe → se devuelve al modelo sin tarjeta: «ya existe; usa expectedHash para
-       sobrescribir».
-   - `write_file` con hash:
+   - `write_file` con `mode: create`:
+     - no existe → tarjeta «Crear «path» (N B)» y `expectedHash: null`.
+     - existe → se devuelve al modelo sin tarjeta: «ya existe; usa mode overwrite».
+   - `write_file` con `mode: overwrite`:
      - existe → tarjeta «Sobrescribir «path» (actual X B, sha256 abc123def456… →
-       nuevo N B)».
+       nuevo N B)» y `expectedHash` = sha256 actual.
      - no existe → al modelo: «el archivo ya no existe».
    - `rename`: origen existe y destino no → tarjeta «Mover «from» → «to» (N B,
      sha256 …)». Origen inexistente o destino existente → al modelo sin tarjeta.
    - `file_info` fallido (offline, ruta fuera de raíces, >64 MiB) → al modelo con el
      motivo, sin tarjeta.
-3. `ask_confirmation` (app o Telegram, riesgo `write`) → denegar/caducar devuelve
-   «denegada por el usuario» sin escribir.
+3. `ask_confirmation` (app o Telegram, riesgo `write`, resumen ya calculado por el
+   plan) → denegar/caducar devuelve «denegada por el usuario» sin escribir.
 4. Al aprobar: `_delegate` síncrono (mismo que lectura, 15 s) con los argumentos
    exactos; el resultado vuelve al modelo en el mismo turno. No se registra en
    `_delegations` ni genera mensaje «Hefesto:».
