@@ -226,9 +226,7 @@ fn python_rust_mtls_echo_abort_and_restart() {
         Err(Error::InvocationConflict)
     );
     let mut changed_result = result.clone();
-    changed_result.output = OutputPayload {
-        text: TextOutput::new("changed").unwrap(),
-    };
+    changed_result.output = OutputPayload::text("changed").unwrap();
     assert_eq!(device.result(&changed_result), Err(Error::RemoteRejected));
     let succeeded = device.result(&result).unwrap();
     assert_eq!(succeeded.state, InvocationState::Succeeded);

@@ -32,7 +32,7 @@ CONTROLLER = hefesto.Peer("controller", "mac-one")
 
 
 def encoded(**fields):
-    return json.dumps({"protocolVersion": 2, **fields}, ensure_ascii=True).encode()
+    return json.dumps({"protocolVersion": 3, **fields}, ensure_ascii=True).encode()
 
 
 def submission(submission_id="submission-1", text="hello", **changes):
@@ -70,13 +70,13 @@ class JournalTests(unittest.TestCase):
     def ok(self, operation, peer=DEVICE, **fields):
         status, value = self.call(operation, peer, **fields)
         self.assertEqual(status, 200, value)
-        self.assertEqual(value["protocolVersion"], 2)
+        self.assertEqual(value["protocolVersion"], 3)
         return value
 
     def error(self, code, operation, peer=DEVICE, **fields):
         status, value = self.call(operation, peer, **fields)
         self.assertGreaterEqual(status, 400)
-        self.assertEqual(value, {"protocolVersion": 2, "error": code})
+        self.assertEqual(value, {"protocolVersion": 3, "error": code})
 
     def ready(self, peer=DEVICE, instance="instance-1"):
         state = self.ok("register", peer, instanceId=instance)
@@ -99,7 +99,7 @@ class JournalTests(unittest.TestCase):
         self.journal = self.new_journal()
 
     def test_full_echo_and_exact_response_contract(self):
-        self.assertEqual(self.ok("status"), {"protocolVersion": 2, "deviceId": "mac-one", "instanceId": None,
+        self.assertEqual(self.ok("status"), {"protocolVersion": 3, "deviceId": "mac-one", "instanceId": None,
                                            "generation": 0, "suspended": True, "online": False,
                                            "activeInvocationId": None})
         state = self.ready()
@@ -112,7 +112,7 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(ack["state"], "pending")
         self.assertEqual(self.ok("status")["activeInvocationId"], ack["invocationId"])
         invocation = self.next()
-        self.assertEqual(invocation, {"protocolVersion": 2, "invocationId": ack["invocationId"],
+        self.assertEqual(invocation, {"protocolVersion": 3, "invocationId": ack["invocationId"],
                                      "requestId": "request-1", "sessionId": "session-1", "taskId": "task-1",
                                      "deviceId": "mac-one", "instanceId": "instance-1", "generation": 2,
                                      "toolId": "hefesto.echo", "arguments": {"text": "héllo 世界"},
@@ -160,7 +160,7 @@ class JournalTests(unittest.TestCase):
     def test_submission_json_order_and_escaping_are_semantic(self):
         self.ready()
         first = self.send(text="é")
-        fields = {"protocolVersion": 2, **submission(text="é")}
+        fields = {"protocolVersion": 3, **submission(text="é")}
         raw = json.dumps(dict(reversed(list(fields.items()))), ensure_ascii=False, indent=2).encode()
         self.assertEqual(self.journal.dispatch(CONTROLLER, "POST", PREFIX + "submit", raw), (200, first))
 
@@ -244,7 +244,7 @@ class JournalTests(unittest.TestCase):
         state = self.ok("control", CONTROLLER, action="abort", expectedGeneration=2)
         self.assertTrue(state["suspended"])
         self.assertEqual(self.journal.dispatch(None, "GET", PREFIX + "status"),
-                         (403, {"protocolVersion": 2, "error": "unauthorized_peer"}))
+                         (403, {"protocolVersion": 3, "error": "unauthorized_peer"}))
 
     def test_device_identity_isolated_including_idempotency(self):
         other_device = hefesto.Peer("device", "mac-two")
@@ -491,7 +491,7 @@ class JournalTests(unittest.TestCase):
                     missing = dict(fields)
                     del missing[key]
                     self.error("invalid_fields", operation, peer, **missing)
-            for version in (True, False, 1.0, "1", 0, 1, None, [], {}):
+            for version in (True, False, 1.0, "1", 0, 1, 2, None, [], {}):
                 with self.subTest(operation=operation, version=version):
                     self.error("invalid_version", operation, peer, **fields, protocolVersion=version)
         for value in (True, 1.0, "1", -1, 2**63, None, [], {}):
@@ -534,14 +534,14 @@ class JournalTests(unittest.TestCase):
             self.error("invalid_text", "submit", CONTROLLER, **submission(arguments=arguments))
 
     def test_raw_json_duplicates_invalid_encoding_and_body_limit(self):
-        cases = (b'{"protocolVersion":2,"protocolVersion":2,"instanceId":"i"}',
-                 b'{"protocolVersion":2,"instanceId":"i","instanceId":"i"}',
+        cases = (b'{"protocolVersion":3,"protocolVersion":3,"instanceId":"i"}',
+                 b'{"protocolVersion":3,"instanceId":"i","instanceId":"i"}',
                  b'{"protocolVersion":NaN,"instanceId":"i"}',
                  b'{"protocolVersion":Infinity,"instanceId":"i"}', b"\xff", b"", b"{}{}")
         for raw in cases:
             with self.subTest(raw=raw[:60]):
                 self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", raw),
-                                 (400, {"protocolVersion": 2, "error": "invalid_json"}))
+                                 (400, {"protocolVersion": 3, "error": "invalid_json"}))
         self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", b"[" * 2000 + b"]" * 2000)[0], 400)
         raw = encoded(**submission()).replace(b'"text": "hello"', b'"text":"hello","text":"hello"')
         self.assertEqual(self.journal.dispatch(CONTROLLER, "POST", PREFIX + "submit", raw)[1]["error"], "invalid_json")
@@ -564,7 +564,7 @@ class JournalTests(unittest.TestCase):
 
     def test_failures_are_sanitized_and_close_is_idempotent(self):
         with mock.patch.object(self.journal, "_monotonic", side_effect=RuntimeError("private /credentials/key.pem")):
-            self.assertEqual(self.call("status"), (503, {"protocolVersion": 2, "error": "journal_unavailable"}))
+            self.assertEqual(self.call("status"), (503, {"protocolVersion": 3, "error": "journal_unavailable"}))
         self.assertFalse(self.ok("status")["online"])
         self.journal.close()
         self.journal.close()
@@ -581,7 +581,7 @@ class JournalTests(unittest.TestCase):
         self.ready()
         ack = self.send(text="héllo 世界")
         outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
-        self.assertEqual(outcome, {"protocolVersion": 2, "invocationId": ack["invocationId"],
+        self.assertEqual(outcome, {"protocolVersion": 3, "invocationId": ack["invocationId"],
                                    "state": "pending", "outputText": None})
         invocation = self.next()
         self.ok("result", peer=DEVICE, **self.result_fields(invocation))
@@ -939,7 +939,7 @@ class TLSTests(unittest.TestCase):
                 response = http.client.HTTPResponse(connection)
                 response.begin()
                 self.assertEqual(response.status, 408)
-                self.assertEqual(json.loads(response.read()), {"protocolVersion": 2, "error": "request_timeout"})
+                self.assertEqual(json.loads(response.read()), {"protocolVersion": 3, "error": "request_timeout"})
 
     def test_smuggling_framing_and_duplicate_headers_are_rejected(self):
         cases = (b"Content-Length: 2\r\nContent-Length: 2\r\n", b"Content-Length: 2\r\ncontent-length: 3\r\n",
@@ -952,7 +952,7 @@ class TLSTests(unittest.TestCase):
                 status, error = self.raw(b"POST /v1/hefesto/register HTTP/1.1\r\nHost: localhost\r\n"
                                          b"Content-Type: application/json\r\n" + headers + b"\r\n{}")
                 self.assertEqual(status, 400)
-                self.assertEqual(error, {"protocolVersion": 2, "error": "invalid_http_framing"})
+                self.assertEqual(error, {"protocolVersion": 3, "error": "invalid_http_framing"})
 
     def test_body_limit_content_type_length_paths_and_json_over_tls(self):
         base = b"POST /v1/hefesto/register HTTP/1.1\r\nHost: localhost\r\n"
@@ -962,7 +962,7 @@ class TLSTests(unittest.TestCase):
                                         (b"Content-Length: 2\r\nContent-Type: text/plain\r\n", b"{}", 415),
                                         (b"Content-Length: 2\r\nContent-Type: application/json; charset=latin1\r\n", b"{}", 415)):
             self.assertEqual(self.raw(base + headers + b"\r\n" + body)[0], expected)
-        for body in (b'{"protocolVersion":2,"instanceId":"i","instanceId":"other"}', b"\xff"):
+        for body in (b'{"protocolVersion":3,"instanceId":"i","instanceId":"other"}', b"\xff"):
             status, error = self.raw(base + b"Content-Type: application/json\r\nContent-Length: "
                                      + str(len(body)).encode() + b"\r\n\r\n" + body)
             self.assertEqual(status, 400)

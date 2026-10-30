@@ -877,7 +877,7 @@ class Brain:
         if len(text.encode("utf-8")) > 256:
             return "delegación rechazada: texto demasiado largo (máx. 256 bytes)"
         submission = {
-            "protocolVersion": 2,
+            "protocolVersion": 3,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -918,7 +918,7 @@ class Brain:
         if not path.startswith("/") or "\x00" in path or len(path.encode("utf-8")) > 1024:
             return "ruta inválida (debe ser una ruta absoluta dentro de las raíces autorizadas)"
         submission = {
-            "protocolVersion": 2,
+            "protocolVersion": 3,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -942,7 +942,7 @@ class Brain:
             status, outcome = journal.dispatch(
                 hefesto.Peer("controller", device_id), "POST",
                 "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 2,
+                json.dumps({"protocolVersion": 3,
                             "invocationId": invocation_id}).encode("utf-8"))
             if status == 200 and outcome.get("state") in (
                     "succeeded", "expired", "cancelled", "unknown"):
@@ -1045,7 +1045,7 @@ class Brain:
                 return {"ok": False, "error": body.get("error", "status_failed")}
             status, body = journal.dispatch(
                 peer, "POST", "/v1/hefesto/control",
-                json.dumps({"protocolVersion": 2, "action": "abort",
+                json.dumps({"protocolVersion": 3, "action": "abort",
                             "expectedGeneration": body["generation"]}).encode("utf-8"))
             if status == 200:
                 return {"ok": True, "suspended": True}
@@ -1070,7 +1070,7 @@ class Brain:
         for entry in entries:
             status, response = journal.dispatch(
                 peer, "POST", "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 2,
+                json.dumps({"protocolVersion": 3,
                             "invocationId": entry["invocation_id"]}).encode("utf-8"))
             if status != 200:
                 dlog(self, "HEFESTO",

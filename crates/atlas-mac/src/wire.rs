@@ -5,6 +5,8 @@ pub const MAX_BODY_BYTES: usize = 128 * 1024;
 pub const MAX_ECHO_BYTES: usize = 256;
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 pub const MAX_PATH_BYTES: usize = 1024;
+pub const MAX_WRITE_BYTES: usize = 16 * 1024;
+pub const MAX_HASH_HEX: usize = 64;
 pub const LEASE_MILLIS: u64 = 15_000;
 pub const MAX_WIRE_INTEGER: u64 = i64::MAX as u64;
 
@@ -51,7 +53,7 @@ pub struct ProtocolVersion;
 impl TryFrom<u64> for ProtocolVersion {
     type Error = Error;
     fn try_from(value: u64) -> Result<Self> {
-        if value == 2 {
+        if value == 3 {
             Ok(Self)
         } else {
             Err(Error::InvalidVersion)
@@ -61,7 +63,7 @@ impl TryFrom<u64> for ProtocolVersion {
 
 impl From<ProtocolVersion> for u64 {
     fn from(_: ProtocolVersion) -> Self {
-        2
+        3
     }
 }
 
@@ -224,10 +226,91 @@ pub struct PathPayload {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct FileText(String);
+
+impl FileText {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        if value.len() > MAX_WRITE_BYTES || value.contains('\0') {
+            return Err(Error::InvalidText);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for FileText {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl From<FileText> for String {
+    fn from(value: FileText) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ContentHash(String);
+
+impl ContentHash {
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        let hex = |b: u8| b.is_ascii_digit() || (b'a'..=b'f').contains(&b);
+        if value.len() != MAX_HASH_HEX || !value.bytes().all(hex) {
+            return Err(Error::InvalidHash);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ContentHash {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self> {
+        Self::new(value)
+    }
+}
+
+impl From<ContentHash> for String {
+    fn from(value: ContentHash) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WritePayload {
+    pub path: ToolPath,
+    pub content: FileText,
+    #[serde(deserialize_with = "required_nullable")]
+    pub expected_hash: Option<ContentHash>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenamePayload {
+    pub from: ToolPath,
+    pub to: ToolPath,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
     Echo(EchoPayload),
     Path(PathPayload),
+    Write(WritePayload),
+    Rename(RenamePayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -263,8 +346,40 @@ impl From<TextOutput> for String {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OutputPayload {
+pub struct TextPayload {
     pub text: TextOutput,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileInfoOutput {
+    pub exists: bool,
+    #[serde(deserialize_with = "required_nullable")]
+    pub size: Option<u64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub sha256: Option<ContentHash>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OutputPayload {
+    Text(TextPayload),
+    Info(FileInfoOutput),
+}
+
+impl OutputPayload {
+    pub fn text(value: impl Into<String>) -> Result<Self> {
+        Ok(Self::Text(TextPayload {
+            text: TextOutput::new(value)?,
+        }))
+    }
+
+    pub fn text_value(&self) -> Option<&str> {
+        match self {
+            Self::Text(payload) => Some(payload.text.as_str()),
+            Self::Info(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -275,6 +390,12 @@ pub enum ToolId {
     ListDir,
     #[serde(rename = "hefesto.read_file")]
     ReadFile,
+    #[serde(rename = "hefesto.write_file")]
+    WriteFile,
+    #[serde(rename = "hefesto.rename")]
+    Rename,
+    #[serde(rename = "hefesto.file_info")]
+    FileInfo,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

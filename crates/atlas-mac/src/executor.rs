@@ -333,9 +333,7 @@ impl Executor {
             }
             _ => return Err(Error::InvalidArguments),
         };
-        let output = OutputPayload {
-            text: TextOutput::new(text)?,
-        };
+        let output = OutputPayload::text(text)?;
         let result = ResultRequest {
             protocol_version: ProtocolVersion,
             instance_id: self.instance_id.clone(),

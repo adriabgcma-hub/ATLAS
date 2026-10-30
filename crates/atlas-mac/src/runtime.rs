@@ -194,7 +194,7 @@ impl Session {
         };
         let badge = match &invocation.arguments {
             ToolArguments::Echo(payload) => Some(payload.text.as_str().to_string()),
-            ToolArguments::Path(_) => None,
+            ToolArguments::Path(_) | ToolArguments::Write(_) | ToolArguments::Rename(_) => None,
         };
         transport.result(&result).map_err(classify)?;
         Ok(badge)
@@ -733,7 +733,7 @@ mod tests {
         runtime.tick(clock(2_000));
         let state = runtime.transport.state.borrow();
         assert_eq!(state.results.len(), 1);
-        assert_eq!(state.results[0].output.text.as_str(), "hola");
+        assert_eq!(state.results[0].output.text_value().unwrap(), "hola");
         assert_eq!(runtime.snapshot().last_echo.as_deref(), Some("hola"));
     }
 

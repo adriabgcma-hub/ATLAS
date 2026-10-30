@@ -99,7 +99,7 @@ fn starts_suspended_and_only_manual_acknowledgement_enables_echo() {
     let mut task = invocation();
     task.generation = generation(3);
     let result = executor.execute(&task, at(7)).unwrap();
-    assert_eq!(result.output.text.as_str(), "hello");
+    assert_eq!(result.output.text_value().unwrap(), "hello");
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn identical_delivery_returns_exact_cached_result_without_reexecution() {
         assert_eq!(executor.execute(&task, at(time)).unwrap(), first);
         assert_eq!(executor.completed_count(), 1);
     }
-    assert_eq!(first.output.text.as_str(), "hello");
+    assert_eq!(first.output.text_value().unwrap(), "hello");
     assert_eq!(first.instance_id, task.instance_id);
     assert_eq!(first.generation, task.generation);
     assert_eq!(first.invocation_id, task.invocation_id);
@@ -756,7 +756,7 @@ fn dispatcher_routes_read_tools_and_rejects_mismatches() {
         path: ToolPath::new(dir.join("greet.txt").to_str().unwrap()).unwrap(),
     });
     let result = executor.execute(&read, at(3)).unwrap();
-    assert_eq!(result.output.text.as_str(), "hola mundo");
+    assert_eq!(result.output.text_value().unwrap(), "hola mundo");
 
     let mut list = invocation();
     list.invocation_id = id("list");
@@ -765,7 +765,7 @@ fn dispatcher_routes_read_tools_and_rejects_mismatches() {
         path: ToolPath::new(dir.to_str().unwrap()).unwrap(),
     });
     let result = executor.execute(&list, at(4)).unwrap();
-    assert!(result.output.text.as_str().contains("greet.txt"));
+    assert!(result.output.text_value().unwrap().contains("greet.txt"));
 
     let mut mismatch = invocation();
     mismatch.invocation_id = id("mismatch");
