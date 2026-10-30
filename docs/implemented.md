@@ -310,6 +310,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 - **Descripción:** cierra la entrega 2 con sus tres frentes. (1) Atajo local `cmd+shift+a` que alterna la ventana de chat con lógica pura y testeada (`next_visibility`: oculta solo si está visible y con foco). (2) Control de suspensión de Hefesto desde el Hub Panel: el relay expone `GET /v1/hefesto/status` y `POST /v1/hefesto/suspend` (kill switch con reintento ante `stale_generation`, tras `_lan_only()`), y el panel añade la tarjeta Hefesto con badge, cadena de estado y botón Suspender de un clic. (3) Matriz de fallos en vivo verificada con el usuario: salida normal, crash con recuperación, pérdida de red, suspensión remota y local, reinicio con encargo en vuelo (sin reejecución) y el atajo. Pruebas: Python 93 (88 + 5), build del panel y `cargo test -p atlas-next`. Desplegado con `./scripts/deploy-relay.sh` y bundle reconstruido con Apple Development.
 - **Documentación relacionada:** `docs/hefesto-plan.md` §8, `docs/relay.md` §5, `docs/superpowers/plans/2026-10-30-hefesto-entrega-2.md`.
 
+### Lectura segura de archivos de Hefesto (puerta 4, corte 1)
+
+- **Commit:** `3a4fd1a`…`295da62` (spec, plan, herramientas, journal v2, despachador, relay, docs y fix IPv4)
+- **Fecha:** `2026-10-30`
+- **Descripción:** primer corte de la puerta 4 — solo lectura. El protocolo pasa a v2 con `hefesto.list_dir` y `hefesto.read_file` sobre raíces del usuario (Documents, Desktop, Downloads, Pictures, Music, Movies), contención canónica por componentes (un enlace que sale se rechaza), 100 entradas por listado, 16 KiB por lectura y binarios rechazados como «no legible». Cada operación pide consentimiento antes de exportar contenido y el resultado vuelve al modelo en el mismo turno (lo redacta Atlas; las lecturas no generan mensaje «Hefesto:» aparte). El cliente Rust resuelve el nombre y prefiere IPv4 porque el link-local de mDNS agotaba el timeout e impedía registrar el dispositivo. Probado en vivo con el usuario: tarjeta de confirmación, `LUNA-42` leída de `~/Documents/atlas-prueba-lectura.txt` y `/etc/hosts` rechazado por estar fuera de las raíces. Pruebas: Python 147, `cargo test --workspace`, clippy `-D warnings` y `cargo fmt --check`; relay desplegado y bundle Apple Development con firma profunda válida.
+- **Documentación relacionada:** `docs/hefesto-plan.md` §5 y §6, `docs/contracts.md`, `docs/superpowers/specs/2026-10-30-hefesto-lecturas-design.md`, `docs/superpowers/plans/2026-10-30-hefesto-lecturas.md`.
+
 ## Plantilla para futuras implementaciones
 
 ### Nombre exacto del commit

@@ -155,12 +155,18 @@ de prueba autorizados por el usuario (2026-10-28).
       `hefesto_echo` con catálogo dinámico, continuador etiquetado HEFESTO con
       `agent`/`taskId` en los contratos, persistencia y recuperación tras reinicio.
       Desplegada en atlas-hub y probada en vivo (local y Telegram).
-- [ ] Archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.
+- [x] Lectura segura de archivos (2026-10-30, puerta 4, corte 1): protocolo v2 con
+      `hefesto.list_dir`/`hefesto.read_file` sobre raíces del usuario (contención
+      canónica, 16 KiB/100 entradas, binarios rechazados), consentimiento por lectura
+      y resultado síncrono al modelo (la respuesta la redacta Atlas). Desplegado y
+      probado en vivo (tarjeta, `LUNA-42`, fuera de raíces rechazado). Commits
+      `3a4fd1a`…`295da62`.
+- [ ] Escritura de archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
-la app Tauri cuando el entorno trae sus credenciales, y sigue limitado al eco. Las
-capacidades reales permanecen fuera de esta entrega. La ventana de tablas queda
-pendiente.
+la app Tauri cuando el entorno trae sus credenciales, y hoy se limita al eco y a la
+lectura de archivos dentro de las raíces autorizadas. La ventana de tablas y la
+escritura permanecen pendientes.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

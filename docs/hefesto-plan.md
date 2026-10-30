@@ -210,8 +210,12 @@ demasiado grande, binario, sin permisos) vuelven como `succeeded` con el mensaje
 3. **Delegación e identidad:** entradas autenticadas, continuaciones no bloqueantes,
    orbe/etiquetas, snapshots atómicos de tareas/confirmaciones/cursor; mantener Atlas
    operativo mientras Hefesto espera. Medir resultados, latencia y tokens.
-4. **Lecturas y archivos:** raíces seguras, permisos de exportación, creación exclusiva,
-   planes para cambios existentes, escritura atómica y auditoría minimizada.
+4. **Lecturas y archivos (corte 1, solo lectura, cerrada 2026-10-30):** protocolo v2 con
+   `hefesto.list_dir`/`hefesto.read_file`, raíces del usuario con contención canónica
+   (enlaces fuera se rechazan), consentimiento de exportación por operación, resultado
+   síncrono al modelo, topes de 16 KiB/100 entradas y binarios rechazados en vez de
+   volcados. Pendiente para el siguiente corte: creación exclusiva, planes para cambios
+   existentes, escritura atómica y auditoría minimizada.
 5. **Apps y multimedia:** adaptadores, cierre sin pérdida, permisos macOS por destino.
 6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
    terminal general solo tras acordar y verificar aislamiento/límites.
@@ -431,3 +435,31 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   Hefesto/Vite/Tauri ni pruebas Python, puertos 5173/5174/8765 libres y
   `launchctl` sin agentes nuevos (Hub Panel registrado sin PID). El marcador
   de suspensión queda como último estado intencionado del usuario.
+- 2026-10-30, lectura segura de archivos (puerta 4, corte 1), implementada,
+  desplegada y probada en vivo con el usuario:
+  1. **Protocolo v2**: `protocolVersion: 2`, `toolId` admitidos
+     `hefesto.echo`/`hefesto.list_dir`/`hefesto.read_file`, `arguments` por
+     herramienta (`{text}` ≤256 B; `{path}` absoluta ≤1024 B, sin NUL) y
+     `output: {text}` ≤64 KiB (cuerpo máximo 128 KiB en transporte).
+  2. **Dispositivo**: `atlas-mac::tools` con `Roots` (Documents, Desktop,
+     Downloads, Pictures, Music, Movies; canónica y contención por
+     componentes, un enlace que sale se rechaza), `list_dir` (≤100 entradas,
+     ordenadas) y `read_file` (≤16 KiB, tamaño en el mensaje, NUL/UTF-8
+     inválido → «binario/no legible»); el despachador del ejecutor enruta por
+     `toolId` sin cambiar el eco.
+  3. **Relay**: catálogo con `hefesto_list_dir`/`hefesto_read_file`
+     (`requiresConfirmation: True`), tarjeta «Leer … — el contenido saldrá del
+     Mac hacia el modelo», espera síncrona de `outcome` (0,5 s, 15 s) y el
+     resultado vuelve al LLM en el mismo turno; la respuesta la redacta
+     Atlas (las lecturas no generan mensaje «Hefesto:» aparte).
+  4. **Registro IPv4**: el cliente Rust del dispositivo resuelve el nombre y
+     ordena IPv4 primero (`resolve_to_addrs`); el link-local IPv6 de mDNS
+     agotaba el timeout y el dispositivo no llegaba a registrarse.
+  5. **Prueba en vivo**: tarjeta mostrada, respuesta con `LUNA-42` leída de
+     `~/Documents/atlas-prueba-lectura.txt`, y `/etc/hosts` rechazado por
+     estar fuera de las raíces (sin confirmación).
+  Commits: spec `3a4fd1a`, plan `f8ce127`, herramientas `1dd3914`, journal v2
+  `6932ef7`, despachador `6658691`, relay `6d315ed`, docs `94e5ca1`, fix IPv4
+  `295da62`. Pruebas: Python 147, `cargo test --workspace`, clippy
+  `-D warnings` y `cargo fmt --check`; relay desplegado (`/v1/health` OK) y
+  bundle Apple Development con firma profunda válida instalado.
