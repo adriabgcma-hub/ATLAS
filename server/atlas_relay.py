@@ -221,7 +221,50 @@ HEFESTO_READ_TOOL = {
     },
 }
 
-HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL]
+HEFESTO_WRITE_TOOL = {
+    "id": "hefesto_write_file",
+    "risk": "write",
+    "requiresConfirmation": True,
+    # El plan (tamaño y hash actuales) se pide dentro de _write_file antes de
+    # la tarjeta; _handle_tool_call no debe abrir otra confirmación genérica.
+    "planConfirmation": True,
+    "description": ("Crea o sobrescribe un archivo de texto en el Mac con Hefesto. Usa "
+                    "una ruta absoluta dentro de las raíces autorizadas (Documents, "
+                    "Desktop, Downloads, Pictures, Music, Movies). mode=create falla si "
+                    "el archivo existe; mode=overwrite lo reemplaza. Máximo 16 KiB de "
+                    "texto. Cada escritura pide confirmación."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "ruta absoluta del archivo"},
+            "content": {"type": "string", "description": "texto a escribir (máx. 16 KiB)"},
+            "mode": {"type": "string", "enum": ["create", "overwrite"],
+                     "description": "create falla si existe; overwrite reemplaza"},
+        },
+        "required": ["path", "content", "mode"],
+    },
+}
+
+HEFESTO_RENAME_TOOL = {
+    "id": "hefesto_rename",
+    "risk": "write",
+    "requiresConfirmation": True,
+    "planConfirmation": True,
+    "description": ("Mueve o renombra un archivo en el Mac con Hefesto, dentro de las "
+                    "raíces autorizadas. El destino no puede existir. Cada movimiento "
+                    "pide confirmación."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "from": {"type": "string", "description": "ruta absoluta actual"},
+            "to": {"type": "string", "description": "ruta absoluta nueva"},
+        },
+        "required": ["from", "to"],
+    },
+}
+
+HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
+                 HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL]
 
 
 def norm_name(name: str) -> str:
@@ -845,6 +888,10 @@ class Brain:
             return self._delegate_read("hefesto.list_dir", job, args)
         if tool_id == "hefesto_read_file":
             return self._delegate_read("hefesto.read_file", job, args)
+        if tool_id == "hefesto_write_file":
+            return self._write_file(job, args)
+        if tool_id == "hefesto_rename":
+            return self._rename_file(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -909,14 +956,13 @@ class Brain:
                               f"request={job['request_id']} task={submission['taskId']}")
         return f"delegado a Hefesto ({invocation_id})"
 
-    def _delegate_read(self, tool_id: str, job: dict, args: dict) -> str:
-        """Lectura síncrona al dispositivo: espera el resultado y lo devuelve al modelo."""
+    def _hefesto_submit(self, tool_id: str, job: dict, arguments: dict) -> tuple[str | None, str | None]:
         journal, device_id = self._hefesto_journal, self._hefesto_device
         if journal is None or device_id is None:
-            return "Hefesto no está disponible (desactivado)"
-        path = str(args.get("path", ""))
-        if not path.startswith("/") or "\x00" in path or len(path.encode("utf-8")) > 1024:
-            return "ruta inválida (debe ser una ruta absoluta dentro de las raíces autorizadas)"
+            return None, "Hefesto no está disponible (desactivado)"
+        with self.lock:
+            if job["request_id"] in self.cancelled:
+                return None, "cancelada a mitad de turno"
         submission = {
             "protocolVersion": 3,
             "submissionId": new_id("sub"),
@@ -924,17 +970,20 @@ class Brain:
             "sessionId": job["session_id"],
             "taskId": new_id("tsk"),
             "toolId": tool_id,
-            "arguments": {"path": path},
+            "arguments": arguments,
         }
         status, response = journal.dispatch(
             hefesto.Peer("controller", device_id), "POST",
             "/v1/hefesto/submit", json.dumps(submission).encode("utf-8"))
         if status != 200:
             dlog(self, "HEFESTO",
-                 f"read submit rejected error={response.get('error')} request={job['request_id']}")
-            return f"Hefesto no está disponible ({response.get('error', 'desconocido')})"
-        invocation_id = response["invocationId"]
-        deadline = time.monotonic() + 15.0
+                 f"submit rejected tool={tool_id} error={response.get('error')} request={job['request_id']}")
+            return None, f"Hefesto no está disponible ({response.get('error', 'desconocido')})"
+        return response["invocationId"], None
+
+    def _hefesto_wait(self, invocation_id: str, job: dict, timeout: float) -> dict | str:
+        journal, device_id = self._hefesto_journal, self._hefesto_device
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self.lock:
                 if job["request_id"] in self.cancelled:
@@ -947,12 +996,100 @@ class Brain:
             if status == 200 and outcome.get("state") in (
                     "succeeded", "expired", "cancelled", "unknown"):
                 if outcome["state"] == "succeeded":
-                    return str(outcome.get("outputText") or "")
+                    return outcome.get("output") or {}
                 if outcome["state"] == "expired":
-                    return "Hefesto no respondió a tiempo y la lectura caducó."
-                return "La lectura se canceló."
+                    return "Hefesto no respondió a tiempo y la operación caducó."
+                return "La operación se canceló."
             time.sleep(0.5)
-        return "Hefesto no respondió a tiempo (timeout de lectura)"
+        return "Hefesto no respondió a tiempo (timeout de la operación)"
+
+    def _delegate(self, tool_id: str, job: dict, arguments: dict) -> str:
+        invocation_id, error = self._hefesto_submit(tool_id, job, arguments)
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 15.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
+    def _delegate_read(self, tool_id: str, job: dict, args: dict) -> str:
+        path = str(args.get("path", ""))
+        if not path.startswith("/") or "\x00" in path or len(path.encode("utf-8")) > 1024:
+            return "ruta inválida (debe ser una ruta absoluta dentro de las raíces autorizadas)"
+        return self._delegate(tool_id, job, {"path": path})
+
+    def _file_info(self, path: str, job: dict) -> dict:
+        """Información del archivo para el plan; `{"error": texto}` si falla."""
+        invocation_id, error = self._hefesto_submit("hefesto.file_info", job, {"path": path})
+        if error is not None:
+            return {"error": error}
+        output = self._hefesto_wait(invocation_id, job, 5.0)
+        if isinstance(output, str):
+            return {"error": output}
+        if "text" in output:
+            # file_info responde con texto cuando rechaza la ruta o el archivo.
+            return {"error": str(output["text"])}
+        return output
+
+    def _write_file(self, job: dict, args: dict) -> str:
+        path = args.get("path")
+        content = args.get("content")
+        mode = args.get("mode")
+        if (not isinstance(path, str) or not path.startswith("/") or "\x00" in path
+                or len(path.encode("utf-8")) > 1024):
+            return "ruta inválida (debe ser una ruta absoluta dentro de las raíces autorizadas)"
+        if not isinstance(content, str) or "\x00" in content or len(content.encode("utf-8")) > 16 * 1024:
+            return "contenido inválido (texto UTF-8 de hasta 16 KiB)"
+        if mode not in ("create", "overwrite"):
+            return "mode inválido (create u overwrite)"
+        info = self._file_info(path, job)
+        if "error" in info:
+            return str(info["error"])
+        size = len(content.encode("utf-8"))
+        if mode == "create":
+            if info["exists"]:
+                return "ya existe; usa mode overwrite para reemplazarlo"
+            summary = (f"Crear «{path}» ({size} B)", "write")
+            expected = None
+        else:
+            if not info["exists"]:
+                return "el archivo ya no existe; usa mode create"
+            expected = info["sha256"]
+            summary = (f"Sobrescribir «{path}» (actual {info['size']} B, "
+                       f"sha256 {expected[:12]}… → nuevo {size} B)", "write")
+        # El tiempo del usuario no consume el plazo de la operación.
+        job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_write_file", args,
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        return self._delegate("hefesto.write_file", job, {
+            "path": path, "content": content, "expectedHash": expected})
+
+    def _rename_file(self, job: dict, args: dict) -> str:
+        source, target = args.get("from"), args.get("to")
+        for value in (source, target):
+            if (not isinstance(value, str) or not value.startswith("/") or "\x00" in value
+                    or len(value.encode("utf-8")) > 1024):
+                return "ruta inválida (debe ser una ruta absoluta dentro de las raíces autorizadas)"
+        info = self._file_info(source, job)
+        if "error" in info:
+            return str(info["error"])
+        if not info["exists"]:
+            return "el origen no existe"
+        destination = self._file_info(target, job)
+        if "error" in destination:
+            return str(destination["error"])
+        if destination["exists"]:
+            return "el destino ya existe"
+        summary = (f"Mover «{source}» → «{target}» ({info['size']} B, "
+                   f"sha256 {info['sha256'][:12]}…)", "write")
+        job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_rename", args,
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        return self._delegate("hefesto.rename", job, {"from": source, "to": target})
 
     def _hefesto_finish(self, entry: dict, state: str,
                         output_text: str | None) -> None:
@@ -1078,8 +1215,8 @@ class Brain:
                      f"invocation={entry['invocation_id']}")
                 continue
             if response.get("state") in ("succeeded", "expired", "cancelled", "unknown"):
-                self._hefesto_finish(entry, response["state"],
-                                     response.get("outputText"))
+                output = response.get("output") or {}
+                self._hefesto_finish(entry, response["state"], output.get("text"))
 
     def _execute_write(self, args: dict) -> str:
         action = args.get("action")
@@ -1169,13 +1306,19 @@ class Brain:
         if tool_id == "hefesto_read_file":
             return (f"Leer «{args.get('path', '?')}» — el contenido saldrá del Mac hacia el modelo",
                     "external")
+        if tool_id == "hefesto_write_file":
+            return (f"Escribir «{args.get('path', '?')}»", "write")
+        if tool_id == "hefesto_rename":
+            return (f"Mover «{args.get('from', '?')}» → «{args.get('to', '?')}»", "write")
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,
                          tool_id: str, args: dict,
-                         chat_id: int | None = None) -> str | None:
+                         chat_id: int | None = None, summary=None) -> str | None:
         """Emite la petición y espera. Devuelve la decisión o None (timeout)."""
-        summary, risk = self._confirm_summary(tool_id, args)
+        if summary is None:
+            summary = self._confirm_summary(tool_id, args)
+        text, risk = summary
         entry = {"tool": tool_id, "args": args, "event": threading.Event(),
                  "decision": None, "expires": time.time() + CONFIRM_TIMEOUT_S,
                  "chat_id": chat_id,
@@ -1186,16 +1329,16 @@ class Brain:
                 "kind": "confirmation", "type": "permission.confirmation_required",
                 "requestId": request_id, "sessionId": session_id,
                 "timestamp": utc_now(), "toolId": tool_id,
-                "summary": summary, "risk": risk,
+                "summary": text, "risk": risk,
                 "expiresAt": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                            time.gmtime(entry["expires"])),
             })
         # Avisar por Telegram si hay chat asociado (fuera del lock por red).
         if chat_id is not None:
-            dlog(self, "CONFIRM", f"enviando aviso a Telegram chat_id={chat_id} summary={summary[:100]}")
+            dlog(self, "CONFIRM", f"enviando aviso a Telegram chat_id={chat_id} summary={text[:100]}")
             self._send_telegram(
                 chat_id,
-                f"⏳ Atlas necesita tu confirmación:\n{summary}\n\n"
+                f"⏳ Atlas necesita tu confirmación:\n{text}\n\n"
                 "Responde «sí» / «adelante» para aceptar, o «no» para denegar.\n"
                 "Tienes 5 minutos para responder.")
         else:
@@ -1371,7 +1514,10 @@ class Brain:
     def _handle_tool_call(self, job: dict, call: dict) -> str:
         """Ejecuta una tool_call del modelo (con confirmación si toca)."""
         function = call.get("function", {}) if isinstance(call, dict) else {}
-        dlog(self, "TOOL", f"call tool={function.get('name')} args={function.get('arguments', '')[:300]} request={job.get('request_id')}")
+        # El contenido de una escritura nunca se registra.
+        logged = ("" if function.get("name") == "hefesto_write_file"
+                  else str(function.get("arguments") or "")[:300])
+        dlog(self, "TOOL", f"call tool={function.get('name')} args={logged} request={job.get('request_id')}")
         try:
             function = call["function"]
             name = function["name"]
@@ -1385,7 +1531,7 @@ class Brain:
             return "herramienta desconocida"
         if job.get("request_id") in self.cancelled:
             return "cancelada a mitad de turno"
-        if tool["requiresConfirmation"]:
+        if tool["requiresConfirmation"] and not tool.get("planConfirmation"):
             # El tiempo del usuario no consume el plazo de la operación.
             job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
             decision = self.ask_confirmation(job["request_id"], job["session_id"],

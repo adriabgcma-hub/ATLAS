@@ -27,18 +27,18 @@ class FakeJournal:
         if operation == "outcome":
             entry = self.outcomes.get(body["invocationId"])
             if entry is None:
-                return (404, {"protocolVersion": 2, "error": "invocation_not_found"})
-            return (200, {"protocolVersion": 2,
+                return (404, {"protocolVersion": 3, "error": "invocation_not_found"})
+            return (200, {"protocolVersion": 3,
                           "invocationId": body["invocationId"], **entry})
-        return (404, {"protocolVersion": 2, "error": "not_found"})
+        return (404, {"protocolVersion": 3, "error": "not_found"})
 
     def accept(self, invocation_id="inv-1"):
-        self.submit_results.append((200, {"protocolVersion": 2,
+        self.submit_results.append((200, {"protocolVersion": 3,
                                           "invocationId": invocation_id,
                                           "state": "pending"}))
 
     def reject(self, code):
-        self.submit_results.append((409, {"protocolVersion": 2, "error": code}))
+        self.submit_results.append((409, {"protocolVersion": 3, "error": code}))
 
 
 class CancellingJournal(FakeJournal):
@@ -64,19 +64,19 @@ class ControlJournal:
     def dispatch(self, peer, method, path, raw=b""):
         operation = path.rsplit("/", 1)[-1]
         if operation == "status":
-            return (200, {"protocolVersion": 2, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 3, "deviceId": peer.device_id,
                           "generation": self.generation,
                           "suspended": self.suspended})
         if operation == "control":
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             if body["expectedGeneration"] != self.generation:
-                return (409, {"protocolVersion": 2, "error": "stale_generation"})
+                return (409, {"protocolVersion": 3, "error": "stale_generation"})
             self.generation += 1
             self.suspended = True
-            return (200, {"protocolVersion": 2, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 3, "deviceId": peer.device_id,
                           "generation": self.generation, "suspended": True})
-        return (404, {"protocolVersion": 2, "error": "not_found"})
+        return (404, {"protocolVersion": 3, "error": "not_found"})
 
 
 class RacedControlJournal(ControlJournal):
@@ -92,7 +92,7 @@ class RacedControlJournal(ControlJournal):
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             self.generation += 1
-            return (409, {"protocolVersion": 2, "error": "stale_generation"})
+            return (409, {"protocolVersion": 3, "error": "stale_generation"})
         return super().dispatch(peer, method, path, raw)
 
 
@@ -329,7 +329,7 @@ class TrackerTests(unittest.TestCase):
         brain = make_brain(self.temp.name)
         fake = FakeJournal()
         session_id = self.delegate(brain, fake)
-        fake.outcomes["inv-1"] = {"state": "expired", "outputText": None}
+        fake.outcomes["inv-1"] = {"state": "expired", "output": None}
         brain._hefesto_poll()
         last = brain.sessions[session_id]["messages"][-1]
         self.assertEqual(last["agent"], "hefesto")
@@ -340,7 +340,7 @@ class TrackerTests(unittest.TestCase):
         brain = make_brain(self.temp.name)
         fake = FakeJournal()
         session_id = self.delegate(brain, fake)
-        fake.outcomes["inv-1"] = {"state": "dispatched", "outputText": None}
+        fake.outcomes["inv-1"] = {"state": "dispatched", "output": None}
         brain._hefesto_poll()
         self.assertIn("inv-1", brain._delegations)
         self.assertEqual(brain.sessions[session_id]["messages"], [])
@@ -353,7 +353,7 @@ class TrackerTests(unittest.TestCase):
                 brain = make_brain(temp.name)
                 fake = FakeJournal()
                 session_id = self.delegate(brain, fake)
-                fake.outcomes["inv-1"] = {"state": state, "outputText": None}
+                fake.outcomes["inv-1"] = {"state": state, "output": None}
                 brain._hefesto_poll()
                 last = brain.sessions[session_id]["messages"][-1]
                 self.assertIn(needle, last["content"])
@@ -367,7 +367,7 @@ class TrackerTests(unittest.TestCase):
         brain2.hefesto_start(fake2, "mac-one")
         try:
             self.assertIn("inv-1", brain2._delegations)
-            fake2.outcomes["inv-1"] = {"state": "unknown", "outputText": None}
+            fake2.outcomes["inv-1"] = {"state": "unknown", "output": None}
             brain2._hefesto_poll()
             self.assertNotIn("inv-1", brain2._delegations)
         finally:
@@ -441,7 +441,7 @@ class ReadFlowTests(unittest.TestCase):
     def test_read_file_envia_submit_con_path_y_devuelve_el_contenido(self):
         journal = self.brain._hefesto_journal
         journal.accept("inv-9")
-        journal.outcomes["inv-9"] = {"state": "succeeded", "outputText": "contenido"}
+        journal.outcomes["inv-9"] = {"state": "succeeded", "output": {"text": "contenido"}}
         result = self.brain.execute_tool(
             "hefesto_read_file", {"path": "/Users/x/Documents/a.txt"}, JOB)
         self.assertEqual(result, "contenido")
@@ -452,7 +452,7 @@ class ReadFlowTests(unittest.TestCase):
     def test_list_dir_envia_submit_con_el_toolid_correcto(self):
         journal = self.brain._hefesto_journal
         journal.accept("inv-7")
-        journal.outcomes["inv-7"] = {"state": "succeeded", "outputText": "a.txt\nb"}
+        journal.outcomes["inv-7"] = {"state": "succeeded", "output": {"text": "a.txt\nb"}}
         result = self.brain.execute_tool(
             "hefesto_list_dir", {"path": "/Users/x/Documents"}, JOB)
         self.assertEqual(result, "a.txt\nb")
@@ -486,3 +486,137 @@ class ReadFlowTests(unittest.TestCase):
     def test_confirm_summary_de_lectura_menciona_la_exportacion(self):
         summary, _ = self.brain._confirm_summary("hefesto_read_file", {"path": "/x/y.txt"})
         self.assertIn("Leer «/x/y.txt»", summary)
+
+
+class WriteFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-write-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def info(self, exists, size=None, sha=None):
+        return {"exists": exists, "size": size, "sha256": sha}
+
+    def test_crear_pide_tarjeta_y_escribe_sin_hash(self):
+        journal = self.journal
+        journal.accept("inv-info")
+        journal.outcomes["inv-info"] = {"state": "succeeded",
+                                        "output": self.info(False)}
+        journal.accept("inv-write")
+        journal.outcomes["inv-write"] = {"state": "succeeded",
+                                          "output": {"text": "Escrito «x»"}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "hola", "mode": "create"},
+                JOB)
+        self.assertEqual(result, "Escrito «x»")
+        self.assertEqual(ask.call_args.kwargs["summary"], ("Crear «/Users/x/Documents/n.txt» (4 B)", "write"))
+        self.assertEqual(journal.submits[1]["toolId"], "hefesto.write_file")
+        self.assertEqual(journal.submits[1]["arguments"],
+                         {"path": "/Users/x/Documents/n.txt", "content": "hola",
+                          "expectedHash": None})
+
+    def test_catalogo_incluye_escritura_y_no_expone_file_info(self):
+        ids = [tool["id"] for tool in self.brain.tool_defs()]
+        self.assertIn("hefesto_write_file", ids)
+        self.assertIn("hefesto_rename", ids)
+        self.assertNotIn("hefesto.file_info", ids)
+
+    def test_crear_con_existente_no_abre_tarjeta(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 10, "a" * 64)}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "hola", "mode": "create"},
+                JOB)
+        self.assertIn("ya existe", result)
+        ask.assert_not_called()
+
+    def test_denegar_no_envia_la_escritura(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(False)}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="deny"):
+            result = self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "hola", "mode": "create"},
+                JOB)
+        self.assertEqual(result, "denegada por el usuario")
+        self.assertEqual(len(self.journal.submits), 1)
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.file_info")
+
+    def test_sobrescribir_inyecta_el_hash_del_plan(self):
+        sha = "b" * 64
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 10, sha)}
+        self.journal.accept("inv-write")
+        self.journal.outcomes["inv-write"] = {"state": "succeeded",
+                                              "output": {"text": "Escrito «x»"}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once") as ask:
+            self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "nuevo", "mode": "overwrite"},
+                JOB)
+        self.assertEqual(
+            ask.call_args.kwargs["summary"],
+            (f"Sobrescribir «/Users/x/Documents/n.txt» (actual 10 B, sha256 {'b' * 12}… → nuevo 5 B)", "write"))
+        self.assertEqual(self.journal.submits[1]["arguments"]["expectedHash"], sha)
+
+    def test_hash_obsoleto_vuelve_como_texto(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 10, "c" * 64)}
+        self.journal.accept("inv-write")
+        self.journal.outcomes["inv-write"] = {"state": "succeeded",
+                                              "output": {"text": "el archivo cambió desde la confirmación"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            result = self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "x", "mode": "overwrite"},
+                JOB)
+        self.assertEqual(result, "el archivo cambió desde la confirmación")
+
+    def test_renombrar_valida_destino_y_pide_tarjeta(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 4, "d" * 64)}
+        self.journal.accept("inv-info-2")
+        self.journal.outcomes["inv-info-2"] = {"state": "succeeded",
+                                               "output": self.info(False)}
+        self.journal.accept("inv-rn")
+        self.journal.outcomes["inv-rn"] = {"state": "succeeded",
+                                            "output": {"text": "Movido «a» → «b» (4 B)"}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_rename",
+                {"from": "/Users/x/Documents/a.txt", "to": "/Users/x/Documents/b.txt"},
+                JOB)
+        self.assertEqual(result, "Movido «a» → «b» (4 B)")
+        self.assertIn("Mover «/Users/x/Documents/a.txt» → «/Users/x/Documents/b.txt»",
+                      ask.call_args.kwargs["summary"][0])
+        self.assertEqual(self.journal.submits[-1]["toolId"], "hefesto.rename")
+
+    def test_renombrar_con_destino_existente_no_abre_tarjeta(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 4, "e" * 64)}
+        self.journal.accept("inv-info-2")
+        self.journal.outcomes["inv-info-2"] = {"state": "succeeded",
+                                               "output": self.info(True, 2, "f" * 64)}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_rename",
+                {"from": "/Users/x/Documents/a.txt", "to": "/Users/x/Documents/b.txt"},
+                JOB)
+        self.assertEqual(result, "el destino ya existe")
+        ask.assert_not_called()
