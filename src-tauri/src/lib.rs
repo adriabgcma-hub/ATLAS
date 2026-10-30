@@ -313,27 +313,35 @@ impl Hefesto {
     }
 
     fn start(&self, app: AppHandle) {
-        let (client, device_id) = match hefesto_transport() {
-            Ok(transport) => transport,
-            Err(snapshot) => {
-                self.store(snapshot);
-                return;
-            }
-        };
-        self.store(Snapshot::connecting(&device_id));
-        // Si las raíces estándar no se pudieran resolver, el dispositivo sigue
-        // vivo (eco y latido) pero toda lectura se rechaza por falta de raíces.
-        let roots = Roots::macos_default().unwrap_or_else(|_| Roots::new(Vec::new()));
-        let marker = app
-            .path()
-            .app_data_dir()
-            .ok()
-            .map(|dir| dir.join(HEFESTO_SUSPEND_MARKER));
         let snapshot = Arc::clone(&self.snapshot);
         let commands = Arc::clone(&self.commands);
         let spawned = thread::Builder::new()
             .name("hefesto".to_string())
             .spawn(move || {
+                // Credenciales, TLS y resolución del nombre fuera del arranque
+                // de la ventana: la consulta mDNS puede tardar y la app no
+                // debe esperar a que termine.
+                let (client, device_id) = match hefesto_transport() {
+                    Ok(transport) => transport,
+                    Err(state) => {
+                        if let Ok(mut slot) = snapshot.lock() {
+                            *slot = state;
+                        }
+                        return;
+                    }
+                };
+                if let Ok(mut slot) = snapshot.lock() {
+                    *slot = Snapshot::connecting(&device_id);
+                }
+                // Si las raíces estándar no se pudieran resolver, el
+                // dispositivo sigue vivo (eco y latido) pero toda lectura se
+                // rechaza por falta de raíces.
+                let roots = Roots::macos_default().unwrap_or_else(|_| Roots::new(Vec::new()));
+                let marker = app
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .map(|dir| dir.join(HEFESTO_SUSPEND_MARKER));
                 hefesto_loop(
                     Runtime::new(client, device_id, roots),
                     Instant::now(),

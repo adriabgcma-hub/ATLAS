@@ -148,6 +148,8 @@ impl HefestoClient {
     }
 }
 
+const RESOLVE_ATTEMPTS: u8 = 3;
+
 /// Resuelve el nombre del relay con un tope de tiempo y deja las IPv4 delante,
 /// conservando el orden dentro de cada familia. `None` deja la resolución a
 /// reqwest (IP literal, fallo o nombre sin resultados).
@@ -157,21 +159,28 @@ fn ipv4_first_resolution(base_url: &Url, timeout: Duration) -> Option<(String, V
         return None;
     }
     let port = base_url.port_or_known_default()?;
-    let (sender, receiver) = mpsc::channel();
-    let probe = host.clone();
-    let worker = std::thread::Builder::new()
-        .name("hefesto-resolve".to_string())
-        .spawn(move || {
-            let addrs = (probe.as_str(), port)
-                .to_socket_addrs()
-                .map(ipv4_first)
-                .ok();
-            let _ = sender.send(addrs);
-        })
-        .ok()?;
-    let addrs = receiver.recv_timeout(timeout).ok().flatten();
-    drop(worker);
-    addrs.filter(|addrs| !addrs.is_empty()).map(|a| (host, a))
+    // mDNS puede tardar más que el timeout de red al arrancar; un único
+    // intento fallido dejaría al cliente sin IPv4 hasta relanzar la app.
+    for _ in 0..RESOLVE_ATTEMPTS {
+        let (sender, receiver) = mpsc::channel();
+        let probe = host.clone();
+        let worker = std::thread::Builder::new()
+            .name("hefesto-resolve".to_string())
+            .spawn(move || {
+                let addrs = (probe.as_str(), port)
+                    .to_socket_addrs()
+                    .map(ipv4_first)
+                    .ok();
+                let _ = sender.send(addrs);
+            })
+            .ok()?;
+        let addrs = receiver.recv_timeout(timeout).ok().flatten();
+        drop(worker);
+        if let Some(addrs) = addrs.filter(|addrs| !addrs.is_empty()) {
+            return Some((host, addrs));
+        }
+    }
+    None
 }
 
 fn ipv4_first(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
