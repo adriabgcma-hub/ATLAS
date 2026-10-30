@@ -20,8 +20,6 @@ export interface ConversationState {
   messages: ChatMessage[]
   /** requestIds en vuelo (thinking/responding): sirven para cancelar. */
   pendingRequestIds: string[]
-  /** Último `message` del evento de estado (toolId en `executing`). */
-  stateMessage: string | null
   lastError: string | null
   /** Confirmaciones pendientes de la UI (una por requestId). */
   confirmations: ConfirmationRequest[]
@@ -32,7 +30,6 @@ export const initialConversationState: ConversationState = {
   sessionState: 'idle',
   messages: [],
   pendingRequestIds: [],
-  stateMessage: null,
   lastError: null,
   confirmations: [],
 }
@@ -109,15 +106,11 @@ export function conversationReducer(
           : base.pendingRequestIds.includes(event.requestId)
             ? base.pendingRequestIds
             : [...base.pendingRequestIds, event.requestId]
-      const settled =
-        event.state === 'cancelled' || event.state === 'completed' || event.state === 'failed'
       return {
         ...base,
         sessionId: event.sessionId,
         sessionState: event.state,
         pendingRequestIds: pending,
-        // Un estado cerrado no conserva el mensaje: la fase ya no está viva.
-        stateMessage: settled ? null : (event.message ?? null),
         lastError: event.state === 'failed' ? (event.message ?? 'unknown_error') : base.lastError,
       }
     }
@@ -164,7 +157,6 @@ export function conversationReducer(
           ? mergeHydrated(state.messages, action.session.messages)
           : action.session.messages,
         pendingRequestIds: [],
-        stateMessage: null,
         lastError: null,
         // Las confirmaciones son en vivo: al recargar caducan solas.
         confirmations: [],
