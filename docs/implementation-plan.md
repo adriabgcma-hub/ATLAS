@@ -145,8 +145,11 @@ de prueba autorizados por el usuario (2026-10-28).
       intención, no por un interruptor); suspender —local, Hub Panel o remoto— deja
       `hefesto-suspended` en el directorio de datos de la app y exige Activar a mano,
       también tras reiniciar. Probado en vivo con el relay real.
-- [ ] Cerrar la entrega 2: atajo local, control desde Hub Panel y matriz completa de
-      salida normal/crash/pérdida de red/suspensión/reinicios en la app.
+- [x] Cerrar la entrega 2 (2026-10-30): atajo local `cmd+shift+a` con lógica pura
+      testeada, tarjeta Hefesto en el Hub Panel con suspensión remota
+      (`GET /v1/hefesto/status` + `POST /v1/hefesto/suspend` en el relay) y matriz
+      completa en vivo (salida normal, crash, pérdida de red, suspensión remota y
+      local, reinicio con encargo en vuelo). Commits `1ade92e`…`cc92ca1`, desplegado.
 - [x] Delegación no bloqueante, identidad visual y recuperación de tareas
       (2026-10-29, entrega 3): operación `outcome` de lectura, herramienta
       `hefesto_echo` con catálogo dinámico, continuador etiquetado HEFESTO con

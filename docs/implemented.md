@@ -303,6 +303,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 - **Descripción:** la prueba en vivo de cancelación destapó dos defectos. En el relay, el único control de cancelación estaba al cierre del turno (`_complete`): si el usuario cancelaba mientras el LLM pensaba, la herramienta se ejecutaba igual y la delegación se registraba después, publicando el continuador; ahora `_handle_tool_call` y `_delegate_echo` revalidan la cancelación. En la app, `InputBar` deshabilitaba el input y el botón de enviar durante una petición en curso, de modo que ni Enter ni la X llegaban a `onCancel`; ambos quedan activos y el envío del formulario enruta a la cancelación. Tests de regresión añadidos en ambos lados.
 - **Documentación relacionada:** `docs/hefesto-plan.md` §8.
 
+### Cierre de la entrega 2 de Hefesto
+
+- **Commit:** `feat(hefesto): suspensión remota de Hefesto desde el relay` … `chore(panel): build con la tarjeta Hefesto` (`1ade92e`…`cc92ca1`)
+- **Fecha:** `2026-10-30`
+- **Descripción:** cierra la entrega 2 con sus tres frentes. (1) Atajo local `cmd+shift+a` que alterna la ventana de chat con lógica pura y testeada (`next_visibility`: oculta solo si está visible y con foco). (2) Control de suspensión de Hefesto desde el Hub Panel: el relay expone `GET /v1/hefesto/status` y `POST /v1/hefesto/suspend` (kill switch con reintento ante `stale_generation`, tras `_lan_only()`), y el panel añade la tarjeta Hefesto con badge, cadena de estado y botón Suspender de un clic. (3) Matriz de fallos en vivo verificada con el usuario: salida normal, crash con recuperación, pérdida de red, suspensión remota y local, reinicio con encargo en vuelo (sin reejecución) y el atajo. Pruebas: Python 93 (88 + 5), build del panel y `cargo test -p atlas-next`. Desplegado con `./scripts/deploy-relay.sh` y bundle reconstruido con Apple Development.
+- **Documentación relacionada:** `docs/hefesto-plan.md` §8, `docs/relay.md` §5, `docs/superpowers/plans/2026-10-30-hefesto-entrega-2.md`.
+
 ## Plantilla para futuras implementaciones
 
 ### Nombre exacto del commit

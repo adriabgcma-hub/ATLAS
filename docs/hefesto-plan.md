@@ -388,3 +388,36 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   deshabilitaba input y botón justo cuando debían cancelar); corregido con
   test de regresión (`b43a68d`). Bundle de Atlas reconstruido con Apple
   Development, firma profunda válida, instalado en `/Applications/Atlas.app`.
+- 2026-10-30, cierre de la entrega 2 (tres frentes) implementado y desplegado:
+  1. **Atajo local** `cmd+shift+a` para alternar la ventana de chat: extraída
+     la lógica a una función pura `next_visibility(visible, focused)` en
+     `src-tauri/src/lib.rs` con su test (4 combinaciones); oculta solo si la
+     ventana está visible y con foco, y si no la muestra, la desminimiza y le
+     da foco (`0166925`).
+  2. **Control de suspensión desde Hub Panel:** el relay expone
+     `GET /v1/hefesto/status` (estado `{configured, deviceId, suspended,
+     generation}`) y `POST /v1/hefesto/suspend` (kill switch: lee la
+     generación, envía `control abort`, reintenta una vez ante
+     `stale_generation`); ambos detrás de `_lan_only()`. El panel añade la
+     tarjeta Hefesto (badge con `deviceId`, cadena Consultando/Sin
+     configurar/Suspendido/Activo y botón Suspender de un clic, activo solo
+     con `configured && !suspended`) que sondea cada 2 s (`cc36b8b` +
+     `e9f1895`, build del panel `cc92ca1`).
+  3. **Matriz de fallos en vivo** (con el usuario, TODO verde): salida normal
+     sin huérfanos; crash (`kill -9`) con relanzamiento limpio, reconexión y
+     suspensión persistida; pérdida de red (reinicio del relay) con reconexión
+     del dispositivo; suspensión remota desde el panel (marcador escrito,
+     gen 123→124) y local desde la app (gen→128); reinicio con encargo en
+     vuelo (tracker recupera `delegations=1`, continuación `state=unknown` sin
+     reejecución). Atajo verificado en vivo.
+  Commits de la entrega: spec `1ade92e`, plan `724ba0f`, relay `cc36b8b`,
+  panel `e9f1895`, atajo `0166925`, build `cc92ca1`. Pruebas: Python 93
+  (88 + 5 nuevas de control remoto), panel `npm run build` y
+  `cargo test -p atlas-next` (atajo). Desplegado con `./scripts/deploy-relay.sh`
+  (`/v1/health` OK) y bundle de Atlas reconstruido con Apple Development
+  (firma profunda válida), instalado en `/Applications/Atlas.app`.
+- Auditoría al cerrar la entrega 2: solo queda abierta la app del usuario
+  (`/Applications/Atlas.app`, PID 83026, ~40 MB); sin procesos
+  Hefesto/Vite/Tauri ni pruebas Python, puertos 5173/5174/8765 libres y
+  `launchctl` sin agentes nuevos (Hub Panel registrado sin PID). El marcador
+  de suspensión queda como último estado intencionado del usuario.
