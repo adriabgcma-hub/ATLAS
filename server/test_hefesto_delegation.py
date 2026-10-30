@@ -620,3 +620,36 @@ class WriteFlowTests(unittest.TestCase):
                 JOB)
         self.assertEqual(result, "el destino ya existe")
         ask.assert_not_called()
+
+    def test_info_malformada_no_abre_tarjeta_ni_escribe(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {
+            "state": "succeeded",
+            "output": {"exists": True, "size": None, "sha256": None}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "hola", "mode": "overwrite"},
+                JOB)
+        self.assertIn("respuesta inválida", result)
+        ask.assert_not_called()
+        self.assertEqual(len(self.journal.submits), 1)
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.file_info")
+
+    def test_handle_tool_call_abre_una_sola_tarjeta_y_no_registra_delegacion(self):
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(False)}
+        self.journal.accept("inv-write")
+        self.journal.outcomes["inv-write"] = {"state": "succeeded",
+                                              "output": {"text": "Escrito «x»"}}
+        call = {"function": {"name": "hefesto_write_file",
+                             "arguments": json.dumps(
+                                 {"path": "/Users/x/Documents/n.txt",
+                                  "content": "hola", "mode": "create"})}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once") as ask:
+            result = self.brain._handle_tool_call(JOB, call)
+        self.assertEqual(result, "Escrito «x»")
+        self.assertEqual(ask.call_count, 1)
+        self.assertEqual(self.brain._delegations, {})

@@ -1029,7 +1029,21 @@ class Brain:
         if "text" in output:
             # file_info responde con texto cuando rechaza la ruta o el archivo.
             return {"error": str(output["text"])}
-        return output
+        # Normaliza la salida correcta en un único punto: una respuesta
+        # malformada no debe llegar al plan (KeyError/TypeError y sin cierre).
+        exists = output.get("exists")
+        size, sha = output.get("size"), output.get("sha256")
+        if not isinstance(exists, bool):
+            return {"error": "respuesta inválida de Hefesto"}
+        if exists:
+            valid = (isinstance(size, int) and not isinstance(size, bool) and size >= 0
+                     and isinstance(sha, str) and len(sha) == 64
+                     and all(ch in "0123456789abcdef" for ch in sha))
+        else:
+            valid = size is None and sha is None
+        if not valid:
+            return {"error": "respuesta inválida de Hefesto"}
+        return {"exists": exists, "size": size, "sha256": sha}
 
     def _write_file(self, job: dict, args: dict) -> str:
         path = args.get("path")
@@ -1314,7 +1328,8 @@ class Brain:
 
     def ask_confirmation(self, request_id: str, session_id: str,
                          tool_id: str, args: dict,
-                         chat_id: int | None = None, summary=None) -> str | None:
+                         chat_id: int | None = None,
+                         summary: tuple[str, str] | None = None) -> str | None:
         """Emite la petición y espera. Devuelve la decisión o None (timeout)."""
         if summary is None:
             summary = self._confirm_summary(tool_id, args)
