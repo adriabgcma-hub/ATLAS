@@ -115,14 +115,15 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v2 (eco y lectura)
+## 5. Protocolo v3 (eco, lectura y escritura)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 2` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 3` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 2, error: "codigo_estable"}`, nunca rutas/certificados.
-Cuerpo máximo 128 KiB (para transportar lecturas de hasta 16 KiB con escape JSON);
-strings del eco limitados a 256 bytes UTF-8 y `output.text` a 64 KiB. Campos
-desconocidos, bool por entero, versiones o tipos incorrectos se rechazan.
+Errores `{protocolVersion: 3, error: "codigo_estable"}`, nunca rutas/certificados.
+Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
+escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
+16 384 bytes UTF-8 sin NUL y `output.text` a 64 KiB. Campos desconocidos, bool por
+entero, versiones o tipos incorrectos se rechazan.
 Generaciones entre 0 y `2^63-1`: cero representa un dispositivo aún no registrado,
 nunca una instancia viva. La expiración usa milisegundos Unix positivos hasta `2^63-1`.
 
@@ -135,30 +136,52 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | POST `/v1/hefesto/register` | device | `instanceId` |
 | POST `/v1/hefesto/heartbeat` | device | `instanceId` |
 | POST `/v1/hefesto/control` | Ambos | `action: resume/abort`, `expectedGeneration` |
-| POST `/v1/hefesto/submit` | controller | `submissionId`, `requestId`, `sessionId`, `taskId`, `toolId: hefesto.echo\|hefesto.list_dir\|hefesto.read_file`, `arguments: {text}` (eco) o `{path}` (lectura/listado) |
+| POST `/v1/hefesto/submit` | controller | `submissionId`, `requestId`, `sessionId`, `taskId`, `toolId` (ver tabla de herramientas), `arguments` por herramienta |
 | POST `/v1/hefesto/next` | device | `instanceId`, `generation` |
-| POST `/v1/hefesto/result` | device | `instanceId`, `generation`, `invocationId`, `output: {text}` |
+| POST `/v1/hefesto/result` | device | `instanceId`, `generation`, `invocationId`, `output` tipado (ver tabla de herramientas) |
 | POST `/v1/hefesto/outcome` | controller | `invocationId` |
+
+| toolId | Catálogo del modelo | `arguments` | `output` |
+| --- | --- | --- | --- |
+| `hefesto.echo` | `hefesto_echo` | `{text}` ≤256 B | `{text}` |
+| `hefesto.list_dir` | `hefesto_list_dir` | `{path}` | `{text}` |
+| `hefesto.read_file` | `hefesto_read_file` | `{path}` | `{text}` |
+| `hefesto.write_file` | `hefesto_write_file` (`mode`) | `{path, content, expectedHash\|null}` | `{text}` resumen |
+| `hefesto.rename` | `hefesto_rename` | `{from, to}` | `{text}` resumen |
+| `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
+
+`expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
+exclusiva y un sha256 de 64 hex minúscula sobrescribe solo si el archivo sigue
+igual. El modelo solo elige `mode` (`create`/`overwrite`); nunca ve ni aporta hashes.
+`content` es texto UTF-8 ≤16 384 bytes sin NUL.
 
 Estado: `{protocolVersion, deviceId, instanceId: string|null, generation,
 suspended, online, activeInvocationId: string|null}`. Estado inicial suspendido.
 `register`, `heartbeat`, `control` devuelven estado; `submit` y `result` devuelven
 `{protocolVersion, invocationId, state}`; `next` devuelve
 `{protocolVersion, invocation: Invocation|null}`; `outcome` devuelve
-`{protocolVersion, invocationId, state, outputText: string|null}` (lectura pura).
+`{protocolVersion, invocationId, state, output: object|null}` (lectura pura).
 
 Invocation: `{protocolVersion, invocationId, requestId, sessionId, taskId,
 deviceId, instanceId, generation, toolId, arguments, expiresAtUnixMs}`, donde
-`arguments` es `{text}` (eco) o `{path}` (lectura/listado).
+`arguments` sigue la tabla de herramientas.
 No se considera autorización ni se ejecuta por recibir un mensaje de chat.
 
-`path` es absoluto (empieza por `/`), ≤1024 bytes UTF-8, sin NUL; el dispositivo
-resuelve la ruta canónica y verifica que queda dentro de una raíz autorizada
-(Documents, Desktop, Downloads, Pictures, Music, Movies), rechazando enlaces que
-escapan. `read_file` devuelve hasta 16 KiB de texto; `list_dir` hasta 100 entradas;
-los binarios se rechazan como «no legible». Los errores de lectura (fuera de raíz,
-demasiado grande, binario, sin permisos) vuelven como `succeeded` con el mensaje en
-`output.text` (el protocolo no tiene estado `failed` para resultados).
+`path` (y `from`/`to` en el renombrado) es absoluto (empieza por `/`), ≤1024 bytes
+UTF-8, sin NUL; el dispositivo resuelve la ruta canónica y verifica que queda dentro
+de una raíz autorizada (Documents, Desktop, Downloads, Pictures, Music, Movies),
+rechazando enlaces que escapan. `read_file` devuelve hasta 16 KiB de texto;
+`list_dir` hasta 100 entradas; los binarios se rechazan como «no legible». Los
+errores de lectura (fuera de raíz, demasiado grande, binario, sin permisos) vuelven
+como `succeeded` con el mensaje en `output` (`{text}`); el protocolo no tiene estado
+`failed` para resultados.
+
+`write_file` solo escribe texto: crear publica con `hard_link` sobre un temporal
+(nunca trunca ni pisa), sobrescribir exige el `expectedHash` actual y publica con
+`rename` atómico conservando el modo, y `rename` mueve con `hard_link` + borrado
+del origen, sin pisar y solo dentro del mismo volumen. Los resúmenes
+(`Escrito «path» (N B, sha256 …)`, `Movido «from» → «to» (N B)`) vuelven como
+`{text}`; los rechazos son texto estable, sin estado `failed`.
 
 ### Estado, duplicados y fallos
 
@@ -210,12 +233,20 @@ demasiado grande, binario, sin permisos) vuelven como `succeeded` con el mensaje
 3. **Delegación e identidad:** entradas autenticadas, continuaciones no bloqueantes,
    orbe/etiquetas, snapshots atómicos de tareas/confirmaciones/cursor; mantener Atlas
    operativo mientras Hefesto espera. Medir resultados, latencia y tokens.
-4. **Lecturas y archivos (corte 1, solo lectura, cerrada 2026-10-30):** protocolo v2 con
-   `hefesto.list_dir`/`hefesto.read_file`, raíces del usuario con contención canónica
-   (enlaces fuera se rechazan), consentimiento de exportación por operación, resultado
-   síncrono al modelo, topes de 16 KiB/100 entradas y binarios rechazados en vez de
-   volcados. Pendiente para el siguiente corte: creación exclusiva, planes para cambios
-   existentes, escritura atómica y auditoría minimizada.
+4. **Lecturas y archivos (puerta 4; corte 1, solo lectura, cerrada 2026-10-30):**
+   protocolo v2 con `hefesto.list_dir`/`hefesto.read_file`, raíces del usuario con
+   contención canónica (enlaces fuera se rechazan), consentimiento de exportación
+   por operación, resultado síncrono al modelo, topes de 16 KiB/100 entradas y
+   binarios rechazados en vez de volcados.
+   **Corte 2, escritura (cerrado 2026-10-30):** protocolo v3 con
+   `hefesto.write_file`, `hefesto.rename` y la interna `hefesto.file_info`, plan
+   exacto con `expectedHash` (control optimista), creación exclusiva con
+   `hard_link`, sobrescritura atómica con `fsync` + `rename` conservando el modo,
+   movimiento sin pisar y solo en el mismo volumen, contenido nunca persistido
+   (solo en memoria del relay, auditoría sin contenido) y errores estables.
+   Queda fuera de esta puerta el **borrado**, que tendrá su propio corte con
+   confirmación individual e identidad revalidada; tampoco incluye `chmod`/
+   propietarios, creación de directorios ni enlaces.
 5. **Apps y multimedia:** adaptadores, cierre sin pérdida, permisos macOS por destino.
 6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
    terminal general solo tras acordar y verificar aislamiento/límites.
@@ -437,7 +468,7 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   de suspensión queda como último estado intencionado del usuario.
 - 2026-10-30, lectura segura de archivos (puerta 4, corte 1), implementada,
   desplegada y probada en vivo con el usuario:
-  1. **Protocolo v2**: `protocolVersion: 2`, `toolId` admitidos
+  1. **Protocolo v2**: `protocolVersion` en 2, `toolId` admitidos
      `hefesto.echo`/`hefesto.list_dir`/`hefesto.read_file`, `arguments` por
      herramienta (`{text}` ≤256 B; `{path}` absoluta ≤1024 B, sin NUL) y
      `output: {text}` ≤64 KiB (cuerpo máximo 128 KiB en transporte).
@@ -465,3 +496,39 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   `295da62`. Pruebas: Python 147, `cargo test --workspace`, clippy
   `-D warnings` y `cargo fmt --check`; relay desplegado (`/v1/health` OK) y
   bundle Apple Development con firma profunda válida instalado.
+- 2026-10-30, escritura segura de archivos (puerta 4, corte 2), implementada y
+  documentada (la prueba en vivo queda para Task 7):
+  1. **Protocolo v3**: `protocolVersion: 3`, `toolId` admitidos
+     `hefesto.write_file` (`{path, content, expectedHash|null}`),
+     `hefesto.rename` (`{from, to}`) y la interna `hefesto.file_info`
+     (`{path}` → `{exists, size, sha256}` o `{text}`); eco y lectura mantienen
+     sus shapes. Contenido ≤16 384 B UTF-8 sin NUL, rutas ≤1024 B absolutas,
+     cuerpo ≤128 KiB y `output.text` ≤64 KiB.
+  2. **Dispositivo**: creación exclusiva con temporal + `fsync` + `hard_link`
+     (sin truncar), sobrescritura con sha256 actual comparado con
+     `expectedHash` + temporal + `rename` atómico conservando el modo, y
+     movimiento con `hard_link` + borrado del origen, sin pisar y solo en el
+     mismo volumen. El plan hashea existentes hasta 64 MiB.
+  3. **Journal**: el contenido no se persiste; la fila sqlite guarda
+     `contentBytes`/`contentSha256` y el texto vive en memoria. `outcome`
+     devuelve `output` tipado y una escritura sin entregar tras reiniciar
+     queda `unknown`.
+  4. **Relay**: catálogo con `hefesto_write_file` (`mode`) y
+     `hefesto_rename`, `planConfirmation` y una sola tarjeta con
+     `Crear`/`Sobrescribir`/`Mover`; `file_info` es interna, no se expone y
+     no abre tarjeta. Los errores estables y los resúmenes
+     `Escrito …`/`Movido …` vuelven al modelo en el mismo turno.
+  5. **Chat**: las órbitas de fase etiquetan también `hefesto_write_file`
+     («Escribiendo archivo») y `hefesto_rename` («Moviendo archivo»).
+  Commits: `cf1f3ab` (protocolo v3), `00bac6e` (herramientas del
+  dispositivo), `99dc59a` (renombrado sin pisar y modo conservado), `dfa5ad2`
+  (journal v3), `53ef4d1` (despacho), `446c7ad` (relay: plan y confirmación),
+  `e9cbd30` (file_info normalizado y tarjeta única) y `fb42e65` (órbitas del
+  chat). Pruebas: `cargo test --workspace` (91 correctas, 2 ignoradas),
+  `cargo clippy -p atlas-mac --all-targets -- -D warnings`,
+  `cargo fmt -p atlas-mac -- --check`,
+  `python3 -m unittest discover -p "test_*.py"` 205 OK,
+  `python3 -m py_compile`, `npm test` 52 y `npm run build`. Prueba en vivo
+  pendiente de Task 7: crear, sobrescribir con el hash de la tarjeta, hash
+  obsoleto, mover y ruta fuera de raíces, seguida de despliegue del relay y
+  verificación del bundle.

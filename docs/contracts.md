@@ -178,19 +178,64 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v2 — eco y lectura
+## Hefesto v3 — eco, lectura y escritura
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v2-eco-y-lectura).
-Usa `protocolVersion: 2`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output.text` máximo 64 KiB. Tres herramientas sobre el mismo protocolo: `hefesto.echo`
-(`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file` (`{path}` absoluto, raíces
-autorizadas Documents/Desktop/Downloads/Pictures/Music/Movies). El relay expone
-`hefesto_echo` (asíncrono), `hefesto_list_dir` y `hefesto_read_file` (lectura síncrona,
-con confirmación por operación) al modelo.
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v3-eco-lectura-y-escritura).
+Usa `protocolVersion: 3`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Seis herramientas sobre el mismo protocolo:
+`hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
+(`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
+Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
+`hefesto.rename` (`{from, to}`) y la interna `hefesto.file_info` (`{path}`). El relay
+expone al modelo `hefesto_echo` (asíncrono), `hefesto_list_dir` y
+`hefesto_read_file` (lectura síncrona, con confirmación por operación),
+`hefesto_write_file` (`{path, content, mode}`) y `hefesto_rename`;
+`hefesto.file_info` no está en el catálogo.
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
-`{invocationId}` → `{protocolVersion, invocationId, state, outputText|null}`.
-Lectura pura del journal.
+`{invocationId}` → `{protocolVersion, invocationId, state, output|null}`.
+Lectura pura del journal. `output` es una unión validada por herramienta:
+
+```ts
+type HefestoOutput =
+  | { text: string } // eco, list_dir, read_file, write_file y rename (≤64 KiB)
+  | { exists: boolean; size: number | null; sha256: string | null } // file_info
+```
+
+### Escritura
+
+`hefesto_write_file` recibe `{path, content, mode}` (`create` falla si el destino
+existe; `overwrite` lo reemplaza) y el relay inyecta en el journal el
+`expectedHash` planificado —el sha256 actual o `null` para crear—; el modelo nunca
+maneja hashes. `hefesto_rename` recibe `{from, to}` y no pisa un destino existente.
+`hefesto.file_info` es una invocación normal pero no visible al modelo: responde
+`{exists, size, sha256}` o `{text}` cuando rechaza la ruta o el archivo. Crear,
+sobrescribir y mover piden confirmación por operación con la tarjeta del plan; el
+riesgo es `write`.
+
+Límites: `content` ≤16 384 bytes UTF-8 sin NUL (solo texto); rutas absolutas
+≤1024 bytes UTF-8 sin NUL; cuerpo del protocolo ≤128 KiB; `output.text` ≤64 KiB;
+hash de archivos existentes para el plan ≤64 MiB.
+
+Garantías del dispositivo: crear escribe un temporal en el mismo directorio, hace
+`fsync` y publica con `hard_link` (nunca trunca ni pisa un destino); sobrescribir
+recalcula el sha256 actual, lo compara con `expectedHash`, escribe temporal +
+`fsync` y publica con `rename` atómico conservando el modo; mover usa `hard_link`
+y elimina el origen (sin pisar) y solo dentro del mismo volumen.
+
+Errores estables, devueltos como texto: «fuera de las raíces autorizadas», «ya
+existe», «el archivo cambió desde la confirmación», «el destino ya existe», «no se
+puede mover entre volúmenes» y «demasiado grande para planificar».
+
+Resúmenes de resultado: `Escrito «<path>» (<N> B, sha256 <12 hex>)` y
+`Movido «<from>» → «<to>» (<N> B)`. Tarjetas: `Crear «path» (N B)`,
+`Sobrescribir «path» (actual X B, sha256 <12 hex>… → nuevo N B)` y
+`Mover «from» → «to» (N B, sha256 <12 hex>…)`.
+
+El contenido nunca se persiste en sqlite: la fila guarda el envío redactado con
+`contentBytes` y `contentSha256`, y el texto vive solo en memoria del relay para
+entregarlo al dispositivo. Si el proceso se reinicia antes de la entrega, la
+invocación queda `unknown` y no se reenvía.
 
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
@@ -240,3 +285,12 @@ El journal conserva `pending`, `dispatched`, `succeeded`, `cancelled`, `expired`
 `unknown`. Reiniciar cancela lo pendiente e invalida instancias; un despachado sin
 resultado queda desconocido, sin reintento automático. El protocolo no promete
 exactly-once para efectos externos ni sustituye el consentimiento por acción.
+
+### Privacidad
+
+El contenido de una escritura nunca se escribe en logs ni en el journal en disco:
+solo llega al archivo destino al ejecutarse. El ejecutor del dispositivo conserva
+en memoria las invocaciones completadas —cada una puede incluir hasta 16 KiB de
+contenido de escritura— para deduplicar entregas y responder a un ACK perdido;
+ese contenido muere con el proceso, y el badge de estado solo transporta texto de
+eco, nunca contenido de archivos.
