@@ -115,6 +115,15 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       Vite cerrado por PID al terminar: puerto 5173 libre, sin procesos Atlas/dev
       activos; `launchctl list` conserva Hub Panel registrado pero sin PID.
       Commit `446ecb4`; bundle firmado e instalado en `/Applications/Atlas.app`.
+- [x] Órbitas por fase del turno (2026-10-30, `f4c2ddc`): el relay publica
+      `executing` con el toolId y la órbita de la petición se sustituye por la
+      fase real — Hefesto en violeta («Leyendo archivo», «Listando carpeta»,
+      «Encargo»), otras herramientas en azul y «Atlas · Redactando respuesta»
+      al responder. `orbitPlan` es puro y con pruebas; el reducer guarda el
+      `message` del estado. Verificado en dev contra el relay desplegado
+      (órbita violeta tras permitir la lectura, azul durante el turno) y con
+      paquete firmado instalado. Pruebas: 45 frontend, 150 Python, build y
+      lint de lo tocado (los 3 errores de Hub Panel siguen siendo previos).
 - [ ] Tablas en ventana aparte (`Atlas · Tabla`) con detección + botón
       "Abrir en ventana" y exportar CSV a `~/Documents/Atlas/tablas/`
       (diseñado; pendiente de implementar).

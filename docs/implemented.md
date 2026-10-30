@@ -317,6 +317,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 - **Descripción:** primer corte de la puerta 4 — solo lectura. El protocolo pasa a v2 con `hefesto.list_dir` y `hefesto.read_file` sobre raíces del usuario (Documents, Desktop, Downloads, Pictures, Music, Movies), contención canónica por componentes (un enlace que sale se rechaza), 100 entradas por listado, 16 KiB por lectura y binarios rechazados como «no legible». Cada operación pide consentimiento antes de exportar contenido y el resultado vuelve al modelo en el mismo turno (lo redacta Atlas; las lecturas no generan mensaje «Hefesto:» aparte). El cliente Rust resuelve el nombre y prefiere IPv4 porque el link-local de mDNS agotaba el timeout e impedía registrar el dispositivo. Probado en vivo con el usuario: tarjeta de confirmación, `LUNA-42` leída de `~/Documents/atlas-prueba-lectura.txt` y `/etc/hosts` rechazado por estar fuera de las raíces. Pruebas: Python 147, `cargo test --workspace`, clippy `-D warnings` y `cargo fmt --check`; relay desplegado y bundle Apple Development con firma profunda válida.
 - **Documentación relacionada:** `docs/hefesto-plan.md` §5 y §6, `docs/contracts.md`, `docs/superpowers/specs/2026-10-30-hefesto-lecturas-design.md`, `docs/superpowers/plans/2026-10-30-hefesto-lecturas.md`.
 
+### Órbitas por fase del turno
+
+- **Commit:** `f4c2ddc`
+- **Fecha:** `2026-10-30`
+- **Descripción:** las órbitas del orbe dejan de mostrar solo la petición y la confirmación: el relay publica `session.state_changed` en `executing` con el `toolId` antes de ejecutar cada herramienta, y la app sustituye la órbita de la fase anterior por la real. Hefesto se dibuja en violeta («Hefesto · Leyendo archivo», «Hefesto · Listando carpeta», «Hefesto · Encargo»), otras herramientas con su nombre en azul y «Atlas · Redactando respuesta» mientras redacta; al terminar el turno todo estalla. La traducción estado→órbita vive en `src/state/orbitPlan.ts` (pura, con pruebas) y el reducer conserva el `message` del estado para la UI. El `message` de `executing` es solo el `toolId`, nunca rutas ni contenido. Verificado en dev contra el relay desplegado (órbita violeta tras permitir la lectura, azul durante el turno) y paquete Apple Development instalado. Pruebas: 45 frontend, 150 Python, build y lint de lo tocado.
+- **Documentación relacionada:** `docs/contracts.md`, `docs/implementation-plan.md`.
+
 ## Plantilla para futuras implementaciones
 
 ### Nombre exacto del commit
