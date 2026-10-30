@@ -31,6 +31,8 @@ interface OrbitalParticle {
 export interface OrbitInfo {
   title: string
   detail: string
+  /** Color hex; por defecto el azul de Atlas. */
+  color?: string
 }
 
 /** Contenido de la mini-burbuja de proximidad. */
@@ -263,11 +265,11 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       return entry
     }
 
-    // Atlas es único: un solo color azul eléctrico para todas las órbitas.
+    // Azul eléctrico por defecto; Hefesto usa el violeta de su etiqueta.
     const ATLAS_ORBIT_COLOR = '#3FA4FF'
 
     const spawnOrbit = (info?: OrbitInfo): number => {
-      const color = ATLAS_ORBIT_COLOR
+      const color = info?.color ?? ATLAS_ORBIT_COLOR
       spritesFor(color)
       const direction = Math.random() < 0.5 ? 1 : -1
       // Banda 1.02–1.30 casi frontal (±0.25 de inclinación): el anillo

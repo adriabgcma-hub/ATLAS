@@ -1393,6 +1393,8 @@ class Brain:
             if decision != "allow_once":
                 return ("denegada por el usuario"
                         if decision == "deny" else "caducada sin respuesta")
+        # Fase visible del proceso: solo el toolId, nunca rutas ni contenido.
+        self._push_state(job["session_id"], job["request_id"], "executing", name)
         return self.execute_tool(name, args, job)
 
     def _process(self, job: dict) -> None:

@@ -270,6 +270,47 @@ class ContinuationTests(unittest.TestCase):
         self.assertEqual(brain._load_delegations(), {})
 
 
+class ToolPhaseTests(unittest.TestCase):
+    """El turno publica `executing` con el toolId antes de ejecutar."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-delegation-")
+        self.addCleanup(self.temp.cleanup)
+
+    def executing_events(self, brain):
+        return [e for e in brain.events
+                if e.get("kind") == "state" and e.get("state") == "executing"]
+
+    def test_emite_executing_con_el_tool_antes_de_ejecutar(self):
+        brain = make_brain(self.temp.name)
+        fake = FakeJournal()
+        fake.accept()
+        brain._hefesto_journal = fake
+        brain._hefesto_device = "mac-one"
+        brain._handle_tool_call(
+            JOB, {"function": {"name": "hefesto_echo",
+                               "arguments": json.dumps({"text": "hola"})}})
+        events = self.executing_events(brain)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["message"], "hefesto_echo")
+        self.assertEqual(events[0]["requestId"], "req-1")
+        self.assertEqual(len(fake.submits), 1)
+
+    def test_denegar_no_emite_executing(self):
+        brain = make_brain(self.temp.name)
+        with mock.patch.object(brain, "ask_confirmation", return_value="deny"):
+            brain._handle_tool_call(
+                JOB, {"function": {"name": "hefesto_read_file",
+                                   "arguments": json.dumps({"path": "/tmp/x"})}})
+        self.assertEqual(self.executing_events(brain), [])
+
+    def test_herramienta_desconocida_no_emite_executing(self):
+        brain = make_brain(self.temp.name)
+        brain._handle_tool_call(
+            JOB, {"function": {"name": "nope", "arguments": "{}"}})
+        self.assertEqual(self.executing_events(brain), [])
+
+
 class TrackerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="atlas-delegation-")

@@ -44,6 +44,19 @@ describe('conversationReducer', () => {
     expect(next.pendingRequestIds).toEqual(['req-1'])
   })
 
+  it('guarda el message del estado (toolId en executing) y lo limpia al cerrar', () => {
+    const executing = conversationReducer(initialConversationState, {
+      type: 'session.state_changed',
+      event: { ...stateChanged('executing'), message: 'hefesto_read_file' },
+    })
+    expect(executing.stateMessage).toBe('hefesto_read_file')
+    const completed = conversationReducer(executing, {
+      type: 'session.state_changed',
+      event: stateChanged('completed'),
+    })
+    expect(completed.stateMessage).toBeNull()
+  })
+
   it('añade mensajes sin duplicar el mismo rol+request', () => {
     const s1 = conversationReducer(initialConversationState, {
       type: 'conversation.message_appended',

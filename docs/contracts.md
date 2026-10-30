@@ -40,6 +40,11 @@ type SessionEvent = Correlation & {
 
 El frontend solo representa este estado; no puede forzar una transición de ejecución sin pasar por IPC y permisos.
 
+En `executing`, `message` lleva el `toolId` del catálogo (p. ej.
+`hefesto_read_file`), nunca rutas ni contenido: la app lo usa para la órbita de
+fase (Hefesto en violeta, otras herramientas en azul). En `failed`, `message`
+es el código estable del error. Un estado terminal limpia el mensaje.
+
 ## Canales de eventos IPC
 
 El nombre del canal Tauri no puede contener puntos (Tauri 2 solo admite

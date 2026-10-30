@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { Orbits, type OrbitPort } from './components/orb/Orbits'
+import { Orbits, type OrbitInfo, type OrbitPort } from './components/orb/Orbits'
 import { AtlasScene, type ScenePort } from './components/scene/Scene'
 import { InputBar } from './components/chat/InputBar'
 import { ConversationPanel } from './components/chat/ConversationPanel'
@@ -13,6 +13,7 @@ import {
   sessionStateToOrbInput,
 } from './state/conversation'
 import { deriveOrbState } from './state/orbState'
+import { planPhaseOrbit } from './state/orbitPlan'
 import type {
   ActiveSession,
   AtlasError,
@@ -349,23 +350,40 @@ export default function App() {
   const orbitPortRef = useRef<OrbitPort | null>(null)
   const orbitedRequestsRef = useRef<Set<string>>(new Set())
   const orbitedConfirmsRef = useRef<Set<string>>(new Set())
+  /** Órbita de la fase viva del turno (petición → proceso → respuesta). */
+  const phaseOrbitRef = useRef<{ key: string; id: number } | null>(null)
   /** Mapea confirmation.requestId → id de órbita en Orbits. */
   const confirmOrbitIdRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     const port = orbitPortRef.current
     if (!port) return
-    const { sessionState, pendingRequestIds, messages, confirmations } = conversation
+    const { sessionState, pendingRequestIds, messages, confirmations, stateMessage } = conversation
+    const retirePhase = () => {
+      const current = phaseOrbitRef.current
+      if (!current) return
+      port.retireOrbit(current.id)
+      phaseOrbitRef.current = null
+    }
+    const showPhase = (key: string, info: OrbitInfo) => {
+      if (phaseOrbitRef.current?.key === key) return
+      retirePhase()
+      phaseOrbitRef.current = { key, id: port.spawnOrbit(info) }
+    }
     if (sessionState === 'thinking' && pendingRequestIds.length > 0) {
       const requestId = pendingRequestIds[pendingRequestIds.length - 1]
       if (!orbitedRequestsRef.current.has(requestId)) {
         orbitedRequestsRef.current.add(requestId)
         const lastUser = [...messages].reverse().find((m) => m.role === 'user')
         port.burstAll()
-        port.spawnOrbit({
-          title: lastUser?.source === 'telegram' ? 'Telegram · Tú' : 'Tú',
-          detail: lastUser ? truncate(lastUser.content, 140) : 'Petición en curso',
-        })
+        retirePhase()
+        phaseOrbitRef.current = {
+          key: `thinking:${requestId}`,
+          id: port.spawnOrbit({
+            title: lastUser?.source === 'telegram' ? 'Telegram · Tú' : 'Tú',
+            detail: lastUser ? truncate(lastUser.content, 140) : 'Petición en curso',
+          }),
+        }
       }
     } else if (
       sessionState === 'completed' ||
@@ -373,8 +391,14 @@ export default function App() {
       sessionState === 'failed'
     ) {
       port.retireAll()
+      phaseOrbitRef.current = null
       orbitedRequestsRef.current.clear()
       orbitedConfirmsRef.current.clear()
+    } else {
+      // Fase real del turno: proceso (Hefesto violeta, otras herramientas azul)
+      // o respuesta de Atlas. Sustituye a la órbita anterior.
+      const plan = planPhaseOrbit(sessionState, stateMessage ?? undefined)
+      if (plan) showPhase(plan.key, { title: plan.title, detail: plan.detail, color: plan.color })
     }
     // Retirar órbitas de confirmaciones que ya se resolvieron (por botón o texto).
     const currentConfirmIds = new Set(confirmations.map((c) => c.requestId))
