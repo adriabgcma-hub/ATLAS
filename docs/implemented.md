@@ -319,10 +319,10 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ### Órbitas por fase del turno
 
-- **Commit:** `f4c2ddc`
+- **Commit:** `f4c2ddc`, `1899526`, `e0eb90c`
 - **Fecha:** `2026-10-30`
-- **Descripción:** las órbitas del orbe dejan de mostrar solo la petición y la confirmación: el relay publica `session.state_changed` en `executing` con el `toolId` antes de ejecutar cada herramienta, y la app sustituye la órbita de la fase anterior por la real. Hefesto se dibuja en violeta («Hefesto · Leyendo archivo», «Hefesto · Listando carpeta», «Hefesto · Encargo»), otras herramientas con su nombre en azul y «Atlas · Redactando respuesta» mientras redacta; al terminar el turno todo estalla. La traducción estado→órbita vive en `src/state/orbitPlan.ts` (pura, con pruebas) y el reducer conserva el `message` del estado para la UI. El `message` de `executing` es solo el `toolId`, nunca rutas ni contenido. Verificado en dev contra el relay desplegado (órbita violeta tras permitir la lectura, azul durante el turno) y paquete Apple Development instalado. Pruebas: 45 frontend, 150 Python, build y lint de lo tocado.
-- **Documentación relacionada:** `docs/contracts.md`, `docs/implementation-plan.md`.
+- **Descripción:** las órbitas del orbe dejan de mostrar solo la petición y la confirmación: el relay publica `session.state_changed` en `executing` con el `toolId` antes de ejecutar cada herramienta, y la app sustituye la órbita de la fase anterior por la real. Hefesto se dibuja en violeta («Hefesto · Leyendo archivo», «Hefesto · Listando carpeta», «Hefesto · Encargo»), otras herramientas con su nombre en azul y «Atlas · Redactando respuesta» mientras redacta; al terminar el turno todo estalla. La primera versión dependía del render y el drenado por lotes la ocultaba, así que el controlador (`src/state/phaseOrbits.ts`, con pruebas sobre un puerto falso) crea cada órbita al procesar el evento de estado y el drenado baja a 1 s. El `message` de `executing` es solo el `toolId`, nunca rutas ni contenido. Además, el cliente de Hefesto reintenta la resolución del nombre (mDNS lento dejaba el registro colgado hasta relanzar) y construye TLS/resolución dentro del hilo, fuera del arranque de la ventana. Verificado en vivo: el flujo del relay emite `thinking → confirmation → executing 'hefesto_read_file' → responding → completed`, órbita violeta tras permitir y azul al responder; paquete Apple Development instalado. Pruebas: 51 frontend, 150 Python, `cargo test --workspace`, clippy y fmt.
+- **Documentación relacionada:** `docs/contracts.md`, `docs/implementation-plan.md`, `docs/hefesto-plan.md` §8.
 
 ## Plantilla para futuras implementaciones
 
