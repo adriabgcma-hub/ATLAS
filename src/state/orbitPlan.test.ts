@@ -24,6 +24,15 @@ describe('planPhaseOrbit', () => {
     expect(plan?.color).toBe(HEFESTO_ORBIT_COLOR)
   })
 
+  it('etiqueta la escritura y el renombrado de Hefesto', () => {
+    const write = planPhaseOrbit('executing', 'hefesto_write_file')
+    expect(write?.title).toBe('Hefesto · Escribiendo archivo')
+    expect(write?.color).toBe(HEFESTO_ORBIT_COLOR)
+    const move = planPhaseOrbit('executing', 'hefesto_rename')
+    expect(move?.title).toBe('Hefesto · Moviendo archivo')
+    expect(move?.color).toBe(HEFESTO_ORBIT_COLOR)
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({

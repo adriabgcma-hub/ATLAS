@@ -18,6 +18,8 @@ const HEFESTO_PHASES: Record<string, string> = {
   hefesto_read_file: 'Hefesto · Leyendo archivo',
   hefesto_list_dir: 'Hefesto · Listando carpeta',
   hefesto_echo: 'Hefesto · Encargo',
+  hefesto_write_file: 'Hefesto · Escribiendo archivo',
+  hefesto_rename: 'Hefesto · Moviendo archivo',
 }
 
 /**
