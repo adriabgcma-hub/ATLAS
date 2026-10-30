@@ -34,7 +34,8 @@ pequeños) y reorganizar archivos existentes dentro de lo autorizado.
    el hash actual no coincide con el confirmado.
 5. **Escritura atómica y exclusiva**: crear publica sin poder truncar un destino
    existente; sobrescribir escribe un temporal en el mismo directorio y lo publica con
-   `rename` atómico; mover usa `rename` atómico y solo en el mismo volumen.
+   `rename` atómico; mover publica con `hard_link` y borra el origen, sin pisar nunca
+   un destino existente y solo en el mismo volumen (`EXDEV` se rechaza).
 6. **Contención real** de origen y destino (canónica, por componentes, sin enlaces) en
    las raíces autorizadas del usuario.
 7. **El journal no persiste el contenido** de las escrituras: guarda toolId, rutas,

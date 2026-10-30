@@ -251,6 +251,16 @@ class Journal:
             self._db.execute("PRAGMA synchronous=FULL")
             self._db.executescript(_SCHEMA)
             self._db.execute("BEGIN IMMEDIATE")
+            # Una escritura pendiente no se entregó y su contenido ya no existe
+            # (solo vivía en memoria): queda `unknown`, nunca se reenvía.
+            pending_writes = [
+                row["invocation_id"]
+                for row in self._db.execute(
+                    "SELECT invocation_id, submission FROM invocations WHERE state='pending'").fetchall()
+                if json.loads(row["submission"])["toolId"] == "hefesto.write_file"
+            ]
+            self._db.executemany("UPDATE invocations SET state='unknown' WHERE invocation_id=?",
+                                 [(invocation_id,) for invocation_id in pending_writes])
             self._db.execute("UPDATE invocations SET state='cancelled' WHERE state='pending'")
             self._db.execute("UPDATE invocations SET state='unknown' WHERE state='dispatched'")
             self._db.execute("""UPDATE devices SET generation=generation + (instance_id IS NOT NULL),

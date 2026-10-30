@@ -692,6 +692,16 @@ class WriteJournalTests(JournalTests):
         self.ready(instance="instance-2")
         self.assertIsNone(self.next())
 
+    def test_reinicio_pendiente_sin_entregar_deja_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **WRITE)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+
     def test_write_valida_argumentos_y_salida(self):
         self.ready()
         broken = json.loads(json.dumps(WRITE))

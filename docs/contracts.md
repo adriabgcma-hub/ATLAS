@@ -192,6 +192,27 @@ expone al modelo `hefesto_echo` (asíncrono), `hefesto_list_dir` y
 `hefesto_write_file` (`{path, content, mode}`) y `hefesto_rename`;
 `hefesto.file_info` no está en el catálogo.
 
+Rutas del protocolo (cuerpo exacto, sin campos extra):
+
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 3` | Respuesta |
+| --- | --- | --- | --- |
+| GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
+| POST `/v1/hefesto/register` | device | `instanceId` | estado |
+| POST `/v1/hefesto/heartbeat` | device | `instanceId` | estado |
+| POST `/v1/hefesto/control` | ambos | `action: resume/abort`, `expectedGeneration` | estado |
+| POST `/v1/hefesto/submit` | controller | `submissionId`, `requestId`, `sessionId`, `taskId`, `toolId`, `arguments` | `{invocationId, state}` |
+| POST `/v1/hefesto/next` | device | `instanceId`, `generation` | `{invocation}` o `null` |
+| POST `/v1/hefesto/result` | device | `instanceId`, `generation`, `invocationId`, `output` | `{invocationId, state}` |
+| POST `/v1/hefesto/outcome` | controller | `invocationId` | `{invocationId, state, output|null}` |
+
+| `toolId` | `arguments` | `output` |
+| --- | --- | --- |
+| `hefesto.echo` | `{text}` ≤256 B | `{text}` |
+| `hefesto.list_dir` / `hefesto.read_file` | `{path}` | `{text}` |
+| `hefesto.write_file` | `{path, content, expectedHash\|null}` | `{text}` resumen |
+| `hefesto.rename` | `{from, to}` | `{text}` resumen |
+| `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
+
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
 `{invocationId}` → `{protocolVersion, invocationId, state, output|null}`.
 Lectura pura del journal. `output` es una unión validada por herramienta:
@@ -206,8 +227,9 @@ type HefestoOutput =
 
 `hefesto_write_file` recibe `{path, content, mode}` (`create` falla si el destino
 existe; `overwrite` lo reemplaza) y el relay inyecta en el journal el
-`expectedHash` planificado —el sha256 actual o `null` para crear—; el modelo nunca
-maneja hashes. `hefesto_rename` recibe `{from, to}` y no pisa un destino existente.
+`expectedHash` planificado —el sha256 actual o `null` para crear—; el modelo no
+elige ni aporta ese `expectedHash` (solo recibe un sha256 corto de 12 hex en el
+resumen de éxito). `hefesto_rename` recibe `{from, to}` y no pisa un destino existente.
 `hefesto.file_info` es una invocación normal pero no visible al modelo: responde
 `{exists, size, sha256}` o `{text}` cuando rechaza la ruta o el archivo. Crear,
 sobrescribir y mover piden confirmación por operación con la tarjeta del plan; el
@@ -233,9 +255,11 @@ Resúmenes de resultado: `Escrito «<path>» (<N> B, sha256 <12 hex>)` y
 `Mover «from» → «to» (N B, sha256 <12 hex>…)`.
 
 El contenido nunca se persiste en sqlite: la fila guarda el envío redactado con
-`contentBytes` y `contentSha256`, y el texto vive solo en memoria del relay para
-entregarlo al dispositivo. Si el proceso se reinicia antes de la entrega, la
-invocación queda `unknown` y no se reenvía.
+`contentBytes` y `contentSha256`, y el texto vive en memoria del relay para
+entregarlo al dispositivo; el ejecutor del dispositivo también conserva en
+memoria las invocaciones completadas (con su contenido) para deduplicar
+entregas y responder a un ACK perdido. Si el proceso se reinicia antes de la
+entrega, la invocación queda `unknown` y no se reenvía.
 
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):

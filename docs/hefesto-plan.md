@@ -100,7 +100,7 @@ Precedencia: prohibición > autorización individual > plan > trivial.
 | --- | --- |
 | Información del sistema, multimedia reversible, abrir apps | Trivial por adaptador |
 | Cierre normal de app | Trivial, sin descartar cambios ni aceptar diálogos de guardado |
-| Crear archivo en raíz autorizada | Trivial, creación exclusiva sin truncar destinos |
+| Crear archivo en raíz autorizada | Plan exacto, creación exclusiva sin truncar destinos |
 | Sobrescribir/mover/renombrar existente, también en zona propia | Plan exacto |
 | Borrado, cierre forzado, matar procesos del usuario | Individual, identidad revalidada |
 | Capturas, accesibilidad, comunicación externa | Individual y consentimiento de datos |
@@ -152,7 +152,8 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
 exclusiva y un sha256 de 64 hex minúscula sobrescribe solo si el archivo sigue
-igual. El modelo solo elige `mode` (`create`/`overwrite`); nunca ve ni aporta hashes.
+igual. El modelo solo elige `mode` (`create`/`overwrite`); no ve ni aporta el
+`expectedHash` del plan (recibe un sha256 corto de 12 hex en el resumen de éxito).
 `content` es texto UTF-8 ≤16 384 bytes sin NUL.
 
 Estado: `{protocolVersion, deviceId, instanceId: string|null, generation,
@@ -200,12 +201,14 @@ del origen, sin pisar y solo dentro del mismo volumen. Los resúmenes
   Cambiar control incrementa generación. Abortar cancela pendientes y marca una
   acción despachada como `unknown` si no se puede confirmar su efecto.
 - Submit requiere dispositivo vivo, no suspendido y libre; TTL de invocación 15 s
-  (eco). No hay cola para dispositivos ausentes, ni encargos para futuros arranques.
+  (eco, lectura y escritura). No hay cola para dispositivos ausentes, ni encargos
+  para futuros arranques.
 - `submissionId` es clave de idempotencia duradera por dispositivo: repetir el mismo
   contenido devuelve la misma invocación/estado; cambiarlo produce conflicto.
 - Estados persistidos en SQLite: `pending`, `dispatched`, `succeeded`, `cancelled`,
-  `expired`, `unknown`. Reiniciar cancela pendientes y convierte despachadas a
-  `unknown`. Nunca reintentar automáticamente un efecto de resultado desconocido.
+  `expired`, `unknown`. Reiniciar cancela los pendientes de eco/lectura, marca
+  `unknown` las escrituras pendientes (su contenido no se entregó) y también las
+  despachadas. Nunca reintentar automáticamente un efecto de resultado desconocido.
 - `next` puede repetir la misma entrega mientras es válida; Rust conserva el resultado
   por ID y rechaza argumentos modificados. Una entrega repetida no vuelve a ejecutar.
 - Resultados repetidos idénticos son idempotentes; diferentes, de otra instancia,
@@ -243,7 +246,8 @@ del origen, sin pisar y solo dentro del mismo volumen. Los resúmenes
    exacto con `expectedHash` (control optimista), creación exclusiva con
    `hard_link`, sobrescritura atómica con `fsync` + `rename` conservando el modo,
    movimiento sin pisar y solo en el mismo volumen, contenido nunca persistido
-   (solo en memoria del relay, auditoría sin contenido) y errores estables.
+   (en memoria del relay y en la del ejecutor del dispositivo para deduplicar,
+   auditoría sin contenido) y errores estables.
    Queda fuera de esta puerta el **borrado**, que tendrá su propio corte con
    confirmación individual e identidad revalidada; tampoco incluye `chmod`/
    propietarios, creación de directorios ni enlaces.
