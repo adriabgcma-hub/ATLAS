@@ -128,11 +128,16 @@ pequeños) y reorganizar archivos existentes dentro de lo autorizado.
   destino existente para escritura.
 - **Sobrescribir**: solo archivo regular no enlace; se recalcula sha256 del actual y
   se compara con `expectedHash` (si no coincide → «el archivo cambió desde la
-  confirmación», sin tocar nada); temporal + `fsync` + `rename` atómico sobre el
-  destino.
+  confirmación», sin tocar nada); temporal + `fsync`; antes del `rename` atómico
+  sobre el destino el temporal recibe el modo del archivo original
+  (`set_permissions` con los permisos del destino), así sobrescribir conserva el
+  modo (un archivo 0600 sigue 0600).
 - **Mover/renombrar**: origen regular no enlace, destino inexistente, ambos padres en
-  raíces; `std::fs::rename`; si cruza volúmenes (`EXDEV`) → «no se puede mover entre
-  volúmenes».
+  raíces; publicación sin pisar con `std::fs::hard_link(source, destino)`, que solo
+  tiene éxito si el destino no existe (`AlreadyExists` → «el destino ya existe»), y
+  después `std::fs::remove_file(source)`; si falla el borrado del origen se deshace
+  el enlace del destino y la operación falla con «no se pudo mover». Cruzar
+  volúmenes (`EXDEV`, errno 18) → «no se puede mover entre volúmenes».
 - **file_info**: archivo regular no enlace; tamaño; sha256 en streaming con tope de
   64 MiB («demasiado grande para planificar»).
 - Errores se devuelven como texto al modelo (sin rutas del sistema ni secretos),
