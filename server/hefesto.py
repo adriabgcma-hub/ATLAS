@@ -55,7 +55,7 @@ class _Rejected(Exception):
 
 
 def _error(code):
-    return {"protocolVersion": 1, "error": code}
+    return {"protocolVersion": 2, "error": code}
 
 
 def _pairs(pairs):
@@ -116,7 +116,7 @@ def _validate(method, path, raw):
     body = _decode(raw)
     if type(body) is not dict or set(body) != _FIELDS[operation] | {"protocolVersion"}:
         raise _Rejected("invalid_fields")
-    if type(body["protocolVersion"]) is not int or body["protocolVersion"] != 1:
+    if type(body["protocolVersion"]) is not int or body["protocolVersion"] != 2:
         raise _Rejected("invalid_version")
     for key in ("instanceId", "submissionId", "requestId", "sessionId", "taskId", "invocationId"):
         if key in body and not _is_id(body[key]):
@@ -260,14 +260,14 @@ class Journal:
 
     def _status(self, device_id):
         device, active = self._device(device_id), self._active(device_id)
-        return {"protocolVersion": 1, "deviceId": device_id, "instanceId": device["instance_id"],
+        return {"protocolVersion": 2, "deviceId": device_id, "instanceId": device["instance_id"],
                 "generation": device["generation"], "suspended": bool(device["suspended"]),
                 "online": device["instance_id"] is not None,
                 "activeInvocationId": active["invocation_id"] if active else None}
 
     @staticmethod
     def _ack(invocation):
-        return {"protocolVersion": 1, "invocationId": invocation["invocation_id"], "state": invocation["state"]}
+        return {"protocolVersion": 2, "invocationId": invocation["invocation_id"], "state": invocation["state"]}
 
     @staticmethod
     def _live(device, instance=None, generation=None, *, ready=False):
@@ -334,14 +334,14 @@ class Journal:
                               device["generation"], data["requestId"], data["sessionId"], data["taskId"],
                               data["arguments"]["text"], int(wall * 1000) + INVOCATION_SECONDS * 1000,
                               now + INVOCATION_SECONDS))
-            return {"protocolVersion": 1, "invocationId": invocation_id, "state": "pending"}
+            return {"protocolVersion": 2, "invocationId": invocation_id, "state": "pending"}
         if operation == "outcome":
             invocation = self._db.execute(
                 "SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
                 (data["invocationId"], device_id)).fetchone()
             if invocation is None:
                 raise _Rejected("invocation_not_found", 404)
-            return {"protocolVersion": 1, "invocationId": invocation["invocation_id"],
+            return {"protocolVersion": 2, "invocationId": invocation["invocation_id"],
                     "state": invocation["state"], "outputText": invocation["output_text"]}
         if operation == "next":
             self._live(device, data["instanceId"], data["generation"], ready=True)
@@ -350,13 +350,13 @@ class Journal:
             if active is not None:
                 self._db.execute("UPDATE invocations SET state='dispatched' WHERE invocation_id=?",
                                  (active["invocation_id"],))
-                invocation = {"protocolVersion": 1, "invocationId": active["invocation_id"],
+                invocation = {"protocolVersion": 2, "invocationId": active["invocation_id"],
                               "requestId": active["request_id"], "sessionId": active["session_id"],
                               "taskId": active["task_id"], "deviceId": device_id,
                               "instanceId": active["instance_id"], "generation": active["generation"],
                               "toolId": "hefesto.echo", "arguments": {"text": active["text"]},
                               "expiresAtUnixMs": active["expires_ms"]}
-            return {"protocolVersion": 1, "invocation": invocation}
+            return {"protocolVersion": 2, "invocation": invocation}
         invocation = self._db.execute("SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
                                       (data["invocationId"], device_id)).fetchone()
         if invocation is None:
@@ -377,7 +377,7 @@ class Journal:
         self._live(device, data["instanceId"], data["generation"], ready=True)
         self._db.execute("UPDATE invocations SET state='succeeded', output_text=? WHERE invocation_id=?",
                          (data["output"]["text"], invocation["invocation_id"]))
-        return {"protocolVersion": 1, "invocationId": invocation["invocation_id"], "state": "succeeded"}
+        return {"protocolVersion": 2, "invocationId": invocation["invocation_id"], "state": "succeeded"}
 
 
 class _Handler(BaseHTTPRequestHandler):

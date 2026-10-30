@@ -49,7 +49,7 @@ pub struct ProtocolVersion;
 impl TryFrom<u64> for ProtocolVersion {
     type Error = Error;
     fn try_from(value: u64) -> Result<Self> {
-        if value == 1 {
+        if value == 2 {
             Ok(Self)
         } else {
             Err(Error::InvalidVersion)
@@ -59,7 +59,7 @@ impl TryFrom<u64> for ProtocolVersion {
 
 impl From<ProtocolVersion> for u64 {
     fn from(_: ProtocolVersion) -> Self {
-        1
+        2
     }
 }
 

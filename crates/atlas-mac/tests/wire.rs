@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 fn invocation() -> Value {
     json!({
-        "protocolVersion": 1, "invocationId": "invoke_1", "requestId": "request_1",
+        "protocolVersion": 2, "invocationId": "invoke_1", "requestId": "request_1",
         "sessionId": "session_1", "taskId": "task_1", "deviceId": "device_1",
         "instanceId": "instance_1", "generation": 2, "toolId": "hefesto.echo",
         "arguments": {"text": "hello"}, "expiresAtUnixMs": 1700000015000u64
@@ -13,7 +13,7 @@ fn invocation() -> Value {
 
 fn status() -> Value {
     json!({
-        "protocolVersion": 1, "deviceId": "device_1", "instanceId": "instance_1",
+        "protocolVersion": 2, "deviceId": "device_1", "instanceId": "instance_1",
         "generation": 2, "suspended": false, "online": true, "activeInvocationId": null
     })
 }
@@ -34,7 +34,7 @@ fn check_strict<T: DeserializeOwned>(value: Value) {
         json!(true),
         json!(false),
         json!(0),
-        json!(2),
+        json!(1),
         json!(-1),
         json!(1.0),
         json!("1"),
@@ -53,26 +53,26 @@ fn check_strict<T: DeserializeOwned>(value: Value) {
 
 #[test]
 fn every_dto_requires_exact_version_fields_and_types() {
-    check_strict::<RegisterRequest>(json!({"protocolVersion":1,"instanceId":"i"}));
-    check_strict::<HeartbeatRequest>(json!({"protocolVersion":1,"instanceId":"i"}));
+    check_strict::<RegisterRequest>(json!({"protocolVersion":2,"instanceId":"i"}));
+    check_strict::<HeartbeatRequest>(json!({"protocolVersion":2,"instanceId":"i"}));
     check_strict::<ControlRequest>(
-        json!({"protocolVersion":1,"action":"abort","expectedGeneration":2}),
+        json!({"protocolVersion":2,"action":"abort","expectedGeneration":2}),
     );
     check_strict::<SubmitRequest>(
-        json!({"protocolVersion":1,"submissionId":"sub","requestId":"r","sessionId":"s","taskId":"t","toolId":"hefesto.echo","arguments":{"text":"hi"}}),
+        json!({"protocolVersion":2,"submissionId":"sub","requestId":"r","sessionId":"s","taskId":"t","toolId":"hefesto.echo","arguments":{"text":"hi"}}),
     );
-    check_strict::<NextRequest>(json!({"protocolVersion":1,"instanceId":"i","generation":2}));
+    check_strict::<NextRequest>(json!({"protocolVersion":2,"instanceId":"i","generation":2}));
     check_strict::<ResultRequest>(
-        json!({"protocolVersion":1,"instanceId":"i","generation":2,"invocationId":"v","output":{"text":"hi"}}),
+        json!({"protocolVersion":2,"instanceId":"i","generation":2,"invocationId":"v","output":{"text":"hi"}}),
     );
     check_strict::<Status>(status());
     check_strict::<Invocation>(invocation());
-    check_strict::<NextResponse>(json!({"protocolVersion":1,"invocation":null}));
-    check_strict::<NextResponse>(json!({"protocolVersion":1,"invocation":invocation()}));
+    check_strict::<NextResponse>(json!({"protocolVersion":2,"invocation":null}));
+    check_strict::<NextResponse>(json!({"protocolVersion":2,"invocation":invocation()}));
     check_strict::<InvocationResponse>(
-        json!({"protocolVersion":1,"invocationId":"v","state":"pending"}),
+        json!({"protocolVersion":2,"invocationId":"v","state":"pending"}),
     );
-    check_strict::<ErrorResponse>(json!({"protocolVersion":1,"error":"access_denied"}));
+    check_strict::<ErrorResponse>(json!({"protocolVersion":2,"error":"access_denied"}));
 }
 
 #[test]
@@ -156,15 +156,15 @@ fn no_post_accepts_or_serializes_device_identity() {
         extra["deviceId"] = json!("device_1");
         assert_rejected::<T>(extra);
     }
-    check::<RegisterRequest>(json!({"protocolVersion":1,"instanceId":"i"}));
-    check::<HeartbeatRequest>(json!({"protocolVersion":1,"instanceId":"i"}));
-    check::<ControlRequest>(json!({"protocolVersion":1,"action":"resume","expectedGeneration":2}));
+    check::<RegisterRequest>(json!({"protocolVersion":2,"instanceId":"i"}));
+    check::<HeartbeatRequest>(json!({"protocolVersion":2,"instanceId":"i"}));
+    check::<ControlRequest>(json!({"protocolVersion":2,"action":"resume","expectedGeneration":2}));
     check::<SubmitRequest>(
-        json!({"protocolVersion":1,"submissionId":"sub","requestId":"r","sessionId":"s","taskId":"t","toolId":"hefesto.echo","arguments":{"text":"hi"}}),
+        json!({"protocolVersion":2,"submissionId":"sub","requestId":"r","sessionId":"s","taskId":"t","toolId":"hefesto.echo","arguments":{"text":"hi"}}),
     );
-    check::<NextRequest>(json!({"protocolVersion":1,"instanceId":"i","generation":2}));
+    check::<NextRequest>(json!({"protocolVersion":2,"instanceId":"i","generation":2}));
     check::<ResultRequest>(
-        json!({"protocolVersion":1,"instanceId":"i","generation":2,"invocationId":"v","output":{"text":"hi"}}),
+        json!({"protocolVersion":2,"instanceId":"i","generation":2,"invocationId":"v","output":{"text":"hi"}}),
     );
 }
 
@@ -188,14 +188,14 @@ fn closed_policy_cannot_be_overridden_by_metadata() {
     }
     for action in ["Resume", "stop", "shell"] {
         assert_rejected::<ControlRequest>(
-            json!({"protocolVersion":1,"action":action,"expectedGeneration":1}),
+            json!({"protocolVersion":2,"action":action,"expectedGeneration":1}),
         );
     }
 }
 
 #[test]
 fn status_validates_semantics_and_required_nulls() {
-    let offline = json!({"protocolVersion":1,"deviceId":"d","instanceId":null,"generation":0,"suspended":true,"online":false,"activeInvocationId":null});
+    let offline = json!({"protocolVersion":2,"deviceId":"d","instanceId":null,"generation":0,"suspended":true,"online":false,"activeInvocationId":null});
     assert!(serde_json::from_value::<Status>(offline.clone()).is_ok());
     let mut invalid = status();
     invalid["generation"] = json!(0);
@@ -231,32 +231,32 @@ fn persisted_states_are_closed_and_nested_messages_are_strict() {
         "unknown",
     ] {
         assert!(serde_json::from_value::<InvocationResponse>(
-            json!({"protocolVersion":1,"invocationId":"v","state":state})
+            json!({"protocolVersion":2,"invocationId":"v","state":state})
         )
         .is_ok());
     }
     assert_rejected::<InvocationResponse>(
-        json!({"protocolVersion":1,"invocationId":"v","state":"success"}),
+        json!({"protocolVersion":2,"invocationId":"v","state":"success"}),
     );
     let mut nested = invocation();
     nested["arguments"]["permission"] = json!("yes");
-    assert_rejected::<NextResponse>(json!({"protocolVersion":1,"invocation":nested}));
+    assert_rejected::<NextResponse>(json!({"protocolVersion":2,"invocation":nested}));
     assert_rejected::<ResultRequest>(
-        json!({"protocolVersion":1,"instanceId":"i","generation":1,"invocationId":"v","output":{"text":"hi","secret":"no"}}),
+        json!({"protocolVersion":2,"instanceId":"i","generation":1,"invocationId":"v","output":{"text":"hi","secret":"no"}}),
     );
 }
 
 #[test]
 fn duplicate_keys_trailing_data_and_oversized_json_are_rejected() {
     for bytes in [
-        br#"{"protocolVersion":1,"protocolVersion":1,"instanceId":"i"}"#.as_slice(),
-        br#"{"protocolVersion":1,"instanceId":"i","instanceId":"j"}"#,
-        br#"{"protocolVersion":1,"instanceId":"i"} {}"#,
+        br#"{"protocolVersion":2,"protocolVersion":2,"instanceId":"i"}"#.as_slice(),
+        br#"{"protocolVersion":2,"instanceId":"i","instanceId":"j"}"#,
+        br#"{"protocolVersion":2,"instanceId":"i"} {}"#,
         b"\xff",
     ] {
         assert_eq!(decode::<RegisterRequest>(bytes), Err(Error::InvalidJson));
     }
-    let body = br#"{"protocolVersion":1,"instanceId":"i"}"#;
+    let body = br#"{"protocolVersion":2,"instanceId":"i"}"#;
     let mut exact = body.to_vec();
     exact.resize(MAX_BODY_BYTES, b' ');
     assert!(decode::<RegisterRequest>(&exact).is_ok());

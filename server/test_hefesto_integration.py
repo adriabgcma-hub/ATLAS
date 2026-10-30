@@ -214,7 +214,7 @@ class ExistingHttpBoundaryTests(unittest.TestCase):
                         conn = http.client.HTTPConnection(*server.server_address, timeout=3)
                         try:
                             conn.request("POST", f"/v1/hefesto/{route}",
-                                         body='{"protocolVersion":1}',
+                                         body='{"protocolVersion":2}',
                                          headers={"Content-Type": "application/json"})
                             response = conn.getresponse()
                             self.assertEqual(response.status, 404)

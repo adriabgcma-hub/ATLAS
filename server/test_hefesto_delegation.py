@@ -27,18 +27,18 @@ class FakeJournal:
         if operation == "outcome":
             entry = self.outcomes.get(body["invocationId"])
             if entry is None:
-                return (404, {"protocolVersion": 1, "error": "invocation_not_found"})
-            return (200, {"protocolVersion": 1,
+                return (404, {"protocolVersion": 2, "error": "invocation_not_found"})
+            return (200, {"protocolVersion": 2,
                           "invocationId": body["invocationId"], **entry})
-        return (404, {"protocolVersion": 1, "error": "not_found"})
+        return (404, {"protocolVersion": 2, "error": "not_found"})
 
     def accept(self, invocation_id="inv-1"):
-        self.submit_results.append((200, {"protocolVersion": 1,
+        self.submit_results.append((200, {"protocolVersion": 2,
                                           "invocationId": invocation_id,
                                           "state": "pending"}))
 
     def reject(self, code):
-        self.submit_results.append((409, {"protocolVersion": 1, "error": code}))
+        self.submit_results.append((409, {"protocolVersion": 2, "error": code}))
 
 
 class CancellingJournal(FakeJournal):
@@ -64,19 +64,19 @@ class ControlJournal:
     def dispatch(self, peer, method, path, raw=b""):
         operation = path.rsplit("/", 1)[-1]
         if operation == "status":
-            return (200, {"protocolVersion": 1, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 2, "deviceId": peer.device_id,
                           "generation": self.generation,
                           "suspended": self.suspended})
         if operation == "control":
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             if body["expectedGeneration"] != self.generation:
-                return (409, {"protocolVersion": 1, "error": "stale_generation"})
+                return (409, {"protocolVersion": 2, "error": "stale_generation"})
             self.generation += 1
             self.suspended = True
-            return (200, {"protocolVersion": 1, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 2, "deviceId": peer.device_id,
                           "generation": self.generation, "suspended": True})
-        return (404, {"protocolVersion": 1, "error": "not_found"})
+        return (404, {"protocolVersion": 2, "error": "not_found"})
 
 
 class RacedControlJournal(ControlJournal):
@@ -92,7 +92,7 @@ class RacedControlJournal(ControlJournal):
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             self.generation += 1
-            return (409, {"protocolVersion": 1, "error": "stale_generation"})
+            return (409, {"protocolVersion": 2, "error": "stale_generation"})
         return super().dispatch(peer, method, path, raw)
 
 

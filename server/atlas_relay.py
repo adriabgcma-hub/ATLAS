@@ -833,7 +833,7 @@ class Brain:
         if len(text.encode("utf-8")) > 256:
             return "delegación rechazada: texto demasiado largo (máx. 256 bytes)"
         submission = {
-            "protocolVersion": 1,
+            "protocolVersion": 2,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -956,7 +956,7 @@ class Brain:
                 return {"ok": False, "error": body.get("error", "status_failed")}
             status, body = journal.dispatch(
                 peer, "POST", "/v1/hefesto/control",
-                json.dumps({"protocolVersion": 1, "action": "abort",
+                json.dumps({"protocolVersion": 2, "action": "abort",
                             "expectedGeneration": body["generation"]}).encode("utf-8"))
             if status == 200:
                 return {"ok": True, "suspended": True}
@@ -981,7 +981,7 @@ class Brain:
         for entry in entries:
             status, response = journal.dispatch(
                 peer, "POST", "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 1,
+                json.dumps({"protocolVersion": 2,
                             "invocationId": entry["invocation_id"]}).encode("utf-8"))
             if status != 200:
                 dlog(self, "HEFESTO",
