@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from types import MappingProxyType
-MAX_BODY_BYTES = 8192
+MAX_BODY_BYTES = 128 * 1024
 LEASE_SECONDS = 15
 INVOCATION_SECONDS = 15
 CONNECTION_TIMEOUT = 3.0
@@ -450,7 +450,7 @@ class _Handler(BaseHTTPRequestHandler):
             length = self.headers.get("Content-Length")
             if length is not None and (not re.fullmatch(r"[0-9]+", length, re.ASCII)):
                 raise _Rejected("invalid_http_framing")
-            if length is not None and (len(length) > 5 or int(length) > MAX_BODY_BYTES):
+            if length is not None and (len(length) > 6 or int(length) > MAX_BODY_BYTES):
                 raise _Rejected("body_too_large", 413)
             if self.command == "GET":
                 if length is not None and int(length) != 0:

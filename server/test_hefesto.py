@@ -547,9 +547,11 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(self.journal.dispatch(CONTROLLER, "POST", PREFIX + "submit", raw)[1]["error"], "invalid_json")
         for raw in (b"[]", b"null", b"true", b'"hello"', b"1", b"{}"):
             self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", raw)[1]["error"], "invalid_fields")
-        self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", b"x" * 8193)[0], 413)
+        self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register",
+                                               b"x" * (hefesto.MAX_BODY_BYTES + 1))[0], 413)
         raw = encoded(instanceId="i")
-        self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", raw + b" " * (8192 - len(raw)))[0], 200)
+        self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register",
+                                               raw + b" " * (hefesto.MAX_BODY_BYTES - len(raw)))[0], 200)
         self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", {})[1]["error"], "invalid_body")
 
     def test_paths_methods_status_body_and_no_authority_from_json(self):
@@ -829,6 +831,24 @@ class TLSTests(unittest.TestCase):
         self.assertEqual(success["invocationId"], ack["invocationId"])
         self.assertEqual(self.request("device", "result", fields), (200, success))
 
+    def test_large_read_result_body_passes_listener_http_layer(self):
+        status, state = self.request("device", "register", {"instanceId": "tls-instance"})
+        self.assertEqual(status, 200)
+        status, state = self.request("controller", "control",
+                                     {"action": "resume", "expectedGeneration": state["generation"]})
+        self.assertEqual(status, 200)
+        status, ack = self.request("controller", "submit",
+                                   submission(toolId="hefesto.read_file",
+                                              arguments={"path": "/Users/x/Documents/a.txt"}))
+        self.assertEqual(status, 200)
+        status, delivery = self.request("device", "next",
+                                        {"instanceId": "tls-instance", "generation": state["generation"]})
+        self.assertEqual(status, 200)
+        fields = JournalTests.result_fields(delivery["invocation"], output={"text": "x" * 16384})
+        status, success = self.request("device", "result", fields)
+        self.assertEqual((status, success["state"]), (200, "succeeded"))
+        self.assertEqual(success["invocationId"], ack["invocationId"])
+
     def test_plain_http_never_reaches_journal(self):
         with socket.create_connection(self.address, timeout=5) as connection:
             connection.sendall(b"GET /v1/hefesto/status HTTP/1.1\r\nHost: localhost\r\n\r\n")
@@ -936,7 +956,8 @@ class TLSTests(unittest.TestCase):
 
     def test_body_limit_content_type_length_paths_and_json_over_tls(self):
         base = b"POST /v1/hefesto/register HTTP/1.1\r\nHost: localhost\r\n"
-        for headers, body, expected in ((b"Content-Length: 8193\r\n", b"", 413),
+        oversized = f"Content-Length: {hefesto.MAX_BODY_BYTES + 1}\r\n".encode()
+        for headers, body, expected in ((oversized, b"", 413),
                                         (b"Content-Type: application/json\r\n", b"", 411),
                                         (b"Content-Length: 2\r\nContent-Type: text/plain\r\n", b"{}", 415),
                                         (b"Content-Length: 2\r\nContent-Type: application/json; charset=latin1\r\n", b"{}", 415)):
