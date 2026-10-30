@@ -454,7 +454,9 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
      Atlas (las lecturas no generan mensaje «Hefesto:» aparte).
   4. **Registro IPv4**: el cliente Rust del dispositivo resuelve el nombre y
      ordena IPv4 primero (`resolve_to_addrs`); el link-local IPv6 de mDNS
-     agotaba el timeout y el dispositivo no llegaba a registrarse.
+     agotaba el timeout y el dispositivo no llegaba a registrarse. La
+     resolución reintenta hasta tres veces y TLS/resolución se construyen en
+     el hilo de Hefesto, fuera del arranque de la ventana (`e0eb90c`).
   5. **Prueba en vivo**: tarjeta mostrada, respuesta con `LUNA-42` leída de
      `~/Documents/atlas-prueba-lectura.txt`, y `/etc/hosts` rechazado por
      estar fuera de las raíces (sin confirmación).
