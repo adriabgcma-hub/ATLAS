@@ -1,5 +1,5 @@
 //! Device runtime: keeps the Mac registered, renews the lease and executes
-//! invocations (echo plus the read-only tools).
+//! invocations (echo plus the file tools).
 //!
 //! The executor owns the protocol state machine; this module owns the pacing
 //! (heartbeat, polling, retries) and exposes a snapshot for the UI. It never
@@ -192,9 +192,10 @@ impl Session {
             Err(Error::InvocationExpired) => return Ok(None),
             Err(error) => return Err(classify(error)),
         };
+        // Only echo text is surfaced to the UI; write content never reaches it.
         let badge = match &invocation.arguments {
             ToolArguments::Echo(payload) => Some(payload.text.as_str().to_string()),
-            ToolArguments::Path(_) | ToolArguments::Write(_) | ToolArguments::Rename(_) => None,
+            _ => None,
         };
         transport.result(&result).map_err(classify)?;
         Ok(badge)

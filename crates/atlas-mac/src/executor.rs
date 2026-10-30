@@ -323,17 +323,39 @@ impl Executor {
             .filter(|remaining| *remaining > 0)
             .ok_or(Error::InvocationExpired)?;
         let deadline = Deadline::from_start(now, remaining.min(LEASE_MILLIS))?;
-        let text = match (&invocation.tool_id, &invocation.arguments) {
-            (ToolId::Echo, ToolArguments::Echo(payload)) => payload.text.as_str().to_string(),
+        let output = match (&invocation.tool_id, &invocation.arguments) {
+            (ToolId::Echo, ToolArguments::Echo(payload)) => {
+                OutputPayload::text(payload.text.as_str())?
+            }
             (ToolId::ListDir, ToolArguments::Path(payload)) => {
-                crate::tools::list_dir(&self.roots, payload.path.as_str())
+                OutputPayload::text(crate::tools::list_dir(&self.roots, payload.path.as_str()))?
             }
             (ToolId::ReadFile, ToolArguments::Path(payload)) => {
-                crate::tools::read_file(&self.roots, payload.path.as_str())
+                OutputPayload::text(crate::tools::read_file(&self.roots, payload.path.as_str()))?
+            }
+            (ToolId::WriteFile, ToolArguments::Write(payload)) => {
+                OutputPayload::text(crate::tools::write_file(
+                    &self.roots,
+                    payload.path.as_str(),
+                    payload.content.as_str(),
+                    payload.expected_hash.as_ref().map(|hash| hash.as_str()),
+                ))?
+            }
+            (ToolId::Rename, ToolArguments::Rename(payload)) => OutputPayload::text(
+                crate::tools::rename(&self.roots, payload.from.as_str(), payload.to.as_str()),
+            )?,
+            (ToolId::FileInfo, ToolArguments::Path(payload)) => {
+                match crate::tools::file_info(&self.roots, payload.path.as_str()) {
+                    Ok(info) => OutputPayload::Info(FileInfoOutput {
+                        exists: info.exists,
+                        size: info.size,
+                        sha256: info.sha256.as_deref().map(ContentHash::new).transpose()?,
+                    }),
+                    Err(text) => OutputPayload::text(text)?,
+                }
             }
             _ => return Err(Error::InvalidArguments),
         };
-        let output = OutputPayload::text(text)?;
         let result = ResultRequest {
             protocol_version: ProtocolVersion,
             instance_id: self.instance_id.clone(),

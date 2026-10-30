@@ -781,6 +781,65 @@ fn dispatcher_routes_read_tools_and_rejects_mismatches() {
 }
 
 #[test]
+fn dispatcher_ejecuta_escritura_renombrado_e_info() {
+    let dir = std::env::temp_dir().join(format!(
+        "atlas-dispatch-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut executor = Executor::new(id("device"), id("instance"), Roots::new(vec![dir.clone()]));
+    let attempt = executor.prepare_registration(at(0)).unwrap();
+    executor
+        .acknowledge_registration(attempt, &status(1, true), at(0))
+        .unwrap();
+    let attempt = executor.prepare_resume(at(1)).unwrap();
+    executor
+        .acknowledge_resume(attempt, &status(2, false), at(2))
+        .unwrap();
+
+    let target = dir.join("n.txt");
+    let mut task = invocation();
+    task.generation = generation(2);
+    task.tool_id = ToolId::WriteFile;
+    task.arguments = ToolArguments::Write(WritePayload {
+        path: ToolPath::new(target.to_str().unwrap()).unwrap(),
+        content: FileText::new("hola").unwrap(),
+        expected_hash: None,
+    });
+    let result = executor.execute(&task, at(3)).unwrap();
+    assert!(result.output.text_value().unwrap().starts_with("Escrito «"));
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "hola");
+
+    let renamed = dir.join("m.txt");
+    let mut task = invocation();
+    task.generation = generation(2);
+    task.invocation_id = id("invocation-2");
+    task.tool_id = ToolId::Rename;
+    task.arguments = ToolArguments::Rename(RenamePayload {
+        from: ToolPath::new(target.to_str().unwrap()).unwrap(),
+        to: ToolPath::new(renamed.to_str().unwrap()).unwrap(),
+    });
+    let result = executor.execute(&task, at(4)).unwrap();
+    assert!(result.output.text_value().unwrap().starts_with("Movido «"));
+    assert!(renamed.exists());
+
+    let mut task = invocation();
+    task.generation = generation(2);
+    task.invocation_id = id("invocation-3");
+    task.tool_id = ToolId::FileInfo;
+    task.arguments = ToolArguments::Path(PathPayload {
+        path: ToolPath::new(renamed.to_str().unwrap()).unwrap(),
+    });
+    let result = executor.execute(&task, at(5)).unwrap();
+    assert!(matches!(result.output, OutputPayload::Info(ref info) if info.exists));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn restart_uses_new_instance_and_never_accepts_old_delivery() {
     let mut executor = Executor::new(
         id("device"),
