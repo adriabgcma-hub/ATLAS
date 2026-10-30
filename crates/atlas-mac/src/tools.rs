@@ -263,6 +263,10 @@ pub fn write_file(roots: &Roots, path: &str, content: &str, expected_hash: Optio
         Ok(temp) => temp,
         Err(message) => return message,
     };
+    if std::fs::set_permissions(&temp, meta.permissions()).is_err() {
+        let _ = std::fs::remove_file(&temp);
+        return "no se pudo escribir".to_string();
+    }
     match std::fs::rename(&temp, &target) {
         Ok(()) => format!(
             "Escrito «{path}» ({} B, sha256 {})",
@@ -300,12 +304,21 @@ pub fn rename(roots: &Roots, from: &str, to: &str) -> String {
     if std::fs::symlink_metadata(&destination).is_ok() {
         return "el destino ya existe".to_string();
     }
-    match std::fs::rename(&source, &destination) {
+    if let Err(error) = std::fs::hard_link(&source, &destination) {
+        return match error.kind() {
+            std::io::ErrorKind::AlreadyExists => "el destino ya existe".to_string(),
+            _ if error.raw_os_error() == Some(18) => {
+                "no se puede mover entre volúmenes".to_string()
+            }
+            _ => "no se pudo mover".to_string(),
+        };
+    }
+    match std::fs::remove_file(&source) {
         Ok(()) => format!("Movido «{from}» → «{to}» ({} B)", meta.len()),
-        Err(error) if error.raw_os_error() == Some(18) => {
-            "no se puede mover entre volúmenes".to_string()
+        Err(_) => {
+            let _ = std::fs::remove_file(&destination);
+            "no se pudo mover".to_string()
         }
-        Err(_) => "no se pudo mover".to_string(),
     }
 }
 
@@ -512,6 +525,8 @@ mod tests {
             rename(&roots, other.to_str().unwrap(), to.to_str().unwrap()),
             "el destino ya existe"
         );
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "hola");
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "x");
         assert_eq!(
             rename(
                 &roots,
@@ -520,6 +535,23 @@ mod tests {
             ),
             "fuera de las raíces autorizadas"
         );
+    }
+
+    #[test]
+    fn sobrescribir_conserva_el_modo_del_archivo() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("mode");
+        let roots = Roots::new(vec![dir.path().to_path_buf()]);
+        let target = dir.path().join("n.txt");
+        std::fs::write(&target, "viejo").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let hash = sha256_hex(b"viejo");
+        let out = write_file(&roots, target.to_str().unwrap(), "nuevo", Some(&hash));
+        assert!(out.starts_with("Escrito «"));
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "nuevo");
     }
 
     #[test]
