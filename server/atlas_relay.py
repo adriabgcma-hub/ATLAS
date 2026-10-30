@@ -184,6 +184,46 @@ HEFESTO_TOOL = {
 }
 
 
+HEFESTO_LIST_TOOL = {
+    "id": "hefesto_list_dir",
+    "risk": "external",
+    "requiresConfirmation": True,
+    "description": ("Pide a Hefesto listar un directorio del Mac. Usa una ruta "
+                    "absoluta dentro de las raíces autorizadas (Documents, Desktop, "
+                    "Downloads, Pictures, Music, Movies). Cada listado pide "
+                    "confirmación al usuario."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string",
+                     "description": "ruta absoluta del directorio a listar"},
+        },
+        "required": ["path"],
+    },
+}
+
+HEFESTO_READ_TOOL = {
+    "id": "hefesto_read_file",
+    "risk": "external",
+    "requiresConfirmation": True,
+    "description": ("Pide a Hefesto leer un archivo de texto del Mac. Usa una ruta "
+                    "absoluta dentro de las raíces autorizadas (Documents, Desktop, "
+                    "Downloads, Pictures, Music, Movies). El contenido saldrá del Mac "
+                    "hacia el modelo, así que cada lectura pide confirmación. "
+                    "Máximo 16 KiB; los binarios se rechazan."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string",
+                     "description": "ruta absoluta del archivo a leer"},
+        },
+        "required": ["path"],
+    },
+}
+
+HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL]
+
+
 def norm_name(name: str) -> str:
     return name.strip().casefold()
 
@@ -777,7 +817,7 @@ class Brain:
     # -- herramientas ----------------------------------------------------
     def tool_defs(self) -> list[dict]:
         if self._hefesto_journal is not None and self._hefesto_device is not None:
-            return TOOL_DEFS + [HEFESTO_TOOL]
+            return TOOL_DEFS + HEFESTO_TOOLS
         return TOOL_DEFS
 
     def _tool_def(self, tool_id: str) -> dict | None:
@@ -801,6 +841,10 @@ class Brain:
         """Ejecuta una herramienta. Devuelve texto para el modelo."""
         if tool_id == "hefesto_echo":
             return self._delegate_echo(job, args)
+        if tool_id == "hefesto_list_dir":
+            return self._delegate_read("hefesto.list_dir", job, args)
+        if tool_id == "hefesto_read_file":
+            return self._delegate_read("hefesto.read_file", job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -864,6 +908,51 @@ class Brain:
         dlog(self, "HEFESTO", f"delegated invocation={invocation_id} "
                               f"request={job['request_id']} task={submission['taskId']}")
         return f"delegado a Hefesto ({invocation_id})"
+
+    def _delegate_read(self, tool_id: str, job: dict, args: dict) -> str:
+        """Lectura síncrona al dispositivo: espera el resultado y lo devuelve al modelo."""
+        journal, device_id = self._hefesto_journal, self._hefesto_device
+        if journal is None or device_id is None:
+            return "Hefesto no está disponible (desactivado)"
+        path = str(args.get("path", ""))
+        if not path.startswith("/") or "\x00" in path or len(path.encode("utf-8")) > 1024:
+            return "ruta inválida (debe ser una ruta absoluta dentro de las raíces autorizadas)"
+        submission = {
+            "protocolVersion": 2,
+            "submissionId": new_id("sub"),
+            "requestId": job["request_id"],
+            "sessionId": job["session_id"],
+            "taskId": new_id("tsk"),
+            "toolId": tool_id,
+            "arguments": {"path": path},
+        }
+        status, response = journal.dispatch(
+            hefesto.Peer("controller", device_id), "POST",
+            "/v1/hefesto/submit", json.dumps(submission).encode("utf-8"))
+        if status != 200:
+            dlog(self, "HEFESTO",
+                 f"read submit rejected error={response.get('error')} request={job['request_id']}")
+            return f"Hefesto no está disponible ({response.get('error', 'desconocido')})"
+        invocation_id = response["invocationId"]
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            with self.lock:
+                if job["request_id"] in self.cancelled:
+                    return "cancelada a mitad de turno"
+            status, outcome = journal.dispatch(
+                hefesto.Peer("controller", device_id), "POST",
+                "/v1/hefesto/outcome",
+                json.dumps({"protocolVersion": 2,
+                            "invocationId": invocation_id}).encode("utf-8"))
+            if status == 200 and outcome.get("state") in (
+                    "succeeded", "expired", "cancelled", "unknown"):
+                if outcome["state"] == "succeeded":
+                    return str(outcome.get("outputText") or "")
+                if outcome["state"] == "expired":
+                    return "Hefesto no respondió a tiempo y la lectura caducó."
+                return "La lectura se canceló."
+            time.sleep(0.5)
+        return "Hefesto no respondió a tiempo (timeout de lectura)"
 
     def _hefesto_finish(self, entry: dict, state: str,
                         output_text: str | None) -> None:
@@ -1075,6 +1164,11 @@ class Brain:
             else:
                 text = f"Calendario: {action} en {calendar}"
             return (text, "write")
+        if tool_id == "hefesto_list_dir":
+            return (f"Listar «{args.get('path', '?')}»", "external")
+        if tool_id == "hefesto_read_file":
+            return (f"Leer «{args.get('path', '?')}» — el contenido saldrá del Mac hacia el modelo",
+                    "external")
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,

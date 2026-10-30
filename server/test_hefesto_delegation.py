@@ -387,3 +387,61 @@ class RemoteControlTests(unittest.TestCase):
         brain._hefesto_device = "mac-one"
         self.assertEqual(brain.hefesto_suspend(), {"ok": True, "suspended": True})
         self.assertEqual(fake.controls, [("abort", 3), ("abort", 4)])
+
+
+class ReadFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-read-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.brain._hefesto_journal = FakeJournal()
+        self.brain._hefesto_device = "mac-one"
+
+    def test_read_file_envia_submit_con_path_y_devuelve_el_contenido(self):
+        journal = self.brain._hefesto_journal
+        journal.accept("inv-9")
+        journal.outcomes["inv-9"] = {"state": "succeeded", "outputText": "contenido"}
+        result = self.brain.execute_tool(
+            "hefesto_read_file", {"path": "/Users/x/Documents/a.txt"}, JOB)
+        self.assertEqual(result, "contenido")
+        self.assertEqual(journal.submits[0]["toolId"], "hefesto.read_file")
+        self.assertEqual(journal.submits[0]["arguments"],
+                         {"path": "/Users/x/Documents/a.txt"})
+
+    def test_list_dir_envia_submit_con_el_toolid_correcto(self):
+        journal = self.brain._hefesto_journal
+        journal.accept("inv-7")
+        journal.outcomes["inv-7"] = {"state": "succeeded", "outputText": "a.txt\nb"}
+        result = self.brain.execute_tool(
+            "hefesto_list_dir", {"path": "/Users/x/Documents"}, JOB)
+        self.assertEqual(result, "a.txt\nb")
+        self.assertEqual(journal.submits[0]["toolId"], "hefesto.list_dir")
+
+    def test_read_con_ruta_relativa_no_envia_submit(self):
+        result = self.brain.execute_tool("hefesto_read_file", {"path": "relativo"}, JOB)
+        self.assertTrue(result.startswith("ruta inválida"))
+        self.assertEqual(self.brain._hefesto_journal.submits, [])
+
+    def test_read_con_submit_rechazado_devuelve_no_disponible(self):
+        journal = self.brain._hefesto_journal
+        journal.reject("device_suspended")
+        result = self.brain.execute_tool(
+            "hefesto_read_file", {"path": "/Users/x/Documents/a.txt"}, JOB)
+        self.assertTrue(result.startswith("Hefesto no está disponible"))
+
+    def test_read_sin_journal_devuelve_desactivado(self):
+        self.brain._hefesto_journal = None
+        self.brain._hefesto_device = None
+        result = self.brain.execute_tool("hefesto_read_file", {"path": "/a"}, JOB)
+        self.assertEqual(result, "Hefesto no está disponible (desactivado)")
+
+    def test_catalogo_incluye_las_dos_lecturas_con_confirmacion(self):
+        ids = {t["id"]: t for t in self.brain.tool_defs()}
+        self.assertIn("hefesto_list_dir", ids)
+        self.assertIn("hefesto_read_file", ids)
+        self.assertTrue(ids["hefesto_read_file"]["requiresConfirmation"])
+        self.assertTrue(ids["hefesto_list_dir"]["requiresConfirmation"])
+
+    def test_confirm_summary_de_lectura_menciona_la_exportacion(self):
+        summary, _ = self.brain._confirm_summary("hefesto_read_file", {"path": "/x/y.txt"})
+        self.assertIn("Leer «/x/y.txt»", summary)
