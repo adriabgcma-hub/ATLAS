@@ -126,16 +126,33 @@ def _validate(method, path, raw):
             raise _Rejected("invalid_generation")
     if operation == "control" and (type(body["action"]) is not str or body["action"] not in ("resume", "abort")):
         raise _Rejected("invalid_action")
-    if operation == "submit" and body["toolId"] != "hefesto.echo":
+    if operation == "submit" and body["toolId"] not in ("hefesto.echo", "hefesto.list_dir", "hefesto.read_file"):
         raise _Rejected("unsupported_tool")
-    for key in ("arguments", "output"):
-        if key not in body:
-            continue
-        value = body[key]
+    if operation == "submit":
+        args = body["arguments"]
+        if body["toolId"] == "hefesto.echo":
+            if type(args) is not dict or set(args) != {"text"} or type(args["text"]) is not str:
+                raise _Rejected("invalid_text")
+            try:
+                if len(args["text"].encode("utf-8")) > 256:
+                    raise _Rejected("invalid_text")
+            except UnicodeError:
+                raise _Rejected("invalid_text") from None
+        else:
+            if type(args) is not dict or set(args) != {"path"} or type(args["path"]) is not str:
+                raise _Rejected("invalid_path")
+            path = args["path"]
+            try:
+                if not path.startswith("/") or "\x00" in path or len(path.encode("utf-8")) > 1024:
+                    raise _Rejected("invalid_path")
+            except UnicodeError:
+                raise _Rejected("invalid_path") from None
+    if "output" in body:
+        value = body["output"]
         if type(value) is not dict or set(value) != {"text"} or type(value["text"]) is not str:
             raise _Rejected("invalid_text")
         try:
-            if len(value["text"].encode("utf-8")) > 256:
+            if len(value["text"].encode("utf-8")) > 64 * 1024:
                 raise _Rejected("invalid_text")
         except UnicodeError:
             raise _Rejected("invalid_text") from None
@@ -332,7 +349,7 @@ class Journal:
                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending')""",
                              (invocation_id, device_id, data["submissionId"], submission, device["instance_id"],
                               device["generation"], data["requestId"], data["sessionId"], data["taskId"],
-                              data["arguments"]["text"], int(wall * 1000) + INVOCATION_SECONDS * 1000,
+                              data["arguments"].get("text", ""), int(wall * 1000) + INVOCATION_SECONDS * 1000,
                               now + INVOCATION_SECONDS))
             return {"protocolVersion": 2, "invocationId": invocation_id, "state": "pending"}
         if operation == "outcome":
@@ -348,13 +365,14 @@ class Journal:
             active = self._active(device_id)
             invocation = None
             if active is not None:
+                submitted = json.loads(active["submission"])
                 self._db.execute("UPDATE invocations SET state='dispatched' WHERE invocation_id=?",
                                  (active["invocation_id"],))
                 invocation = {"protocolVersion": 2, "invocationId": active["invocation_id"],
                               "requestId": active["request_id"], "sessionId": active["session_id"],
                               "taskId": active["task_id"], "deviceId": device_id,
                               "instanceId": active["instance_id"], "generation": active["generation"],
-                              "toolId": "hefesto.echo", "arguments": {"text": active["text"]},
+                              "toolId": submitted["toolId"], "arguments": submitted["arguments"],
                               "expiresAtUnixMs": active["expires_ms"]}
             return {"protocolVersion": 2, "invocation": invocation}
         invocation = self._db.execute("SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
@@ -365,7 +383,8 @@ class Journal:
             raise _Rejected("instance_mismatch", 409)
         if data["generation"] != invocation["generation"]:
             raise _Rejected("stale_generation", 409)
-        if data["output"]["text"] != invocation["text"]:
+        submitted = json.loads(invocation["submission"])
+        if submitted["toolId"] == "hefesto.echo" and data["output"]["text"] != invocation["text"]:
             raise _Rejected("result_conflict", 409)
         # A committed success survives ACK loss, expiry, abort and relay restart.
         if invocation["state"] == "succeeded":

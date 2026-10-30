@@ -526,7 +526,10 @@ class JournalTests(unittest.TestCase):
         for text in ("a" * 257, "é" * 129, "\U0001f600" * 65, "\ud800", 1, True, None, [], {}):
             with self.subTest(text_type=type(text)):
                 self.error("invalid_text", "submit", CONTROLLER, **submission(text=text))
-                self.error("invalid_text", "result", instanceId="i", generation=2, invocationId="v", output={"text": text})
+        for text in ("\ud800", 1, True, None, [], {}):
+            with self.subTest(output_type=type(text)):
+                self.error("invalid_text", "result", instanceId="i", generation=2, invocationId="v",
+                           output={"text": text})
         for arguments in ({}, {"text": "hi", "extra": 1}, [], None, "text"):
             self.error("invalid_text", "submit", CONTROLLER, **submission(arguments=arguments))
 
@@ -596,6 +599,61 @@ class JournalTests(unittest.TestCase):
         self.next()
         self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
         self.assertEqual(self.ok("status")["activeInvocationId"], ack["invocationId"])
+
+
+class ReadToolTests(JournalTests):
+    def test_submit_read_file_aceptado(self):
+        self.ready()
+        ack = self.ok("submit", CONTROLLER, **submission(
+            toolId="hefesto.read_file", arguments={"path": "/Users/x/Documents/a.txt"}))
+        self.assertEqual(set(ack), {"protocolVersion", "invocationId", "state"})
+        self.assertEqual(ack["state"], "pending")
+
+    def test_submit_list_dir_aceptado(self):
+        self.ready()
+        ack = self.ok("submit", CONTROLLER, **submission(
+            toolId="hefesto.list_dir", arguments={"path": "/Users/x/Documents"}))
+        self.assertEqual(ack["state"], "pending")
+
+    def test_submit_con_tool_desconocido_rechazado(self):
+        self.ready()
+        self.error("unsupported_tool", "submit", CONTROLLER,
+                   **submission(toolId="hefesto.mkdir", arguments={"path": "/x"}))
+
+    def test_read_con_argumento_text_rechazado(self):
+        self.ready()
+        # toolId de lectura con arguments {text} (shape de eco) => invalid_path
+        self.error("invalid_path", "submit", CONTROLLER,
+                   **submission(toolId="hefesto.read_file"))
+
+    def test_read_con_ruta_relativa_rechazada(self):
+        self.ready()
+        self.error("invalid_path", "submit", CONTROLLER,
+                   **submission(toolId="hefesto.read_file", arguments={"path": "relativo"}))
+
+    def test_next_devuelve_toolid_y_arguments_del_submit(self):
+        self.ready()
+        ack = self.ok("submit", CONTROLLER, **submission(
+            toolId="hefesto.read_file", arguments={"path": "/Users/x/Documents/a.txt"}))
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["toolId"], "hefesto.read_file")
+        self.assertEqual(invocation["arguments"], {"path": "/Users/x/Documents/a.txt"})
+
+    def test_result_de_lectura_acepta_texto_libre(self):
+        self.ready()
+        self.ok("submit", CONTROLLER, **submission(
+            toolId="hefesto.read_file", arguments={"path": "/Users/x/Documents/a.txt"}))
+        invocation = self.next()
+        done = self.ok("result", **self.result_fields(invocation, output={"text": "contenido leído"}))
+        self.assertEqual(done["state"], "succeeded")
+
+    def test_result_de_eco_sigue_exigiendo_eco_exacto(self):
+        self.ready()
+        self.send(text="hola")
+        invocation = self.next()
+        self.error("result_conflict", "result",
+                   **self.result_fields(invocation, output={"text": "distinto"}))
 
 
 class RegistryTests(unittest.TestCase):
