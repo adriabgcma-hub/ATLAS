@@ -3,6 +3,7 @@
 pub mod client;
 pub mod executor;
 pub mod runtime;
+pub mod tools;
 pub mod wire;
 
 pub use client::HefestoClient;
@@ -17,6 +18,7 @@ pub enum Error {
     InvalidGeneration,
     InvalidExpiration,
     InvalidText,
+    InvalidPath,
     InvalidState,
     InvalidErrorCode,
     InvalidJson,
@@ -48,6 +50,7 @@ impl Error {
             Self::InvalidGeneration => "invalid_generation",
             Self::InvalidExpiration => "invalid_expiration",
             Self::InvalidText => "invalid_text",
+            Self::InvalidPath => "invalid_path",
             Self::InvalidState => "invalid_state",
             Self::InvalidErrorCode => "invalid_error_code",
             Self::InvalidJson => "invalid_json",
