@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
+pub mod apps;
 pub mod client;
 pub mod executor;
 pub mod runtime;
 pub mod tools;
 pub mod wire;
 
+pub use apps::{handle_apps, AppBridge, AppRef, CloseOutcome};
 pub use client::HefestoClient;
 pub use executor::{Clock, Executor, RegistrationAttempt, ResumeAttempt};
 pub use runtime::{Phase, Runtime, Snapshot, Transport};

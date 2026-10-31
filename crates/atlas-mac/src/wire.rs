@@ -304,6 +304,40 @@ pub struct RenamePayload {
     pub to: ToolPath,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppsAction {
+    Open,
+    Close,
+    List,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppsPayload {
+    pub action: AppsAction,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub bundle_id: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppRecord {
+    pub name: String,
+    pub bundle_id: String,
+    pub running: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppsOutput {
+    pub apps: Vec<AppRecord>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
@@ -311,6 +345,7 @@ pub enum ToolArguments {
     Path(PathPayload),
     Write(WritePayload),
     Rename(RenamePayload),
+    Apps(AppsPayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -365,6 +400,7 @@ pub struct FileInfoOutput {
 pub enum OutputPayload {
     Text(TextPayload),
     Info(FileInfoOutput),
+    Apps(AppsOutput),
 }
 
 impl OutputPayload {
@@ -377,7 +413,7 @@ impl OutputPayload {
     pub fn text_value(&self) -> Option<&str> {
         match self {
             Self::Text(payload) => Some(payload.text.as_str()),
-            Self::Info(_) => None,
+            Self::Info(_) | Self::Apps(_) => None,
         }
     }
 }
@@ -396,6 +432,8 @@ pub enum ToolId {
     Rename,
     #[serde(rename = "hefesto.file_info")]
     FileInfo,
+    #[serde(rename = "hefesto.apps")]
+    Apps,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
