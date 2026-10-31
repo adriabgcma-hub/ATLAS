@@ -536,3 +536,16 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   pendiente de Task 7: crear, sobrescribir con el hash de la tarjeta, hash
   obsoleto, mover y ruta fuera de raíces, seguida de despliegue del relay y
   verificación del bundle.
+- 2026-10-30, prueba en vivo de la escritura (Task 7) con el relay desplegado:
+  crear (10 B) y sobrescribir (6 B) correctos, hash obsoleto rechazado sin pisar
+  («el archivo cambió desde la confirmación»; el modelo lo reportó mal como
+  éxito, hallazgo de prompt pendiente), mover (17 B) correcto, `/etc` fuera de
+  raíces sin tarjeta y sin archivo, y journal sin contenido (solo
+  `contentBytes`/`contentSha256`). Bundle Apple Development instalado.
+- 2026-10-30, visibilidad de Hefesto en la escritura (petición del usuario):
+  tras cada escritura o movimiento con éxito, el relay publica un mensaje
+  `agent: hefesto` («Escrito …»/«Movido …») que la app dibuja como burbuja
+  violeta HEFESTO, y la tarjeta de confirmación se etiqueta HEFESTO para las
+  herramientas `hefesto_*` (antes ATLAS). Reutiliza el contrato `agent`/`taskId`
+  existente; sin cambios de protocolo. Pruebas: Python 209, frontend 54,
+  `cargo test --workspace`, clippy y fmt.

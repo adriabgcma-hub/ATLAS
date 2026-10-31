@@ -1077,8 +1077,11 @@ class Brain:
                                  "hefesto_write_file", args,
                                  chat_id=job.get("chat_id"), summary=summary) != "allow_once":
             return "denegada por el usuario"
-        return self._delegate("hefesto.write_file", job, {
+        result = self._delegate("hefesto.write_file", job, {
             "path": path, "content": content, "expectedHash": expected})
+        if result.startswith("Escrito «"):
+            self._hefesto_note(job["session_id"], result)
+        return result
 
     def _rename_file(self, job: dict, args: dict) -> str:
         source, target = args.get("from"), args.get("to")
@@ -1103,7 +1106,33 @@ class Brain:
                                  "hefesto_rename", args,
                                  chat_id=job.get("chat_id"), summary=summary) != "allow_once":
             return "denegada por el usuario"
-        return self._delegate("hefesto.rename", job, {"from": source, "to": target})
+        result = self._delegate("hefesto.rename", job, {"from": source, "to": target})
+        if result.startswith("Movido «") or result.startswith("Escrito «"):
+            self._hefesto_note(job["session_id"], result)
+        return result
+
+    def _hefesto_note(self, session_id: str, content: str) -> None:
+        """Burbuja violeta de Hefesto tras una escritura o un movimiento."""
+        task_id = new_id("tsk")
+        request_id = new_id("req")
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session is None:
+                return
+            session["messages"].append({
+                "requestId": request_id, "sessionId": session_id,
+                "role": "assistant", "content": content, "source": "local",
+                "agent": "hefesto", "taskId": task_id,
+                "timestamp": utc_now(),
+            })
+            session["messages"] = session["messages"][-STORE_HISTORY:]
+            self._save_sessions()
+            self._push_event({
+                "kind": "message", "type": "conversation.message_appended",
+                "requestId": request_id, "sessionId": session_id,
+                "timestamp": utc_now(), "role": "assistant", "content": content,
+                "source": "local", "agent": "hefesto", "taskId": task_id,
+            })
 
     def _hefesto_finish(self, entry: dict, state: str,
                         output_text: str | None) -> None:

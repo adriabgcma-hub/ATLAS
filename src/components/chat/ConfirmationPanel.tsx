@@ -22,7 +22,8 @@ export function ConfirmationPanel({
       {items.map((item) => (
         <article key={item.requestId} className="chat-confirm-card">
           <span className="chat-msg-tag">
-            ATLAS · {item.toolId} · {item.risk.toUpperCase()}
+            {item.toolId.startsWith('hefesto') ? 'HEFESTO' : 'ATLAS'} ·{' '}
+            {item.toolId} · {item.risk.toUpperCase()}
           </span>
           <p className="chat-confirm-text">{item.summary}</p>
           <div className="chat-confirm-actions">

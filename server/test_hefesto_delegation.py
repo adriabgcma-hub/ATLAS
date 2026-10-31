@@ -653,3 +653,62 @@ class WriteFlowTests(unittest.TestCase):
         self.assertEqual(result, "Escrito «x»")
         self.assertEqual(ask.call_count, 1)
         self.assertEqual(self.brain._delegations, {})
+
+    def _hefesto_notes(self):
+        return [e for e in self.brain.events
+                if e.get("kind") == "message" and e.get("agent") == "hefesto"]
+
+    def test_escritura_exitosa_emite_burbuja_de_hefesto(self):
+        session_id = self.brain._active()["id"]
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(False)}
+        self.journal.accept("inv-write")
+        self.journal.outcomes["inv-write"] = {"state": "succeeded",
+                                              "output": {"text": "Escrito «x» (4 B, sha256 abc)"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "hola", "mode": "create"},
+                {**JOB, "session_id": session_id})
+        notes = self._hefesto_notes()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["content"], "Escrito «x» (4 B, sha256 abc)")
+        last = self.brain.sessions[session_id]["messages"][-1]
+        self.assertEqual(last["agent"], "hefesto")
+        self.assertEqual(last["content"], "Escrito «x» (4 B, sha256 abc)")
+
+    def test_renombrado_exitoso_emite_burbuja_de_hefesto(self):
+        session_id = self.brain._active()["id"]
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 4, "d" * 64)}
+        self.journal.accept("inv-info-2")
+        self.journal.outcomes["inv-info-2"] = {"state": "succeeded",
+                                               "output": self.info(False)}
+        self.journal.accept("inv-rn")
+        self.journal.outcomes["inv-rn"] = {"state": "succeeded",
+                                            "output": {"text": "Movido «a» → «b» (4 B)"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            self.brain.execute_tool(
+                "hefesto_rename",
+                {"from": "/Users/x/Documents/a.txt", "to": "/Users/x/Documents/b.txt"},
+                {**JOB, "session_id": session_id})
+        notes = self._hefesto_notes()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["content"], "Movido «a» → «b» (4 B)")
+
+    def test_hash_obsoleto_no_emite_burbuja(self):
+        session_id = self.brain._active()["id"]
+        self.journal.accept("inv-info")
+        self.journal.outcomes["inv-info"] = {"state": "succeeded",
+                                             "output": self.info(True, 10, "c" * 64)}
+        self.journal.accept("inv-write")
+        self.journal.outcomes["inv-write"] = {"state": "succeeded",
+                                              "output": {"text": "el archivo cambió desde la confirmación"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            self.brain.execute_tool(
+                "hefesto_write_file",
+                {"path": "/Users/x/Documents/n.txt", "content": "x", "mode": "overwrite"},
+                {**JOB, "session_id": session_id})
+        self.assertEqual(self._hefesto_notes(), [])

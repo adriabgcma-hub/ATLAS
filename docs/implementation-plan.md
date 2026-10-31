@@ -174,7 +174,16 @@ de prueba autorizados por el usuario (2026-10-28).
       y resultado síncrono al modelo (la respuesta la redacta Atlas). Desplegado y
       probado en vivo (tarjeta, `LUNA-42`, fuera de raíces rechazado). Commits
       `3a4fd1a`…`295da62`.
-- [ ] Escritura de archivos, apps/multimedia, terminal y accesibilidad, según puertas del plan.
+- [x] Escritura segura de archivos (2026-10-30, puerta 4, corte 2): protocolo v3 con
+      `hefesto.write_file`/`hefesto.rename`/`hefesto.file_info`, creación sin pisar
+      (`hard_link`), sobrescritura con hash + `rename` atómico conservando el modo,
+      movimiento sin pisar en el mismo volumen, contenido nunca persistido y tarjeta
+      única «Crear/Sobrescribir/Mover» con el hash del plan. Probado en vivo (crear,
+      sobrescribir, hash obsoleto rechazado sin pisar, mover, `/etc` fuera de raíces)
+      y con visibilidad de Hefesto: burbuja violeta HEFESTO tras cada escritura o
+      movimiento y tarjeta etiquetada HEFESTO. Commits `cf1f3ab`…`e1a4cee` más el de
+      la burbuja/tarjeta, desplegado.
+- [ ] Apps/multimedia, terminal y accesibilidad, según puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
 la app Tauri cuando el entorno trae sus credenciales, y hoy se limita al eco y a la
