@@ -86,7 +86,7 @@ pub fn find_running<'a>(
     find_installed(running, name, bundle)
 }
 
-pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> OutputPayload {
+pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> crate::Result<OutputPayload> {
     match payload.action {
         AppsAction::List => {
             let apps = build_list(
@@ -94,7 +94,7 @@ pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> OutputPaylo
                 &bridge.installed(),
                 payload.query.as_deref(),
             );
-            OutputPayload::Apps(AppsOutput { apps })
+            Ok(OutputPayload::Apps(AppsOutput { apps }))
         }
         AppsAction::Open => {
             let catalog = bridge.installed();
@@ -103,17 +103,16 @@ pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> OutputPaylo
                 payload.name.as_deref(),
                 payload.bundle_id.as_deref(),
             ) {
-                None => OutputPayload::text(format!(
+                None => Ok(OutputPayload::text(format!(
                     "no encuentro «{}» entre las apps instaladas",
                     payload.name.as_deref().unwrap_or("?")
-                ))
-                .unwrap(),
+                ))?),
                 Some(target) => match bridge.open(target) {
-                    Ok(()) => OutputPayload::text(format!("Abierta «{}»", target.name)).unwrap(),
-                    Err(err) => {
-                        OutputPayload::text(format!("no se pudo abrir «{}»: {err}", target.name))
-                            .unwrap()
-                    }
+                    Ok(()) => Ok(OutputPayload::text(format!("Abierta «{}»", target.name))?),
+                    Err(err) => Ok(OutputPayload::text(format!(
+                        "no se pudo abrir «{}»: {err}",
+                        target.name
+                    ))?),
                 },
             }
         }
@@ -136,22 +135,20 @@ pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> OutputPaylo
                 return OutputPayload::text(format!(
                     "«{}» no está abierta",
                     payload.name.as_deref().unwrap_or("?")
-                ))
-                .unwrap();
+                ));
             };
             match bridge.terminate(target) {
-                Err(err) => {
-                    OutputPayload::text(format!("no se pudo cerrar «{}»: {err}", target.name))
-                        .unwrap()
-                }
+                Err(err) => Ok(OutputPayload::text(format!(
+                    "no se pudo cerrar «{}»: {err}",
+                    target.name
+                ))?),
                 Ok(CloseOutcome::Gone) => {
-                    OutputPayload::text(format!("Cerrada «{}»", target.name)).unwrap()
+                    Ok(OutputPayload::text(format!("Cerrada «{}»", target.name))?)
                 }
-                Ok(CloseOutcome::StillPresent) => OutputPayload::text(format!(
+                Ok(CloseOutcome::StillPresent) => Ok(OutputPayload::text(format!(
                     "«{}» sigue abierta (¿tiene cambios sin guardar?); no la fuerzo",
                     target.name
-                ))
-                .unwrap(),
+                ))?),
             }
         }
     }
@@ -262,7 +259,7 @@ mod tests {
             open_result: Ok(()),
             close_result: Ok(CloseOutcome::Gone),
         };
-        let out = handle_apps(&bridge, &payload(AppsAction::Open, Some("Spotify"), None));
+        let out = handle_apps(&bridge, &payload(AppsAction::Open, Some("Spotify"), None)).unwrap();
         assert_eq!(out.text_value(), Some("Abierta «Spotify»"));
     }
 
@@ -274,7 +271,7 @@ mod tests {
             open_result: Ok(()),
             close_result: Ok(CloseOutcome::Gone),
         };
-        let out = handle_apps(&bridge, &payload(AppsAction::Open, Some("Gimp"), None));
+        let out = handle_apps(&bridge, &payload(AppsAction::Open, Some("Gimp"), None)).unwrap();
         assert!(out.text_value().unwrap().contains("no encuentro"));
     }
 
@@ -286,7 +283,7 @@ mod tests {
             open_result: Ok(()),
             close_result: Ok(CloseOutcome::StillPresent),
         };
-        let out = handle_apps(&bridge, &payload(AppsAction::Close, Some("Mail"), None));
+        let out = handle_apps(&bridge, &payload(AppsAction::Close, Some("Mail"), None)).unwrap();
         assert!(
             out.text_value().unwrap().contains("no la fuerzos")
                 || out.text_value().unwrap().contains("sigue abierta")
@@ -301,7 +298,7 @@ mod tests {
             open_result: Ok(()),
             close_result: Ok(CloseOutcome::Gone),
         };
-        match handle_apps(&bridge, &payload(AppsAction::List, None, None)) {
+        match handle_apps(&bridge, &payload(AppsAction::List, None, None)).unwrap() {
             OutputPayload::Apps(out) => assert_eq!(out.apps[0].bundle_id, "com.spotify.client"),
             _ => panic!("esperaba OutputPayload::Apps"),
         }
