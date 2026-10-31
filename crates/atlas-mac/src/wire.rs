@@ -53,7 +53,7 @@ pub struct ProtocolVersion;
 impl TryFrom<u64> for ProtocolVersion {
     type Error = Error;
     fn try_from(value: u64) -> Result<Self> {
-        if value == 3 {
+        if value == 4 {
             Ok(Self)
         } else {
             Err(Error::InvalidVersion)
@@ -63,7 +63,7 @@ impl TryFrom<u64> for ProtocolVersion {
 
 impl From<ProtocolVersion> for u64 {
     fn from(_: ProtocolVersion) -> Self {
-        3
+        4
     }
 }
 
@@ -629,4 +629,16 @@ pub fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T> {
         return Err(Error::ResponseTooLarge);
     }
     serde_json::from_slice(bytes).map_err(|_| Error::InvalidJson)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProtocolVersion;
+
+    #[test]
+    fn protocol_version_is_four() {
+        assert_eq!(u64::from(ProtocolVersion), 4);
+        assert!(ProtocolVersion::try_from(4u64).is_ok());
+        assert!(ProtocolVersion::try_from(3u64).is_err());
+    }
 }
