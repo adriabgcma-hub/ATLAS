@@ -115,16 +115,17 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v4 (eco, lectura, escritura y apps)
+## 5. Protocolo v5 (eco, lectura, escritura, apps y teclado)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 4` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 5` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 4, error: "codigo_estable"}`, nunca rutas/certificados.
+Errores `{protocolVersion: 5, error: "codigo_estable"}`, nunca rutas/certificados.
 Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
 escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
-16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB y los strings de apps
-(`name`/`bundleId`/`query`) a 256 caracteres. Campos desconocidos, bool por
-entero, versiones o tipos incorrectos se rechazan.
+16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB, los strings de apps
+(`name`/`bundleId`/`query`) a 256 caracteres y el teclado a 4096 bytes de texto o
+64 bytes de atajo. Campos desconocidos, bool por entero, versiones o tipos
+incorrectos se rechazan.
 Generaciones entre 0 y `2^63-1`: cero representa un dispositivo aún no registrado,
 nunca una instancia viva. La expiración usa milisegundos Unix positivos hasta `2^63-1`.
 
@@ -150,6 +151,7 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | `hefesto.write_file` | `hefesto_write_file` (`mode`) | `{path, content, expectedHash\|null}` | `{text}` resumen |
 | `hefesto.rename` | `hefesto_rename` | `{from, to}` | `{text}` resumen |
 | `hefesto.apps` | `hefesto_apps` (`requiresConfirmation: False`) | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
+| `hefesto.keyboard` | `hefesto_keyboard` (`requiresConfirmation: True`) | `{action, text?, combo?}` | `{text}` resumen |
 | `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
@@ -203,6 +205,28 @@ fuerza. `list` no produce burbuja —es lectura y la redacta Atlas—; los efect
 `open`/`close` sí emiten la burbuja `agent: hefesto` y, como las escrituras, quedan
 `unknown` si el dispositivo se reinició con la acción en vuelo.
 
+`keyboard` escribe texto o pulsa un atajo en la app **en primer plano**, sin
+activarla ni elegir ventana o campo: `action` vale `type` (con `text` no vacío,
+≤4096 bytes UTF-8 y sin caracteres de control) o `combo` (≤64 bytes), y las claves
+se cierran a `{action, text?, combo?}`. El atajo sigue una gramática cerrada y
+autoritativa en el dispositivo: 1–3 modificadores `cmd`/`shift`/`alt`/`ctrl` —sin
+repetir— más una tecla final de `a-z 0-9 space return tab esc left right up down
+delete`, con al menos un modificador; la regex del relay es algo más laxa y el
+dispositivo rechaza las repeticiones con `atajo no válido`. Los eventos se postean
+con `CGEvent` público desde la fuente HID, el mismo camino que el teclado físico,
+troceados en ≤20 unidades UTF-16 y desde el hilo principal. Antes de teclear se
+comprueba la entrada segura del sistema y el permiso TCC de Accesibilidad: con un
+campo seguro delante no se teclea (`hay un campo con entrada segura en primer
+plano; no tecleo ahí`) y sin permiso se solicita una vez y se avisa (`falta el
+permiso de Accesibilidad; actívalo en Ajustes del Sistema › Privacidad y seguridad
+› Accesibilidad`). Resúmenes `Escrito {n} caracteres en «X»` y `Pulsado {combo} en
+«X»`, sin estado `failed`. El texto no se persiste (el journal guarda solo
+`textBytes` y `textSha256` en los argumentos redactados), no se registra en el log
+del relay, no genera burbuja violeta y la tarjeta —siempre, con el texto como
+superficie de consentimiento— lo mantiene, igual que el aviso de Telegram cuando la
+petición llegó por ahí. Un reinicio con el tecleo en vuelo lo deja `unknown`, sin
+reentregarlo ni reejecutarlo.
+
 ### Estado, duplicados y fallos
 
 - Latido con lease de 15 s; reloj monótono para disponibilidad. Al registrar una
@@ -220,14 +244,15 @@ fuerza. `list` no produce burbuja —es lectura y la redacta Atlas—; los efect
   Cambiar control incrementa generación. Abortar cancela pendientes y marca una
   acción despachada como `unknown` si no se puede confirmar su efecto.
 - Submit requiere dispositivo vivo, no suspendido y libre; TTL de invocación 15 s
-  (eco, lectura, escritura y apps). No hay cola para dispositivos ausentes, ni encargos
-  para futuros arranques.
+  (eco, lectura, escritura, apps y teclado). No hay cola para dispositivos ausentes,
+  ni encargos para futuros arranques.
 - `submissionId` es clave de idempotencia duradera por dispositivo: repetir el mismo
   contenido devuelve la misma invocación/estado; cambiarlo produce conflicto.
 - Estados persistidos en SQLite: `pending`, `dispatched`, `succeeded`, `cancelled`,
   `expired`, `unknown`. Reiniciar cancela los pendientes de eco/lectura, marca
-  `unknown` las escrituras pendientes (su contenido no se entregó) y también las
-  despachadas. Nunca reintentar automáticamente un efecto de resultado desconocido.
+  `unknown` los pendientes con efecto —escrituras, apps y teclado, cuyo contenido no
+  se entregó— y también los despachados. Nunca reintentar automáticamente un efecto de
+  resultado desconocido.
 - `next` puede repetir la misma entrega mientras es válida; Rust conserva el resultado
   por ID y rechaza argumentos modificados. Una entrega repetida no vuelve a ejecutar.
 - Resultados repetidos idénticos son idempotentes; diferentes, de otra instancia,
@@ -276,15 +301,25 @@ fuerza. `list` no produce burbuja —es lectura y la redacta Atlas—; los efect
 6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
    terminal general solo tras acordar y verificar aislamiento/límites.
 7. **Accesibilidad, control del Mac y capturas (puerta 7; corte 1, control de apps,
-   implementado 2026-11-01 con protocolo v4; pendiente la matriz en vivo de §8):**
+   implementado 2026-11-01 con protocolo v4; corte 2, teclado, implementado 2026-11-01
+   con protocolo v5; pendiente la matriz en vivo de §8):**
    `hefesto.apps` (`open`/`close`/`list`) con las tres acciones como trivial por
    adaptador (`hefesto_apps`, `requiresConfirmation: False`, sin tarjeta), cierre **solo
    suave** (`terminate`, sin forzar ni descartar cambios), resolución híbrida
    NSWorkspace + escaneo cacheado de `Info.plist` y sin API privada ni subprocess; `list`
-   cortado a ≤30 y sin burbuja. **Pendientes** los cortes de teclado sintético y de
-   ventanas (mover/redimensionar/traer), que sí exigen habilitación explícita y TCC de
-   Accesibilidad, además de las capturas y el modelo de visión si hace falta: bloqueo de
-   sesión, consentimiento de envío y no activar sensores por defecto.
+   cortado a ≤30 y sin burbuja.
+   **Corte 2 — teclado (`hefesto_keyboard`, 2026-11-01, protocolo v5):**
+   `hefesto.keyboard` con `action` `type`/`combo` (texto ≤4096 bytes sin controles;
+   atajo de 1–3 modificadores + tecla cerrada, al menos uno), tarjeta **siempre** con el
+   texto como superficie de consentimiento, posteo con `CGEvent` público desde la fuente
+   HID solo a la app en primer plano (sin activarla ni elegir ventana o campo), rechazo
+   con campo de entrada segura delante y permiso TCC de Accesibilidad pedido como mucho
+   una vez por proceso; el texto tecleado no se persiste, no se registra ni emite
+   burbuja (journal con `textBytes`/`textSha256`, en vuelo tras reinicio → `unknown`).
+   **Pendientes** los cortes de ventanas (mover/redimensionar/traer), las capturas y la
+   parte de multimedia, que exigen habilitación explícita y TCC, además del modelo de
+   visión si hace falta: bloqueo de sesión, consentimiento de envío y no activar
+   sensores por defecto.
 
 Cada entrega es local y comprobable antes de activar la siguiente. La base no es un
 agente funcional ni un anuncio de que Hefesto ya controle el Mac.

@@ -39,6 +39,12 @@ describe('planPhaseOrbit', () => {
     expect(plan?.color).toBe(HEFESTO_ORBIT_COLOR)
   })
 
+  it('órbita violeta para teclear', () => {
+    const plan = planPhaseOrbit('executing', 'hefesto_keyboard')
+    expect(plan?.title).toBe('Hefesto · Tecleando')
+    expect(plan?.color).toBe(HEFESTO_ORBIT_COLOR)
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({

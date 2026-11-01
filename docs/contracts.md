@@ -178,27 +178,30 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v4 — eco, lectura, escritura y apps
+## Hefesto v5 — eco, lectura, escritura, apps y teclado
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v4-eco-lectura-escritura-y-apps).
-Usa `protocolVersion: 4`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output` tipado por herramienta. Siete herramientas sobre el mismo protocolo:
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v5-eco-lectura-escritura-apps-y-teclado).
+Usa `protocolVersion: 5`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Ocho herramientas sobre el mismo protocolo:
 `hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
 (`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
 Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
 `hefesto.rename` (`{from, to}`), `hefesto.apps` (`{action, name?, bundleId?,
-query?}`) y la interna `hefesto.file_info` (`{path}`). El relay expone al modelo
-`hefesto_echo` (asíncrono), `hefesto_list_dir` y
-`hefesto_read_file` (lectura síncrona, con confirmación por operación),
-`hefesto_write_file` (`{path, content, mode}`) y `hefesto_rename`;
-`hefesto.file_info` no está en el catálogo. La de apps es **una sola** herramienta
-`hefesto_apps` (`{action, name?, bundleId?, query?}`) con `requiresConfirmation:
-False` —trivial por adaptador, como el eco—: tres acciones en vez de tres
-herramientas para no multiplicar el catálogo que viaja en cada petición.
+query?}`), `hefesto.keyboard` (`{action, text?, combo?}`) y la interna
+`hefesto.file_info` (`{path}`). El relay expone al modelo `hefesto_echo`
+(asíncrono), `hefesto_list_dir` y `hefesto_read_file` (lectura síncrona, con
+confirmación por operación), `hefesto_write_file` (`{path, content, mode}`) y
+`hefesto_rename`; `hefesto.file_info` no está en el catálogo. La de apps es **una
+sola** herramienta `hefesto_apps` (`{action, name?, bundleId?, query?}`) con
+`requiresConfirmation: False` —trivial por adaptador, como el eco—: tres acciones
+en vez de tres herramientas para no multiplicar el catálogo que viaja en cada
+petición. El teclado es `hefesto_keyboard` (`{action, text?, combo?}`), con
+`requiresConfirmation: True` y `planConfirmation: True`: cada invocación pasa por
+su tarjeta y no se abre ninguna confirmación genérica.
 
 Rutas del protocolo (cuerpo exacto, sin campos extra):
 
-| Método y ruta | Rol | Cuerpo además de `protocolVersion: 4` | Respuesta |
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 5` | Respuesta |
 | --- | --- | --- | --- |
 | GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
 | POST `/v1/hefesto/register` | device | `instanceId` | estado |
@@ -216,6 +219,7 @@ Rutas del protocolo (cuerpo exacto, sin campos extra):
 | `hefesto.write_file` | `{path, content, expectedHash\|null}` | `{text}` resumen |
 | `hefesto.rename` | `{from, to}` | `{text}` resumen |
 | `hefesto.apps` | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
+| `hefesto.keyboard` | `{action, text?, combo?}` | `{text}` resumen |
 | `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
@@ -229,8 +233,11 @@ type AppRecord = { name: string; bundleId: string; running: boolean }
 /** Salida de `hefesto.apps` (`action: list`), cortada a ≤30 entradas. */
 type AppsOutput = { apps: AppRecord[] }
 
+/** Argumentos de `hefesto.keyboard`: teclear `text` o pulsar `combo`. */
+type KeyboardPayload = { action: 'type' | 'combo'; text?: string; combo?: string }
+
 type HefestoOutput =
-  | { text: string } // eco, list_dir, read_file, write_file, rename y open/close de apps (≤64 KiB)
+  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps y teclado (≤64 KiB)
   | AppsOutput // hefesto.apps, action=list
   | { exists: boolean; size: number | null; sha256: string | null } // file_info
 ```
@@ -310,8 +317,63 @@ burbuja `agent: hefesto` con el resumen, como las escrituras; `list` es lectura 
 devuelve su resultado síncrono al modelo **sin burbuja** (lo redacta Atlas en su
 turno). El journal trata `hefesto.apps` como efecto: no persiste contenido (solo
 `toolId`, estado e identificadores) y un reinicio con la acción en vuelo la deja
-`unknown`, sin reejecutarla. Quedan fuera de este contrato el cierre forzado, el
-teclado sintético y la gestión de ventanas.
+`unknown`, sin reejecutarla. Quedan fuera de este contrato el cierre forzado y la
+gestión de ventanas.
+
+### Teclado
+
+`hefesto.keyboard` recibe `{action, text?, combo?}` con `action` obligatoria y
+solo `type` o `combo`; según la acción llega `text` o `combo`. La herramienta del
+relay es `hefesto_keyboard` (`{action, text?, combo?}`, `action` requerida) con
+`requiresConfirmation: True` y `planConfirmation: True`: valida la acción y los
+argumentos antes de delegar, y **siempre** abre su propia tarjeta —con el texto
+recortado, que es la superficie de consentimiento—; no hay confirmación genérica
+previa ni se abre tarjeta con argumentos inválidos. La tarjeta llega con riesgo
+`write` y el resumen `Escribir «<texto>» en la app en primer plano` (texto cortado
+a 120 caracteres más «…») o `Pulsar <combo> en la app en primer plano`.
+
+Límites: `text` no vacío, ≤4096 bytes UTF-8 y sin caracteres de control (saltos de
+línea incluidos). `combo` ≤64 bytes y sigue una gramática cerrada y **autoritativa
+en el dispositivo**: 1–3 modificadores de `cmd`, `shift`, `alt`, `ctrl` —sin
+repetir— más una tecla final de `a-z 0-9 space return tab esc left right up down
+delete`, con al menos un modificador (por eso `return` o `s` solos no valen). La
+regex del relay es algo más laxa y acepta modificadores repetidos; el dispositivo
+los rechaza con `atajo no válido`.
+
+Destino: solo la **app en primer plano**. No se activa ninguna aplicación ni se
+elige ventana o campo: los eventos se postean con `CGEvent` desde la fuente HID del
+sistema, el mismo camino que el teclado físico, y el texto se trocea en eventos
+Unicode de ≤20 unidades UTF-16 sin partir pares sustitutos. Antes de postear se
+comprueba la entrada segura del sistema (`IsSecureEventInputEnabled`): si hay un
+campo con entrada segura en primer plano no se teclea nada y el texto es `hay un
+campo con entrada segura en primer plano; no tecleo ahí`. También se exige el
+permiso TCC de Accesibilidad (`CGPreflightPostEventAccess`); si falta, se solicita
+como mucho una vez por proceso (`CGRequestPostEventAccess`) y el texto es `falta el
+permiso de Accesibilidad; actívalo en Ajustes del Sistema › Privacidad y seguridad
+› Accesibilidad`. El diálogo del sistema es UI: el puente ejecuta las consultas y
+los posteos en el hilo principal y el hilo de Hefesto espera por canal con timeout
+de 5 s; si el hilo principal no responde al consultar la entrada segura, se asume
+segura y no se teclea.
+
+Salidas: `{text}` con el resumen `Escrito {n} caracteres en «App»` (`1 carácter` en
+singular) o `Pulsado {combo} en «App»`; si no se conoce el nombre de la app, `en la
+app en primer plano`. Los rechazos son texto estable, sin estado `failed`: `texto no
+válido (sin saltos de línea ni controles)`, `atajo no válido`, y en el relay antes
+de delegar, `action inválida (type o combo)`, `falta text para type`, `falta combo
+para combo`, `texto no válido (sin saltos de línea ni controles)` y `atajo no
+válido`; una tarjeta denegada devuelve `denegada por el usuario`.
+
+Privacidad: el texto tecleado nunca se persiste ni se registra. El journal guarda
+solo `textBytes` y `textSha256` en los argumentos redactados, sin `text`, y el
+texto vive únicamente en memoria del relay y del ejecutor del dispositivo para
+entregarlo (y deduplicar entregas); el log del relay omite los argumentos de
+`hefesto_keyboard` y, en el aviso de confirmación, registra la longitud del resumen,
+no su contenido. El aviso de Telegram conserva el texto cuando la petición llegó
+por Telegram (es la misma superficie de consentimiento que la tarjeta). Un tecleo
+**no** emite la burbuja `agent: hefesto`: el resumen solo vuelve al modelo, que lo
+narra. El journal trata `hefesto.keyboard` como efecto con contenido: un reinicio
+con la invocación en vuelo (pendiente o despachada) la deja `unknown`, sin
+reentregarla ni reejecutarla.
 
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
