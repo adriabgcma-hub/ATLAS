@@ -631,7 +631,9 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   -D warnings` limpio, `python3 -m unittest discover` 271 OK, `npm test` 55 y
   `npm run build`. Deuda **preexistente** que este corte no toca: `cargo fmt
   --all -- --check` sigue fallando en `crates/atlas-core` y `npm run lint`
-  conserva los tres avisos de `apps/panel`. Desplegado con
+  conserva los tres avisos de `apps/panel` (limpiada después en
+  `chore(panel): formato y lint limpios`, sin cambios de comportamiento).
+  Desplegado con
   `./scripts/deploy-relay.sh` (push `8273df7..355fa2a`, `atlas-relay` activo y
   `/v1/health` OK) y bundle con identidad Apple Development instalado en
   `/Applications/Atlas.app` con firma profunda válida (el paso del DMG vuelve a

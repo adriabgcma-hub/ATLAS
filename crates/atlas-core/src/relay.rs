@@ -10,8 +10,8 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::contracts::{
-    Agent, AtlasError, ConfirmationRequest, Correlation, EventType, MessageAppended, OutEvent,
-    RiskLevel, Role, SessionEvent, SessionState, Source, codes,
+    codes, Agent, AtlasError, ConfirmationRequest, Correlation, EventType, MessageAppended,
+    OutEvent, RiskLevel, Role, SessionEvent, SessionState, Source,
 };
 
 fn unreachable(message: &str) -> AtlasError {
@@ -180,8 +180,7 @@ fn convert(value: &serde_json::Value) -> Option<(u64, OutEvent)> {
             ))
         }
         "state" => {
-            let state: SessionState =
-                serde_json::from_value(value.get("state")?.clone()).ok()?;
+            let state: SessionState = serde_json::from_value(value.get("state")?.clone()).ok()?;
             Some((
                 seq,
                 OutEvent::Session(SessionEvent {
@@ -200,8 +199,7 @@ fn convert(value: &serde_json::Value) -> Option<(u64, OutEvent)> {
             ))
         }
         "confirmation" => {
-            let risk: RiskLevel =
-                serde_json::from_value(value.get("risk")?.clone()).ok()?;
+            let risk: RiskLevel = serde_json::from_value(value.get("risk")?.clone()).ok()?;
             Some((
                 seq,
                 OutEvent::Confirm(ConfirmationRequest {
@@ -277,10 +275,7 @@ pub fn post_send(
 }
 
 /// Pide al cerebro cancelar una petición (idempotente).
-pub fn post_cancel(    base_url: &str,
-    request_id: &str,
-    timeout: Duration,
-) -> Result<(), AtlasError> {
+pub fn post_cancel(base_url: &str, request_id: &str, timeout: Duration) -> Result<(), AtlasError> {
     let payload = serde_json::json!({ "requestId": request_id });
     http(
         "POST",
@@ -345,7 +340,10 @@ pub fn get_session(
     timeout: Duration,
 ) -> Result<(Option<SessionSnapshot>, u64), AtlasError> {
     let parsed = http("GET", base_url, "/v1/session", None, timeout)?;
-    let cursor = parsed.get("cursor").and_then(|seq| seq.as_u64()).unwrap_or(0);
+    let cursor = parsed
+        .get("cursor")
+        .and_then(|seq| seq.as_u64())
+        .unwrap_or(0);
     let snapshot = match parsed.get("session") {
         None | Some(serde_json::Value::Null) => None,
         Some(snapshot) => serde_json::from_value(snapshot.clone())
@@ -377,11 +375,7 @@ mod tests {
                 if reader.read_line(&mut first).unwrap_or(0) == 0 {
                     continue;
                 }
-                let path = first
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap_or("/")
-                    .to_string();
+                let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
                 let mut content_length = 0usize;
                 loop {
                     let mut line = String::new();
@@ -448,7 +442,10 @@ mod tests {
     #[test]
     fn send_devuelve_ids_y_cancel_no_falla() {
         let url = fake_brain(vec![
-            ("/v1/send", r#"{"ok": true, "requestId": "r", "sessionId": "s"}"#),
+            (
+                "/v1/send",
+                r#"{"ok": true, "requestId": "r", "sessionId": "s"}"#,
+            ),
             ("/v1/cancel", r#"{"ok": true, "cancelled": false}"#),
             ("/v1/confirm", r#"{"ok": true, "accepted": true}"#),
         ]);
@@ -501,11 +498,11 @@ mod tests {
 
     #[test]
     fn https_se_rechaza_y_caido_es_reintentable() {
-        let err = get_events("https://127.0.0.1:8765", 0, Duration::from_secs(1))
-            .expect_err("https no");
+        let err =
+            get_events("https://127.0.0.1:8765", 0, Duration::from_secs(1)).expect_err("https no");
         assert_eq!(err.code, codes::RELAY_INVALID);
-        let err = get_events("http://127.0.0.1:1", 0, Duration::from_millis(300))
-            .expect_err("sin relay");
+        let err =
+            get_events("http://127.0.0.1:1", 0, Duration::from_millis(300)).expect_err("sin relay");
         assert_eq!(err.code, codes::RELAY_UNREACHABLE);
         assert!(err.retryable);
     }

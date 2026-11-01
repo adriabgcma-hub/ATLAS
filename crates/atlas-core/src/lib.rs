@@ -8,10 +8,11 @@ pub mod contracts;
 pub mod relay;
 
 pub use contracts::{
-    Agent, AtlasError, ConfirmationRequest, Correlation, EventType, MessageAppended, OutEvent,
-    RiskLevel, Role, SessionEvent, SessionState, Source, codes, now_iso8601, MAX_CONTENT_LEN,
+    codes, now_iso8601, Agent, AtlasError, ConfirmationRequest, Correlation, EventType,
+    MessageAppended, OutEvent, RiskLevel, Role, SessionEvent, SessionState, Source,
+    MAX_CONTENT_LEN,
 };
 pub use relay::{
-    FetchedEvents, SessionSnapshot, SnapshotMessage, get_events, get_session, post_cancel,
-    post_confirm, post_send,
+    get_events, get_session, post_cancel, post_confirm, post_send, FetchedEvents, SessionSnapshot,
+    SnapshotMessage,
 };

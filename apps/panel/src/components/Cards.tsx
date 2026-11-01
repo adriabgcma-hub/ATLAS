@@ -1,4 +1,5 @@
 import type { Health, HefestoStatus, Snapshot, Stats, Unit } from '../api'
+import { dotClass, unitLabel } from './format'
 
 /* Léxico visual: tarjetas sueltas; nada de framework (tokens en panel.css). */
 
@@ -15,15 +16,6 @@ export function Card({ title, badge, wide, tone, className, children }: {
     </section>
   )
 }
-
-export const dotClass = (active?: string | null, load?: string | null): string => {
-  if (load === 'masked' || active === 'failed') return 'err'
-  if (active === 'activating') return 'warn'
-  if (active === 'active') return 'ok'
-  return 'dim'
-}
-
-export const unitLabel = (u: string) => u.replace(/\.service$/, '')
 
 export function UnitRow({ unit, onAct }: { unit: Unit; onAct?: (unit: string, verb: string) => void }) {
   const busy = unit.active === 'activating'

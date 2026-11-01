@@ -159,7 +159,9 @@ export function usePoll<T>(fn: () => Promise<T>, ms: number, active = true) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fnRef = useRef(fn)
-  fnRef.current = fn
+  useEffect(() => {
+    fnRef.current = fn
+  })
   useEffect(() => {
     if (!active) return
     let alive = true
