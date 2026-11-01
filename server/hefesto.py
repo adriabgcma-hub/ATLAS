@@ -202,6 +202,12 @@ def _validate(method, path, raw):
             _validate_path(args["from"])
             _validate_path(args["to"])
         elif body["toolId"] == "hefesto.apps":
+            # Set de claves cerrado: una clave extra (en particular "content")
+            # se colaria por el encauzamiento de `_contents` del submit y filtraria
+            # el cuerpo al persistir contentBytes/contentSha256. Apps nunca lleva
+            # contenido de usuario.
+            if not set(args) <= {"action", "name", "bundleId", "query"}:
+                raise _Rejected("bad_argument", 400)
             action = args.get("action")
             if action not in ("open", "close", "list"):
                 raise _Rejected("bad_action", 400)

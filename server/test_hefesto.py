@@ -838,6 +838,60 @@ class AppControlJournalTests(JournalTests):
         self.error("invalid_output", "result",
                    **self.result_fields(invocation, output={"exists": True, "size": 1, "sha256": "0" * 64}))
 
+    def test_apps_rechaza_claves_extra_y_no_usa_contents(self):
+        # Una clave fuera del set autorizado (en particular "content") reabre la
+        # puerta de `_contents`: el journal debe rechazarla ANTES de crear la fila,
+        # sin inyectar contentBytes/contentSha256 y sin encolar nada.
+        self.ready()
+        smuggled = self.apps({"action": "list", "content": "cuerpo privado del documento"},
+                             submissionId="submission-apps-c1", taskId="task-10")
+        self.error("bad_argument", "submit", peer=CONTROLLER, **smuggled)
+        self.assertIsNone(self.ok("status")["activeInvocationId"])
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM invocations").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT submission FROM invocations").fetchall(), [])
+        # "content" tampoco cuela con open/close ni con otras claves inventadas.
+        for extra in ({"content": "cuerpo"}, {"path": "/Users/x/Documents/a.txt"},
+                      {"text": "eco"}, {"target": "Spotify"}):
+            with self.subTest(extra=extra):
+                self.error("bad_argument", "submit", peer=CONTROLLER,
+                           **self.apps({"action": "open", "name": "Spotify", **extra},
+                                       submissionId="submission-apps-c2", taskId="task-11"))
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM invocations").fetchone()[0], 0)
+        # El rechazo no deja la cola ni el journal tocados: un submit válido sigue
+        # funcionando y `next` entrega exactamente las claves autorizadas.
+        ack = self.ok("submit", peer=CONTROLLER,
+                      **self.apps({"action": "open", "name": "Spotify"},
+                                  submissionId="submission-apps-c3", taskId="task-12"))
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["arguments"], {"action": "open", "name": "Spotify"})
+        self.assertEqual(self.ok("result",
+                                 **self.result_fields(invocation, output={"text": "Abierta"}))["state"],
+                         "succeeded")
+
+    def test_apps_acepta_las_cuatro_claves_autorizadas(self):
+        # La restricción no puede sobre-rechazar: el set completo {action, name,
+        # bundleId, query} es válido y se persiste sin derivar hacia `_contents`.
+        self.ready()
+        full = {"action": "list", "name": "Mail", "bundleId": "com.apple.mail", "query": "mail"}
+        ack = self.ok("submit", peer=CONTROLLER,
+                      **self.apps(full, submissionId="submission-apps-full", taskId="task-13"))
+        invocation = self.next()
+        self.assertEqual(invocation["arguments"], full)
+        self.assertEqual(self.ok("result",
+                                 **self.result_fields(invocation, output={"apps": []}))["state"],
+                         "succeeded")
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "succeeded")
+        with sqlite3.connect(self.path) as db:
+            raw = db.execute("SELECT submission FROM invocations WHERE submission_id=?",
+                             ("submission-apps-full",)).fetchone()[0]
+        self.assertEqual(json.loads(raw)["arguments"], full)
+        self.assertNotIn("contentBytes", raw)
+        self.assertNotIn("contentSha256", raw)
+
     def test_apps_reinicio_despachada_queda_unknown_y_no_reenvia(self):
         self.ready()
         ack = self.ok("submit", peer=CONTROLLER, **APPS_OPEN)
