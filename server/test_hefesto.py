@@ -754,6 +754,114 @@ class WriteJournalTests(JournalTests):
         self.ok("submit", peer=CONTROLLER, **RENAME)
 
 
+APPS_OPEN = {"submissionId": "submission-apps", "requestId": "request-1", "sessionId": "session-1",
+             "taskId": "task-1", "toolId": "hefesto.apps",
+             "arguments": {"action": "open", "name": "Spotify"}}
+
+
+class AppControlJournalTests(JournalTests):
+    @staticmethod
+    def apps(arguments, **changes):
+        return {**APPS_OPEN, **changes, "arguments": arguments}
+
+    def test_apps_submit_next_result(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **APPS_OPEN)
+        self.assertEqual(ack["state"], "pending")
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["toolId"], "hefesto.apps")
+        self.assertEqual(invocation["arguments"], {"action": "open", "name": "Spotify"})
+        result = self.ok("result", **self.result_fields(invocation, output={"text": "Abierta «Spotify»"}))
+        self.assertEqual(result["state"], "succeeded")
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "succeeded")
+
+    def test_apps_close_acepta_texto(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER,
+                **self.apps({"action": "close", "bundleId": "com.spotify.client"},
+                            submissionId="submission-apps-close", taskId="task-2"))
+        invocation = self.next()
+        self.assertEqual(invocation["arguments"], {"action": "close", "bundleId": "com.spotify.client"})
+        done = self.ok("result", **self.result_fields(invocation, output={"text": "Cerrada"}))
+        self.assertEqual(done["state"], "succeeded")
+
+    def test_apps_lista_acepta_output_estructurado(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER,
+                      **self.apps({"action": "list", "query": "mail"},
+                                  submissionId="submission-apps-list", taskId="task-3"))
+        invocation = self.next()
+        apps_output = {"apps": [{"name": "Mail", "bundleId": "com.apple.mail", "running": True}]}
+        result = self.ok("result", **self.result_fields(invocation, output=apps_output))
+        self.assertEqual(result["state"], "succeeded")
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["output"], apps_output)
+
+    def test_apps_lista_acepta_lista_vacia(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER,
+                **self.apps({"action": "list"}, submissionId="submission-apps-empty", taskId="task-4"))
+        invocation = self.next()
+        self.assertEqual(self.ok("result", **self.result_fields(invocation, output={"apps": []}))["state"],
+                         "succeeded")
+
+    def test_apps_action_invalida_se_rechaza(self):
+        self.ready()
+        self.error("bad_action", "submit", peer=CONTROLLER,
+                   **self.apps({"action": "kill", "name": "Spotify"}))
+
+    def test_apps_open_sin_destino_se_rechaza(self):
+        self.ready()
+        self.error("missing_target", "submit", peer=CONTROLLER,
+                   **self.apps({"action": "open"}, submissionId="submission-apps-x1", taskId="task-5"))
+        self.error("missing_target", "submit", peer=CONTROLLER,
+                   **self.apps({"action": "close"}, submissionId="submission-apps-x2", taskId="task-6"))
+
+    def test_apps_argumento_invalido_se_rechaza(self):
+        self.ready()
+        self.error("bad_argument", "submit", peer=CONTROLLER,
+                   **self.apps({"action": "open", "name": "x" * 257},
+                               submissionId="submission-apps-x3", taskId="task-7"))
+        self.error("bad_argument", "submit", peer=CONTROLLER,
+                   **self.apps({"action": "list", "query": 5},
+                               submissionId="submission-apps-x4", taskId="task-8"))
+
+    def test_apps_lista_rechaza_output_malformado(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER,
+                **self.apps({"action": "list"}, submissionId="submission-apps-bad", taskId="task-9"))
+        invocation = self.next()
+        self.error("invalid_output", "result",
+                   **self.result_fields(invocation, output={"apps": [{"name": "Mail"}]}))
+        self.error("invalid_output", "result",
+                   **self.result_fields(invocation, output={"exists": True, "size": 1, "sha256": "0" * 64}))
+
+    def test_apps_reinicio_despachada_queda_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **APPS_OPEN)
+        self.next()
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+
+    def test_apps_reinicio_pendiente_queda_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **APPS_OPEN)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+        # Un re-submit idempotente devuelve el unknown: nunca se reejecuta.
+        self.assertEqual(self.ok("submit", peer=CONTROLLER, **APPS_OPEN), {**ack, "state": "unknown"})
+
+
 class RegistryTests(unittest.TestCase):
     def test_peer_validation(self):
         for role, device in (("admin", "mac"), (None, "mac"), ([], "mac"), ("device", ""),

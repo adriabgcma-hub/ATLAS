@@ -107,6 +107,34 @@ def _validate_path(value):
         raise _Rejected("invalid_path") from None
 
 
+def _text_output(value):
+    return type(value) is dict and set(value) == {"text"} and type(value["text"]) is str
+
+
+def _apps_output(value):
+    """Shape of the hefesto.apps LIST result: {"apps": [{name, bundleId, running}]}.
+
+    Sin contenido de usuario: solo identificadores de app acotados; el cuerpo
+    completo ya esta limitado por MAX_BODY_BYTES y cada cadena por 256 bytes.
+    """
+    if type(value) is not dict or set(value) != {"apps"} or type(value["apps"]) is not list:
+        return False
+    for app in value["apps"]:
+        if type(app) is not dict or set(app) != {"name", "bundleId", "running"}:
+            return False
+        if type(app["running"]) is not bool:
+            return False
+        for key in ("name", "bundleId"):
+            if type(app[key]) is not str:
+                return False
+            try:
+                if len(app[key].encode("utf-8")) > 256:
+                    return False
+            except UnicodeError:
+                return False
+    return True
+
+
 def _validate(method, path, raw):
     if type(raw) is not bytes:
         raise _Rejected("invalid_body")
@@ -138,7 +166,7 @@ def _validate(method, path, raw):
         raise _Rejected("invalid_action")
     if operation == "submit" and body["toolId"] not in (
             "hefesto.echo", "hefesto.list_dir", "hefesto.read_file",
-            "hefesto.write_file", "hefesto.rename", "hefesto.file_info"):
+            "hefesto.write_file", "hefesto.rename", "hefesto.file_info", "hefesto.apps"):
         raise _Rejected("unsupported_tool")
     if operation == "submit":
         args = body["arguments"]
@@ -173,6 +201,15 @@ def _validate(method, path, raw):
                 raise _Rejected("invalid_fields")
             _validate_path(args["from"])
             _validate_path(args["to"])
+        elif body["toolId"] == "hefesto.apps":
+            action = args.get("action")
+            if action not in ("open", "close", "list"):
+                raise _Rejected("bad_action", 400)
+            for key in ("name", "bundleId", "query"):
+                if key in args and (type(args[key]) is not str or len(args[key]) > 256):
+                    raise _Rejected("bad_argument", 400)
+            if action in ("open", "close") and not (args.get("name") or args.get("bundleId")):
+                raise _Rejected("missing_target", 400)
         else:
             if set(args) != {"path"}:
                 raise _Rejected("invalid_fields")
@@ -195,6 +232,8 @@ def _validate(method, path, raw):
                 and all(c in "0123456789abcdef" for c in digest))
             if not ok_size or not ok_hash:
                 raise _Rejected("invalid_output")
+        elif _apps_output(value):
+            pass
         else:
             raise _Rejected("invalid_output")
     return operation, body
@@ -251,16 +290,19 @@ class Journal:
             self._db.execute("PRAGMA synchronous=FULL")
             self._db.executescript(_SCHEMA)
             self._db.execute("BEGIN IMMEDIATE")
-            # Una escritura pendiente no se entregó y su contenido ya no existe
-            # (solo vivía en memoria): queda `unknown`, nunca se reenvía.
-            pending_writes = [
+            # Una invocacion con efecto pendiente no se entregó y su contenido
+            # ya no existe (solo vivía en memoria): queda `unknown`, nunca se
+            # reenvía. `hefesto.apps` (open/close) también es un efecto: aunque
+            # sus argumentos si persisten, no se reejecuta tras un reinicio.
+            side_effects = ("hefesto.write_file", "hefesto.apps")
+            pending_effects = [
                 row["invocation_id"]
                 for row in self._db.execute(
                     "SELECT invocation_id, submission FROM invocations WHERE state='pending'").fetchall()
-                if json.loads(row["submission"])["toolId"] == "hefesto.write_file"
+                if json.loads(row["submission"])["toolId"] in side_effects
             ]
             self._db.executemany("UPDATE invocations SET state='unknown' WHERE invocation_id=?",
-                                 [(invocation_id,) for invocation_id in pending_writes])
+                                 [(invocation_id,) for invocation_id in pending_effects])
             self._db.execute("UPDATE invocations SET state='cancelled' WHERE state='pending'")
             self._db.execute("UPDATE invocations SET state='unknown' WHERE state='dispatched'")
             self._db.execute("""UPDATE devices SET generation=generation + (instance_id IS NOT NULL),
@@ -480,6 +522,11 @@ class Journal:
             info_shape = set(output) == {"exists", "size", "sha256"}
             text_shape = set(output) == {"text"} and type(output["text"]) is str
             if not (info_shape or text_shape):
+                raise _Rejected("invalid_output")
+        elif tool == "hefesto.apps":
+            # open/close devuelven texto; list puede devolver el formato
+            # estructurado de apps. No se exige la forma apps para open/close.
+            if not (_text_output(output) or _apps_output(output)):
                 raise _Rejected("invalid_output")
         elif set(output) != {"text"}:
             raise _Rejected("invalid_text")
