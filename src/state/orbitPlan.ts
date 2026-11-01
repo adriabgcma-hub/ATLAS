@@ -20,6 +20,7 @@ const HEFESTO_PHASES: Record<string, string> = {
   hefesto_echo: 'Hefesto · Encargo',
   hefesto_write_file: 'Hefesto · Escribiendo archivo',
   hefesto_rename: 'Hefesto · Moviendo archivo',
+  hefesto_apps: 'Hefesto · Gestiona apps',
 }
 
 /**

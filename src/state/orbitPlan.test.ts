@@ -33,6 +33,12 @@ describe('planPhaseOrbit', () => {
     expect(move?.color).toBe(HEFESTO_ORBIT_COLOR)
   })
 
+  it('órbita violeta para gestionar apps', () => {
+    const plan = planPhaseOrbit('executing', 'hefesto_apps')
+    expect(plan?.title).toBe('Hefesto · Gestiona apps')
+    expect(plan?.color).toBe(HEFESTO_ORBIT_COLOR)
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({

@@ -115,14 +115,15 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v3 (eco, lectura y escritura)
+## 5. Protocolo v4 (eco, lectura, escritura y apps)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 3` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 4` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 3, error: "codigo_estable"}`, nunca rutas/certificados.
+Errores `{protocolVersion: 4, error: "codigo_estable"}`, nunca rutas/certificados.
 Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
 escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
-16 384 bytes UTF-8 sin NUL y `output.text` a 64 KiB. Campos desconocidos, bool por
+16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB y los strings de apps
+(`name`/`bundleId`/`query`) a 256 caracteres. Campos desconocidos, bool por
 entero, versiones o tipos incorrectos se rechazan.
 Generaciones entre 0 y `2^63-1`: cero representa un dispositivo aún no registrado,
 nunca una instancia viva. La expiración usa milisegundos Unix positivos hasta `2^63-1`.
@@ -148,6 +149,7 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | `hefesto.read_file` | `hefesto_read_file` | `{path}` | `{text}` |
 | `hefesto.write_file` | `hefesto_write_file` (`mode`) | `{path, content, expectedHash\|null}` | `{text}` resumen |
 | `hefesto.rename` | `hefesto_rename` | `{from, to}` | `{text}` resumen |
+| `hefesto.apps` | `hefesto_apps` (`requiresConfirmation: False`) | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
 | `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
@@ -184,6 +186,23 @@ del origen, sin pisar y solo dentro del mismo volumen. Los resúmenes
 (`Escrito «path» (N B, sha256 …)`, `Movido «from» → «to» (N B)`) vuelven como
 `{text}`; los rechazos son texto estable, sin estado `failed`.
 
+`apps` actúa solo sobre aplicaciones **instaladas** —nunca rutas arbitrarias ni
+binarios sueltos—: `action` vale `open`, `close` o `list`, las claves se cierran a
+`{action, name?, bundleId?, query?}` (una extra se rechaza con `bad_argument`; apps no
+transporta contenido) y `open`/`close` exigen `name` o `bundleId` (`missing_target`),
+comprobado por el relay antes de delegar. La resolución es híbrida:
+`NSWorkspace.runningApplications` para lo vivo y un mapa cacheado `nombre/bundleId → URL`
+construido con un escaneo único de `/Applications`, `/System/Applications` y
+`~/Applications` leyendo `Info.plist`, sin API privada. AppKit exige hilo principal: el
+ejecutor reenvía la acción y espera el resultado por un canal con timeout. `open`/`close`
+devuelven `{text}` (`Abierta «X»`, `Cerrada «X»`) y `list` `{apps:[{name, bundleId,
+running}]}` con lo en ejecución primero, filtrado por `query` y cortado a ≤30 entradas
+para no volcar las ~300 instaladas ni gastar tokens. El cierre es **solo suave**
+(`terminate`): si la app sigue viva tras la espera, el texto estable avisa y no se
+fuerza. `list` no produce burbuja —es lectura y la redacta Atlas—; los efectos de
+`open`/`close` sí emiten la burbuja `agent: hefesto` y, como las escrituras, quedan
+`unknown` si el dispositivo se reinició con la acción en vuelo.
+
 ### Estado, duplicados y fallos
 
 - Latido con lease de 15 s; reloj monótono para disponibilidad. Al registrar una
@@ -201,7 +220,7 @@ del origen, sin pisar y solo dentro del mismo volumen. Los resúmenes
   Cambiar control incrementa generación. Abortar cancela pendientes y marca una
   acción despachada como `unknown` si no se puede confirmar su efecto.
 - Submit requiere dispositivo vivo, no suspendido y libre; TTL de invocación 15 s
-  (eco, lectura y escritura). No hay cola para dispositivos ausentes, ni encargos
+  (eco, lectura, escritura y apps). No hay cola para dispositivos ausentes, ni encargos
   para futuros arranques.
 - `submissionId` es clave de idempotencia duradera por dispositivo: repetir el mismo
   contenido devuelve la misma invocación/estado; cambiarlo produce conflicto.
@@ -252,10 +271,20 @@ del origen, sin pisar y solo dentro del mismo volumen. Los resúmenes
    confirmación individual e identidad revalidada; tampoco incluye `chmod`/
    propietarios, creación de directorios ni enlaces.
 5. **Apps y multimedia:** adaptadores, cierre sin pérdida, permisos macOS por destino.
+   El **control de apps** no espera a esta puerta: se ejecuta como corte 1 de la puerta 7
+   (ver abajo); aquí queda la parte de multimedia.
 6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
    terminal general solo tras acordar y verificar aislamiento/límites.
-7. **Accesibilidad/capturas:** habilitación explícita, TCC, bloqueo de sesión, modelo
-   de visión si hace falta y consentimiento de envío. No activar sensores por defecto.
+7. **Accesibilidad, control del Mac y capturas (puerta 7; corte 1, control de apps,
+   implementado 2026-11-01 con protocolo v4; pendiente la matriz en vivo de §8):**
+   `hefesto.apps` (`open`/`close`/`list`) con las tres acciones como trivial por
+   adaptador (`hefesto_apps`, `requiresConfirmation: False`, sin tarjeta), cierre **solo
+   suave** (`terminate`, sin forzar ni descartar cambios), resolución híbrida
+   NSWorkspace + escaneo cacheado de `Info.plist` y sin API privada ni subprocess; `list`
+   cortado a ≤30 y sin burbuja. **Pendientes** los cortes de teclado sintético y de
+   ventanas (mover/redimensionar/traer), que sí exigen habilitación explícita y TCC de
+   Accesibilidad, además de las capturas y el modelo de visión si hace falta: bloqueo de
+   sesión, consentimiento de envío y no activar sensores por defecto.
 
 Cada entrega es local y comprobable antes de activar la siguiente. La base no es un
 agente funcional ni un anuncio de que Hefesto ya controle el Mac.

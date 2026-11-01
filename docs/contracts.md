@@ -178,23 +178,27 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v3 — eco, lectura y escritura
+## Hefesto v4 — eco, lectura, escritura y apps
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v3-eco-lectura-y-escritura).
-Usa `protocolVersion: 3`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output` tipado por herramienta. Seis herramientas sobre el mismo protocolo:
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v4-eco-lectura-escritura-y-apps).
+Usa `protocolVersion: 4`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Siete herramientas sobre el mismo protocolo:
 `hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
 (`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
 Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
-`hefesto.rename` (`{from, to}`) y la interna `hefesto.file_info` (`{path}`). El relay
-expone al modelo `hefesto_echo` (asíncrono), `hefesto_list_dir` y
+`hefesto.rename` (`{from, to}`), `hefesto.apps` (`{action, name?, bundleId?,
+query?}`) y la interna `hefesto.file_info` (`{path}`). El relay expone al modelo
+`hefesto_echo` (asíncrono), `hefesto_list_dir` y
 `hefesto_read_file` (lectura síncrona, con confirmación por operación),
 `hefesto_write_file` (`{path, content, mode}`) y `hefesto_rename`;
-`hefesto.file_info` no está en el catálogo.
+`hefesto.file_info` no está en el catálogo. La de apps es **una sola** herramienta
+`hefesto_apps` (`{action, name?, bundleId?, query?}`) con `requiresConfirmation:
+False` —trivial por adaptador, como el eco—: tres acciones en vez de tres
+herramientas para no multiplicar el catálogo que viaja en cada petición.
 
 Rutas del protocolo (cuerpo exacto, sin campos extra):
 
-| Método y ruta | Rol | Cuerpo además de `protocolVersion: 3` | Respuesta |
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 4` | Respuesta |
 | --- | --- | --- | --- |
 | GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
 | POST `/v1/hefesto/register` | device | `instanceId` | estado |
@@ -211,6 +215,7 @@ Rutas del protocolo (cuerpo exacto, sin campos extra):
 | `hefesto.list_dir` / `hefesto.read_file` | `{path}` | `{text}` |
 | `hefesto.write_file` | `{path, content, expectedHash\|null}` | `{text}` resumen |
 | `hefesto.rename` | `{from, to}` | `{text}` resumen |
+| `hefesto.apps` | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
 | `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
@@ -218,8 +223,15 @@ Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol
 Lectura pura del journal. `output` es una unión validada por herramienta:
 
 ```ts
+/** Fila de `hefesto.apps` (`action: list`): nombre visible, bundle y si vive. */
+type AppRecord = { name: string; bundleId: string; running: boolean }
+
+/** Salida de `hefesto.apps` (`action: list`), cortada a ≤30 entradas. */
+type AppsOutput = { apps: AppRecord[] }
+
 type HefestoOutput =
-  | { text: string } // eco, list_dir, read_file, write_file y rename (≤64 KiB)
+  | { text: string } // eco, list_dir, read_file, write_file, rename y open/close de apps (≤64 KiB)
+  | AppsOutput // hefesto.apps, action=list
   | { exists: boolean; size: number | null; sha256: string | null } // file_info
 ```
 
@@ -260,6 +272,44 @@ entregarlo al dispositivo; el ejecutor del dispositivo también conserva en
 memoria las invocaciones completadas (con su contenido) para deduplicar
 entregas y responder a un ACK perdido. Si el proceso se reinicia antes de la
 entrega, la invocación queda `unknown` y no se reenvía.
+
+### Apps
+
+`hefesto.apps` recibe `{action, name?, bundleId?, query?}`. El conjunto de claves
+está cerrado: una clave extra —en particular `content`— se rechaza con
+`bad_argument`, porque apps nunca transporta contenido del usuario. `action` vale
+solo `open`, `close` o `list` (`bad_action`), cada cadena admite ≤256 caracteres y
+`open`/`close` exigen `name` o `bundleId` (`missing_target`). El relay comprueba
+además la acción y el destino antes de delegar, así que un argumento malformado no
+genera invocación.
+
+La resolución del dispositivo es híbrida: `NSWorkspace.runningApplications` es la
+fuente de verdad de lo que está vivo (y localiza la app antes de `terminate()`) y un
+mapa cacheado `nombre/bundleId → URL`, rellenado de forma perezosa con un escaneo
+único de `/Applications`, `/System/Applications` y `~/Applications` leyendo
+`Info.plist`, localiza las instaladas. Sin API privada, sin rutas arbitrarias del
+modelo y sin ejecutar binarios sueltos. AppKit exige hilo principal para abrir y
+cerrar: el ejecutor reenvía la acción y espera el resultado por un canal con
+timeout, sin bloquear su hilo.
+
+Salidas: `open`/`close` devuelven `{text}` con el resumen —`Abierta «Spotify»`,
+`Cerrada «Mail»`— y `list` devuelve `AppsOutput`, cortado a ≤30 entradas con las en
+ejecución primero y `query` como filtro; el relay lo traduce a líneas `«nombre»
+[bundleId] en ejecución|disponible` (`sin apps` si está vacío). El cierre es **solo
+suave** (`terminate`): si tras la espera la app sigue viva, el texto estable es
+`«X» sigue abierta (¿tiene cambios sin guardar?); no la fuerzo` y no se fuerza nada.
+Los rechazos vuelven también como texto: `no encuentro «X» entre las apps instaladas`,
+`no se pudo abrir «X»`, `no se pudo cerrar «X»`, y en el relay, antes de delegar,
+`action inválida (open, close o list)` o `falta name o bundleId para open`.
+
+Visibilidad: `hefesto_apps` se expone con `requiresConfirmation: False` (no hay
+tarjeta: es trivial por adaptador). Un `open`/`close` de éxito emite además la
+burbuja `agent: hefesto` con el resumen, como las escrituras; `list` es lectura y
+devuelve su resultado síncrono al modelo **sin burbuja** (lo redacta Atlas en su
+turno). El journal trata `hefesto.apps` como efecto: no persiste contenido (solo
+`toolId`, estado e identificadores) y un reinicio con la acción en vuelo la deja
+`unknown`, sin reejecutarla. Quedan fuera de este contrato el cierre forzado, el
+teclado sintético y la gestión de ventanas.
 
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
