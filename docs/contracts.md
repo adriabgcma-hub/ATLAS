@@ -329,8 +329,9 @@ relay es `hefesto_keyboard` (`{action, text?, combo?}`, `action` requerida) con
 argumentos antes de delegar, y **siempre** abre su propia tarjeta —con el texto
 recortado, que es la superficie de consentimiento—; no hay confirmación genérica
 previa ni se abre tarjeta con argumentos inválidos. La tarjeta llega con riesgo
-`write` y el resumen `Escribir «<texto>» en la app en primer plano` (texto cortado
-a 120 caracteres más «…») o `Pulsar <combo> en la app en primer plano`.
+`write` y el resumen `Escribir «<texto>» en la app en primer plano` (el texto se
+corta a 120 caracteres más «…» cuando es más largo) o `Pulsar <combo> en la app en
+primer plano`.
 
 Límites: `text` no vacío, ≤4096 bytes UTF-8 y sin caracteres de control (saltos de
 línea incluidos). `combo` ≤64 bytes y sigue una gramática cerrada y **autoritativa
@@ -361,7 +362,8 @@ app en primer plano`. Los rechazos son texto estable, sin estado `failed`: `text
 válido (sin saltos de línea ni controles)`, `atajo no válido`, y en el relay antes
 de delegar, `action inválida (type o combo)`, `falta text para type`, `falta combo
 para combo`, `texto no válido (sin saltos de línea ni controles)` y `atajo no
-válido`; una tarjeta denegada devuelve `denegada por el usuario`.
+válido`; una decisión distinta de `allow_once` —denegada o caducada— devuelve
+`denegada por el usuario`.
 
 Privacidad: el texto tecleado nunca se persiste ni se registra. El journal guarda
 solo `textBytes` y `textSha256` en los argumentos redactados, sin `text`, y el
