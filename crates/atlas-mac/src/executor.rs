@@ -93,6 +93,7 @@ pub struct Executor {
     pending_resume: Option<u64>,
     barred_resume_through: Option<Generation>,
     completed: HashMap<OpaqueId, CompletedInvocation>,
+    app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
 }
 
 impl Executor {
@@ -115,7 +116,15 @@ impl Executor {
             pending_resume: None,
             barred_resume_through: None,
             completed: HashMap::new(),
+            app_bridge: None,
         }
+    }
+
+    /// Injects the macOS app bridge so `hefesto.apps` can open, close and list
+    /// applications. Without it the tool reports unavailability as text.
+    pub fn with_app_bridge(mut self, bridge: std::sync::Arc<dyn crate::apps::AppBridge>) -> Self {
+        self.app_bridge = Some(bridge);
+        self
     }
 
     pub fn is_suspended(&self) -> bool {
@@ -354,6 +363,10 @@ impl Executor {
                     Err(text) => OutputPayload::text(text)?,
                 }
             }
+            (ToolId::Apps, ToolArguments::Apps(payload)) => match &self.app_bridge {
+                Some(bridge) => crate::apps::handle_apps(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede gestionar apps")?,
+            },
             _ => return Err(Error::InvalidArguments),
         };
         let result = ResultRequest {

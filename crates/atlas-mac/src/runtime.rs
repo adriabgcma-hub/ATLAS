@@ -206,6 +206,7 @@ pub struct Runtime<T: Transport> {
     transport: T,
     device_id: OpaqueId,
     roots: crate::tools::Roots,
+    app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
     session: Option<Session>,
     phase: Phase,
     detail: Option<&'static str>,
@@ -225,6 +226,7 @@ impl<T: Transport> Runtime<T> {
             transport,
             device_id,
             roots,
+            app_bridge: None,
             session: None,
             phase: Phase::Connecting,
             detail: None,
@@ -237,6 +239,14 @@ impl<T: Transport> Runtime<T> {
             last_abort: None,
             sequence: 0,
         }
+    }
+
+    /// Injects the macOS app bridge into every executor session this runtime
+    /// spawns, enabling `hefesto.apps`. Optional: without it the tool only
+    /// reports unavailability.
+    pub fn with_app_bridge(mut self, bridge: std::sync::Arc<dyn crate::apps::AppBridge>) -> Self {
+        self.app_bridge = Some(bridge);
+        self
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -341,7 +351,11 @@ impl<T: Transport> Runtime<T> {
             now.unix_ms().get(),
             self.sequence
         ))?;
-        let executor = Executor::new(self.device_id.clone(), instance.clone(), self.roots.clone());
+        let mut executor =
+            Executor::new(self.device_id.clone(), instance.clone(), self.roots.clone());
+        if let Some(bridge) = &self.app_bridge {
+            executor = executor.with_app_bridge(bridge.clone());
+        }
         self.session = Some(Session { instance, executor });
         self.registered = false;
         self.last_heartbeat = None;

@@ -864,3 +864,140 @@ fn restart_uses_new_instance_and_never_accepts_old_delivery() {
     );
     assert_eq!(executor.completed_count(), 0);
 }
+
+use std::sync::Arc;
+
+struct FakeBridge;
+impl atlas_mac::AppBridge for FakeBridge {
+    fn running(&self) -> Vec<atlas_mac::AppRef> {
+        vec![atlas_mac::AppRef {
+            name: "Spotify".into(),
+            bundle_id: "com.spotify.client".into(),
+            url: "file:///Applications/Spotify.app".into(),
+        }]
+    }
+    fn installed(&self) -> Vec<atlas_mac::AppRef> {
+        self.running()
+    }
+    fn open(&self, _: &atlas_mac::AppRef) -> std::result::Result<(), String> {
+        Ok(())
+    }
+    fn terminate(
+        &self,
+        _: &atlas_mac::AppRef,
+    ) -> std::result::Result<atlas_mac::CloseOutcome, String> {
+        Ok(atlas_mac::CloseOutcome::Gone)
+    }
+}
+
+fn apps_executor(bridge: Option<Arc<dyn atlas_mac::AppBridge>>) -> Executor {
+    let mut executor = Executor::new(
+        id("device"),
+        id("instance"),
+        Roots::new(vec![std::env::temp_dir()]),
+    );
+    if let Some(bridge) = bridge {
+        executor = executor.with_app_bridge(bridge);
+    }
+    let attempt = executor.prepare_registration(at(0)).unwrap();
+    executor
+        .acknowledge_registration(attempt, &status(1, true), at(0))
+        .unwrap();
+    let attempt = executor.prepare_resume(at(1)).unwrap();
+    executor
+        .acknowledge_resume(attempt, &status(2, false), at(2))
+        .unwrap();
+    executor
+}
+
+fn apps_invocation(tool: ToolId, payload: AppsPayload, inv_id: &str) -> Invocation {
+    let mut inv = invocation(); // generation(2), device/instance correctos
+    inv.invocation_id = id(inv_id);
+    inv.tool_id = tool;
+    inv.arguments = ToolArguments::Apps(payload);
+    inv
+}
+
+#[test]
+fn apps_open_close_and_list_route_through_bridge() {
+    let mut executor = apps_executor(Some(Arc::new(FakeBridge)));
+    let open = executor
+        .execute(
+            &apps_invocation(
+                ToolId::Apps,
+                AppsPayload {
+                    action: AppsAction::Open,
+                    name: Some("Spotify".into()),
+                    bundle_id: None,
+                    query: None,
+                },
+                "a-open",
+            ),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(open.output.text_value(), Some("Abierta «Spotify»"));
+
+    let mut executor = apps_executor(Some(Arc::new(FakeBridge)));
+    let close = executor
+        .execute(
+            &apps_invocation(
+                ToolId::Apps,
+                AppsPayload {
+                    action: AppsAction::Close,
+                    name: Some("Spotify".into()),
+                    bundle_id: None,
+                    query: None,
+                },
+                "a-close",
+            ),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(close.output.text_value(), Some("Cerrada «Spotify»"));
+
+    let mut executor = apps_executor(Some(Arc::new(FakeBridge)));
+    let list = executor
+        .execute(
+            &apps_invocation(
+                ToolId::Apps,
+                AppsPayload {
+                    action: AppsAction::List,
+                    name: None,
+                    bundle_id: None,
+                    query: None,
+                },
+                "a-list",
+            ),
+            at(3),
+        )
+        .unwrap();
+    match list.output {
+        OutputPayload::Apps(out) => assert_eq!(out.apps[0].bundle_id, "com.spotify.client"),
+        _ => panic!("esperaba OutputPayload::Apps"),
+    }
+}
+
+#[test]
+fn apps_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor
+        .execute(
+            &apps_invocation(
+                ToolId::Apps,
+                AppsPayload {
+                    action: AppsAction::Open,
+                    name: Some("Spotify".into()),
+                    bundle_id: None,
+                    query: None,
+                },
+                "a-none",
+            ),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Hefesto no puede gestionar apps")
+    );
+}
