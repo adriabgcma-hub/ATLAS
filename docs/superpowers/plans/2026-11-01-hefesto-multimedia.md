@@ -520,7 +520,7 @@ En `crates/atlas-mac/src/lib.rs`:
 ```rust
 pub mod media;
 ...
-pub use media::{handle_media, SystemKey};
+pub use media::handle_media;
 ```
 
 - [ ] **Step 5: Implementar el puente real de teclas de sistema**
