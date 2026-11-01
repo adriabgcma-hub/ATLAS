@@ -45,6 +45,7 @@ import ipaddress
 import json
 import os
 import queue
+import re
 import socket
 import sqlite3
 import sys
@@ -284,8 +285,41 @@ HEFESTO_APPS_TOOL = {
     },
 }
 
+HEFESTO_KEYBOARD_TOOL = {
+    "id": "hefesto_keyboard",
+    "risk": "external",
+    "requiresConfirmation": True,
+    # La tarjeta la abre _keyboard después de validar, con el texto recortado;
+    # _handle_tool_call no debe abrir otra (ni con argumentos inválidos).
+    "planConfirmation": True,
+    "description": ("Escribe texto o pulsa un atajo en la app en primer plano del Mac con "
+                    "Hefesto. action=type escribe `text` (máx. 4096 bytes, sin saltos de "
+                    "línea ni controles); action=combo pulsa `combo` con la gramática "
+                    "mods+tecla (cmd, shift, alt, ctrl; p. ej. cmd+s). Cada tecleo pide "
+                    "confirmación."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["type", "combo"],
+                       "description": "type escribe texto; combo pulsa un atajo"},
+            "text": {"type": "string",
+                     "description": "texto a escribir (máx. 4096 bytes; sin saltos)"},
+            "combo": {"type": "string",
+                      "description": "atajo mods+tecla (p. ej. cmd+shift+s)"},
+        },
+        "required": ["action"],
+    },
+}
+
 HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
-                 HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL]
+                 HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL,
+                 HEFESTO_KEYBOARD_TOOL]
+
+
+# Gramática cerrada del atajo (misma que el dispositivo): 1–3 modificadores
+# y una tecla del conjunto. Se ancla con fullmatch.
+_KEYBOARD_COMBO_RE = re.compile(
+    r"(?:(?:cmd|shift|alt|ctrl)\+){1,3}(?:[a-z0-9]|space|return|tab|esc|left|right|up|down|delete)")
 
 
 def norm_name(name: str) -> str:
@@ -915,6 +949,8 @@ class Brain:
             return self._rename_file(job, args)
         if tool_id == "hefesto_apps":
             return self._apps(job, args)
+        if tool_id == "hefesto_keyboard":
+            return self._keyboard(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -1172,6 +1208,43 @@ class Brain:
                 lines.append(f"«{a.get('name')}» [{a.get('bundleId')}] {state}")
         return "\n".join(lines) if lines else "sin apps"
 
+    def _keyboard(self, job: dict, args: dict) -> str:
+        """Teclado sintético en la app en primer plano; el texto nunca se registra."""
+        action = args.get("action")
+        if action not in ("type", "combo"):
+            return "action inválida (type o combo)"
+        if action == "type":
+            text = args.get("text")
+            if not isinstance(text, str) or not text:
+                return "falta text para type"
+            if (len(text.encode("utf-8")) > 4096
+                    or any(not c.isprintable() for c in text)):
+                return "texto no válido (sin saltos de línea ni controles)"
+            arguments = {"action": "type", "text": text}
+        else:
+            combo = args.get("combo")
+            if not isinstance(combo, str) or not combo:
+                return "falta combo para combo"
+            if len(combo.encode("utf-8")) > 64 or not _KEYBOARD_COMBO_RE.fullmatch(combo):
+                return "atajo no válido"
+            arguments = {"action": "combo", "combo": combo}
+        # La tarjeta solo se abre con argumentos ya validados y sin burbuja: el
+        # texto tecleado no debe replicarse. El tiempo del usuario no consume
+        # el plazo de la operación (igual que escritura y renombrado).
+        job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
+        summary = self._confirm_summary("hefesto_keyboard", args)
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_keyboard", args,
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        invocation_id, error = self._hefesto_submit("hefesto.keyboard", job, arguments)
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 20.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
     def _hefesto_note(self, session_id: str, content: str) -> None:
         """Burbuja violeta de Hefesto tras un efecto aprobado (escritura, movido, app)."""
         task_id = new_id("tsk")
@@ -1414,6 +1487,13 @@ class Brain:
             return (f"Escribir «{args.get('path', '?')}»", "write")
         if tool_id == "hefesto_rename":
             return (f"Mover «{args.get('from', '?')}» → «{args.get('to', '?')}»", "write")
+        if tool_id == "hefesto_keyboard":
+            if args.get("action") == "combo":
+                return (f"Pulsar {args.get('combo', '?')} en la app en primer plano", "write")
+            preview = str(args.get("text", ""))
+            if len(preview) > 120:
+                preview = preview[:120] + "…"
+            return (f"Escribir «{preview}» en la app en primer plano", "write")
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,
@@ -1619,8 +1699,8 @@ class Brain:
     def _handle_tool_call(self, job: dict, call: dict) -> str:
         """Ejecuta una tool_call del modelo (con confirmación si toca)."""
         function = call.get("function", {}) if isinstance(call, dict) else {}
-        # El contenido de una escritura nunca se registra.
-        logged = ("" if function.get("name") == "hefesto_write_file"
+        # El contenido de una escritura o del teclado nunca se registra.
+        logged = ("" if function.get("name") in ("hefesto_write_file", "hefesto_keyboard")
                   else str(function.get("arguments") or "")[:300])
         dlog(self, "TOOL", f"call tool={function.get('name')} args={logged} request={job.get('request_id')}")
         try:

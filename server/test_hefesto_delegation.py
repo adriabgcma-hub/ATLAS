@@ -863,3 +863,83 @@ class AppFlowTests(unittest.TestCase):
         ask.assert_not_called()
         # La delegación es síncrona: no queda encargos pendientes en el tracker.
         self.assertEqual(self.brain._delegations, {})
+
+
+class KeyboardFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-kbd-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def test_catalogo_expone_teclado_con_tarjeta(self):
+        tool = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_keyboard")
+        self.assertTrue(tool["requiresConfirmation"])
+        self.assertEqual(tool["schema"]["properties"]["action"]["enum"], ["type", "combo"])
+
+    def test_type_pide_tarjeta_y_devuelve_resumen(self):
+        self.journal.accept("inv-kbd")
+        self.journal.outcomes["inv-kbd"] = {"state": "succeeded",
+                                            "output": {"text": "Escrito 4 caracteres en «TextEdit»"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_keyboard", {"action": "type", "text": "hola"}, JOB)
+        self.assertEqual(result, "Escrito 4 caracteres en «TextEdit»")
+        self.assertEqual(ask.call_args.kwargs["summary"],
+                         ("Escribir «hola» en la app en primer plano", "write"))
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.keyboard")
+        self.assertEqual(self.journal.submits[0]["arguments"], {"action": "type", "text": "hola"})
+
+    def test_combo_valido(self):
+        self.journal.accept("inv-kbd")
+        self.journal.outcomes["inv-kbd"] = {"state": "succeeded",
+                                            "output": {"text": "Pulsado cmd+s en «TextEdit»"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            result = self.brain.execute_tool("hefesto_keyboard",
+                                             {"action": "combo", "combo": "cmd+s"}, JOB)
+        self.assertEqual(result, "Pulsado cmd+s en «TextEdit»")
+
+    def test_texto_con_salto_no_delega(self):
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_keyboard", {"action": "type", "text": "a\nb"}, JOB)
+        self.assertIn("texto no válido", result)
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_type_sin_texto_no_delega(self):
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool("hefesto_keyboard", {"action": "type"}, JOB)
+        self.assertIn("falta text", result)
+        ask.assert_not_called()
+
+    def test_atajo_invalido_no_delega(self):
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool("hefesto_keyboard",
+                                             {"action": "combo", "combo": "s"}, JOB)
+        self.assertIn("atajo no válido", result)
+        ask.assert_not_called()
+
+    def test_sin_burbuja_hefesto(self):
+        self.journal.accept("inv-kbd")
+        self.journal.outcomes["inv-kbd"] = {"state": "succeeded",
+                                            "output": {"text": "Escrito 4 caracteres en «TextEdit»"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"), \
+                mock.patch.object(self.brain, "_hefesto_note") as note:
+            self.brain.execute_tool("hefesto_keyboard",
+                                    {"action": "type", "text": "hola"}, JOB)
+        note.assert_not_called()
+
+    def test_el_log_no_contiene_el_texto(self):
+        self.journal.accept("inv-kbd")
+        self.journal.outcomes["inv-kbd"] = {"state": "succeeded",
+                                            "output": {"text": "Escrito 4 caracteres en «TextEdit»"}}
+        call = {"id": "c1", "function": {"name": "hefesto_keyboard",
+                                         "arguments": json.dumps({"action": "type", "text": "secreto"})}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"), \
+                mock.patch("atlas_relay.dlog") as log:
+            self.brain._handle_tool_call(JOB, call)
+        joined = " ".join(str(c) for c in log.call_args_list)
+        self.assertNotIn("secreto", joined)
