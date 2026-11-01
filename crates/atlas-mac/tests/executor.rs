@@ -1001,3 +1001,82 @@ fn apps_sin_puente_devuelve_texto_no_disponible() {
         Some("Hefesto no puede gestionar apps")
     );
 }
+
+struct FakeKeyboard;
+impl atlas_mac::KeyboardBridge for FakeKeyboard {
+    fn can_post(&self, _: bool) -> bool {
+        true
+    }
+    fn secure_input(&self) -> bool {
+        false
+    }
+    fn frontmost_app(&self) -> Option<String> {
+        Some("TextEdit".into())
+    }
+    fn type_text(&self, _: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
+    fn press(&self, _: u8, _: u16) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+
+fn keyboard_executor() -> Executor {
+    apps_executor(None).with_keyboard_bridge(Arc::new(FakeKeyboard))
+}
+
+fn keyboard_invocation(
+    action: KeyboardAction,
+    text: Option<&str>,
+    combo: Option<&str>,
+    inv_id: &str,
+) -> Invocation {
+    let mut inv = invocation();
+    inv.invocation_id = id(inv_id);
+    inv.tool_id = ToolId::Keyboard;
+    inv.arguments = ToolArguments::Keyboard(KeyboardPayload {
+        action,
+        text: text.map(str::to_owned),
+        combo: combo.map(str::to_owned),
+    });
+    inv
+}
+
+#[test]
+fn keyboard_type_se_enruta_por_el_puente_inyectado() {
+    let mut executor = keyboard_executor();
+    let out = executor
+        .execute(
+            &keyboard_invocation(KeyboardAction::Type, Some("hola"), None, "k-type"),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Escrito 4 caracteres en «TextEdit»")
+    );
+}
+
+#[test]
+fn keyboard_combo_se_enruta_por_el_puente_inyectado() {
+    let mut executor = keyboard_executor();
+    let out = executor
+        .execute(
+            &keyboard_invocation(KeyboardAction::Combo, None, Some("cmd+s"), "k-combo"),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(out.output.text_value(), Some("Pulsado cmd+s en «TextEdit»"));
+}
+
+#[test]
+fn keyboard_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor
+        .execute(
+            &keyboard_invocation(KeyboardAction::Type, Some("hola"), None, "k-none"),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(out.output.text_value(), Some("Hefesto no puede teclear"));
+}

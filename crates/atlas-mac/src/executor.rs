@@ -94,6 +94,7 @@ pub struct Executor {
     barred_resume_through: Option<Generation>,
     completed: HashMap<OpaqueId, CompletedInvocation>,
     app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
+    keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
 }
 
 impl Executor {
@@ -117,6 +118,7 @@ impl Executor {
             barred_resume_through: None,
             completed: HashMap::new(),
             app_bridge: None,
+            keyboard_bridge: None,
         }
     }
 
@@ -124,6 +126,16 @@ impl Executor {
     /// applications. Without it the tool reports unavailability as text.
     pub fn with_app_bridge(mut self, bridge: std::sync::Arc<dyn crate::apps::AppBridge>) -> Self {
         self.app_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS keyboard bridge so `hefesto.keyboard` can type text
+    /// and press shortcuts. Without it the tool reports unavailability as text.
+    pub fn with_keyboard_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::keyboard::KeyboardBridge>,
+    ) -> Self {
+        self.keyboard_bridge = Some(bridge);
         self
     }
 
@@ -366,6 +378,10 @@ impl Executor {
             (ToolId::Apps, ToolArguments::Apps(payload)) => match &self.app_bridge {
                 Some(bridge) => crate::apps::handle_apps(bridge.as_ref(), payload)?,
                 None => OutputPayload::text("Hefesto no puede gestionar apps")?,
+            },
+            (ToolId::Keyboard, ToolArguments::Keyboard(payload)) => match &self.keyboard_bridge {
+                Some(bridge) => crate::keyboard::handle_keyboard(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede teclear")?,
             },
             _ => return Err(Error::InvalidArguments),
         };

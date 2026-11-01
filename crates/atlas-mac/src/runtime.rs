@@ -207,6 +207,7 @@ pub struct Runtime<T: Transport> {
     device_id: OpaqueId,
     roots: crate::tools::Roots,
     app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
+    keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
     session: Option<Session>,
     phase: Phase,
     detail: Option<&'static str>,
@@ -227,6 +228,7 @@ impl<T: Transport> Runtime<T> {
             device_id,
             roots,
             app_bridge: None,
+            keyboard_bridge: None,
             session: None,
             phase: Phase::Connecting,
             detail: None,
@@ -246,6 +248,17 @@ impl<T: Transport> Runtime<T> {
     /// reports unavailability.
     pub fn with_app_bridge(mut self, bridge: std::sync::Arc<dyn crate::apps::AppBridge>) -> Self {
         self.app_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS keyboard bridge into every executor session this
+    /// runtime spawns, enabling `hefesto.keyboard`. Optional: without it the
+    /// tool only reports unavailability.
+    pub fn with_keyboard_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::keyboard::KeyboardBridge>,
+    ) -> Self {
+        self.keyboard_bridge = Some(bridge);
         self
     }
 
@@ -355,6 +368,9 @@ impl<T: Transport> Runtime<T> {
             Executor::new(self.device_id.clone(), instance.clone(), self.roots.clone());
         if let Some(bridge) = &self.app_bridge {
             executor = executor.with_app_bridge(bridge.clone());
+        }
+        if let Some(bridge) = &self.keyboard_bridge {
+            executor = executor.with_keyboard_bridge(bridge.clone());
         }
         self.session = Some(Session { instance, executor });
         self.registered = false;
