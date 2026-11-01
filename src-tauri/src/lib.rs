@@ -18,6 +18,10 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 #[cfg(target_os = "macos")]
 mod hefesto_apps;
 
+/// Puente real de teclado (`CGEvent` + permiso TCC), solo en macOS.
+#[cfg(target_os = "macos")]
+mod hefesto_keyboard;
+
 /// URL del cerebro en la red local. No es un secreto. Por nombre (.local):
 /// la IP del servidor puede cambiar, el nombre no.
 fn default_relay_url() -> String {
@@ -348,12 +352,15 @@ impl Hefesto {
                     .ok()
                     .map(|dir| dir.join(HEFESTO_SUSPEND_MARKER));
                 let mut runtime = Runtime::new(client, device_id, roots);
-                // El puente real de apps necesita el `AppHandle` para reenviar
-                // todo acceso a AppKit al hilo principal. Solo en macOS.
+                // Los puentes reales necesitan el `AppHandle` para reenviar
+                // todo acceso a AppKit/CG al hilo principal. Solo en macOS.
                 #[cfg(target_os = "macos")]
                 {
                     runtime = runtime
-                        .with_app_bridge(Arc::new(hefesto_apps::WorkspaceApps::new(app.clone())));
+                        .with_app_bridge(Arc::new(hefesto_apps::WorkspaceApps::new(app.clone())))
+                        .with_keyboard_bridge(Arc::new(hefesto_keyboard::CgKeyboard::new(
+                            app.clone(),
+                        )));
                 }
                 hefesto_loop(runtime, Instant::now(), snapshot, commands, app, marker)
             });
