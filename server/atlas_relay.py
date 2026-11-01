@@ -311,9 +311,32 @@ HEFESTO_KEYBOARD_TOOL = {
     },
 }
 
+HEFESTO_MEDIA_TOOL = {
+    "id": "hefesto_media",
+    "risk": "external",
+    "requiresConfirmation": True,
+    # La tarjeta la abre _media después de validar; _handle_tool_call no abre otra.
+    "planConfirmation": True,
+    "description": ("Sube o baja el volumen o el brillo, silencia y controla la reproducción "
+                    "del Mac con Hefesto usando las teclas de sistema. `count` (1–10) solo "
+                    "aplica a volumen y brillo (por defecto 1). Cada pulsación pide confirmación."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string",
+                       "enum": ["volume_up", "volume_down", "mute", "brightness_up",
+                                "brightness_down", "play_pause", "next", "previous"],
+                       "description": "acción multimedia"},
+            "count": {"type": "integer", "minimum": 1, "maximum": 10,
+                      "description": "pulsaciones (solo volumen y brillo; por defecto 1)"},
+        },
+        "required": ["action"],
+    },
+}
+
 HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
                  HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL,
-                 HEFESTO_KEYBOARD_TOOL]
+                 HEFESTO_KEYBOARD_TOOL, HEFESTO_MEDIA_TOOL]
 
 
 # Gramática cerrada del atajo (misma que el dispositivo): 1–3 modificadores
@@ -324,6 +347,10 @@ _KEYBOARD_COMBO_RE = re.compile(
 
 def norm_name(name: str) -> str:
     return name.strip().casefold()
+
+
+def counted_steps(count) -> bool:
+    return type(count) is int and count > 1
 
 
 def tool_payload(defs: list[dict] = TOOL_DEFS) -> list[dict]:
@@ -951,6 +978,8 @@ class Brain:
             return self._apps(job, args)
         if tool_id == "hefesto_keyboard":
             return self._keyboard(job, args)
+        if tool_id == "hefesto_media":
+            return self._media(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -1245,6 +1274,38 @@ class Brain:
             return output
         return str(output.get("text") or "")
 
+    def _media(self, job: dict, args: dict) -> str:
+        """Teclas de sistema (volumen, brillo, reproducción); siempre con tarjeta."""
+        action = args.get("action")
+        if action not in ("volume_up", "volume_down", "mute", "brightness_up",
+                          "brightness_down", "play_pause", "next", "previous"):
+            return ("action inválida (volume_up, volume_down, mute, brightness_up, "
+                    "brightness_down, play_pause, next o previous)")
+        counted = action in ("volume_up", "volume_down", "brightness_up", "brightness_down")
+        if counted:
+            count = args.get("count", 1)
+            if type(count) is not int or not 1 <= count <= 10:
+                return "count fuera de rango (1–10)"
+            arguments = {"action": action, "count": count}
+        else:
+            if "count" in args:
+                return "count no aplica a esta acción"
+            arguments = {"action": action}
+        # El tiempo del usuario no consume el plazo de la operación.
+        job["deadline"] = time.monotonic() + CONFIRM_TIMEOUT_S + 60
+        summary = self._confirm_summary("hefesto_media", arguments)
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_media", arguments,
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        invocation_id, error = self._hefesto_submit("hefesto.media", job, arguments)
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 20.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
     def _hefesto_note(self, session_id: str, content: str) -> None:
         """Burbuja violeta de Hefesto tras un efecto aprobado (escritura, movido, app)."""
         task_id = new_id("tsk")
@@ -1494,6 +1555,21 @@ class Brain:
             if len(preview) > 120:
                 preview = preview[:120] + "…"
             return (f"Escribir «{preview}» en la app en primer plano", "write")
+        if tool_id == "hefesto_media":
+            action = str(args.get("action", "?"))
+            count = args.get("count", 1)
+            extra = f" {count} pasos" if counted_steps(count) else ""
+            labels = {
+                "volume_up": f"Subir el volumen{extra}",
+                "volume_down": f"Bajar el volumen{extra}",
+                "mute": "Silenciar o reactivar el sonido",
+                "brightness_up": f"Subir el brillo{extra}",
+                "brightness_down": f"Bajar el brillo{extra}",
+                "play_pause": "Reproducir o pausar",
+                "next": "Pasar a la siguiente pista",
+                "previous": "Volver a la pista anterior",
+            }
+            return (labels.get(action, f"Multimedia: {action}"), "write")
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,

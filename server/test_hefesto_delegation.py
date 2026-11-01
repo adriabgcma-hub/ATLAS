@@ -991,3 +991,108 @@ class KeyboardFlowTests(unittest.TestCase):
         self.assertEqual(api.call_args.args[1]["text"], "secreto-teclado")
         joined = " ".join(str(c) for c in telegram_log.call_args_list)
         self.assertNotIn("secreto-teclado", joined)
+
+
+class MediaFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-media-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def test_catalogo_expone_media_con_tarjeta(self):
+        tool = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_media")
+        self.assertTrue(tool["requiresConfirmation"])
+        self.assertTrue(tool["planConfirmation"])
+        self.assertEqual(tool["schema"]["properties"]["action"]["enum"],
+                         ["volume_up", "volume_down", "mute", "brightness_up",
+                          "brightness_down", "play_pause", "next", "previous"])
+        count = tool["schema"]["properties"]["count"]
+        self.assertEqual((count["minimum"], count["maximum"]), (1, 10))
+
+    def test_volumen_pide_tarjeta_y_normaliza_count(self):
+        self.journal.accept("inv-media")
+        self.journal.outcomes["inv-media"] = {
+            "state": "succeeded", "output": {"text": "Subido 3 pasos de volumen"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_media", {"action": "volume_up", "count": 3}, JOB)
+        self.assertEqual(result, "Subido 3 pasos de volumen")
+        self.assertEqual(ask.call_args.kwargs["summary"],
+                         ("Subir el volumen 3 pasos", "write"))
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.media")
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "volume_up", "count": 3})
+
+    def test_media_sin_count_usa_uno(self):
+        self.journal.accept("inv-media")
+        self.journal.outcomes["inv-media"] = {
+            "state": "succeeded", "output": {"text": "Bajado 1 paso de brillo"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            self.brain.execute_tool("hefesto_media", {"action": "brightness_down"}, JOB)
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "brightness_down", "count": 1})
+
+    def test_mute_no_lleva_count(self):
+        self.journal.accept("inv-media")
+        self.journal.outcomes["inv-media"] = {
+            "state": "succeeded", "output": {"text": "Pulsada la tecla de silencio"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"):
+            self.brain.execute_tool("hefesto_media", {"action": "mute"}, JOB)
+        self.assertEqual(self.journal.submits[0]["arguments"], {"action": "mute"})
+
+    def test_action_invalida_no_delega(self):
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool("hefesto_media", {"action": "explode"}, JOB)
+        self.assertEqual(
+            result,
+            "action inválida (volume_up, volume_down, mute, brightness_up, "
+            "brightness_down, play_pause, next o previous)")
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_count_invalido_no_delega(self):
+        cases = (
+            ({"action": "volume_up", "count": 0}, "count fuera de rango (1–10)"),
+            ({"action": "volume_up", "count": 11}, "count fuera de rango (1–10)"),
+            ({"action": "volume_up", "count": "2"}, "count fuera de rango (1–10)"),
+            ({"action": "mute", "count": 1}, "count no aplica a esta acción"),
+            ({"action": "next", "count": 2}, "count no aplica a esta acción"),
+        )
+        for args, expected in cases:
+            with mock.patch.object(self.brain, "ask_confirmation") as ask:
+                self.assertEqual(self.brain.execute_tool("hefesto_media", args, JOB), expected)
+            ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_sin_burbuja_hefesto(self):
+        self.journal.accept("inv-media")
+        self.journal.outcomes["inv-media"] = {
+            "state": "succeeded", "output": {"text": "Pulsada la tecla de silencio"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"), \
+                mock.patch.object(self.brain, "_hefesto_note") as note:
+            self.brain.execute_tool("hefesto_media", {"action": "mute"}, JOB)
+        note.assert_not_called()
+
+    def test_handle_tool_call_abre_una_sola_tarjeta(self):
+        self.journal.accept("inv-media")
+        self.journal.outcomes["inv-media"] = {
+            "state": "succeeded", "output": {"text": "Pulsada la tecla de reproducción/pausa"}}
+        call = {"id": "c1", "function": {"name": "hefesto_media",
+                                         "arguments": json.dumps({"action": "play_pause"})}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask, \
+                mock.patch("atlas_relay.dlog"):
+            self.brain._handle_tool_call(JOB, call)
+        self.assertEqual(ask.call_count, 1)
+
+    def test_entrada_invalida_no_abre_tarjeta(self):
+        call = {"id": "c1", "function": {"name": "hefesto_media",
+                                         "arguments": json.dumps({"action": "mute", "count": 1})}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch("atlas_relay.dlog"):
+            result = self.brain._handle_tool_call(JOB, call)
+        self.assertEqual(result, "count no aplica a esta acción")
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
