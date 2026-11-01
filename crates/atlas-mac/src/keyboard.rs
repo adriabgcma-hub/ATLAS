@@ -25,6 +25,7 @@ pub trait KeyboardBridge: Send + Sync {
     fn frontmost_app(&self) -> Option<String>;
     fn type_text(&self, text: &str) -> Result<(), String>;
     fn press(&self, modifiers: u8, keycode: u16) -> Result<(), String>;
+    fn press_system(&self, key: u32, count: u8) -> Result<(), String>;
 }
 
 pub fn validate_text(text: &str) -> Result<(), &'static str> {
@@ -227,6 +228,11 @@ mod tests {
         }
 
         fn press(&self, _: u8, _: u16) -> Result<(), String> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn press_system(&self, _: u32, _: u8) -> Result<(), String> {
             self.called.store(true, Ordering::SeqCst);
             Ok(())
         }

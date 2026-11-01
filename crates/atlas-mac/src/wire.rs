@@ -355,6 +355,27 @@ pub struct KeyboardPayload {
     pub combo: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaAction {
+    VolumeUp,
+    VolumeDown,
+    Mute,
+    BrightnessUp,
+    BrightnessDown,
+    PlayPause,
+    Next,
+    Previous,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MediaPayload {
+    pub action: MediaAction,
+    #[serde(default)]
+    pub count: Option<u8>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
@@ -364,6 +385,7 @@ pub enum ToolArguments {
     Rename(RenamePayload),
     Apps(AppsPayload),
     Keyboard(KeyboardPayload),
+    Media(MediaPayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -454,6 +476,8 @@ pub enum ToolId {
     Apps,
     #[serde(rename = "hefesto.keyboard")]
     Keyboard,
+    #[serde(rename = "hefesto.media")]
+    Media,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

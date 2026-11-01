@@ -1,4 +1,5 @@
 use atlas_mac::*;
+use atlas_mac::{MediaAction, MediaPayload};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
@@ -338,4 +339,21 @@ fn teclado_v6_aterriza_en_su_variante_sin_robar_apps() {
     ));
     let list: ToolArguments = serde_json::from_str(r#"{"action":"list","query":"saf"}"#).unwrap();
     assert!(matches!(list, ToolArguments::Apps(_)));
+}
+
+#[test]
+fn media_v6_aterriza_en_su_variante_sin_robar_teclado_ni_apps() {
+    let volume: ToolArguments =
+        serde_json::from_str(r#"{"action":"volume_up","count":3}"#).unwrap();
+    assert_eq!(
+        volume,
+        ToolArguments::Media(MediaPayload {
+            action: MediaAction::VolumeUp,
+            count: Some(3),
+        })
+    );
+    let typed: ToolArguments = serde_json::from_str(r#"{"action":"type","text":"hola"}"#).unwrap();
+    assert!(matches!(typed, ToolArguments::Keyboard(_)));
+    let apps: ToolArguments = serde_json::from_str(r#"{"action":"list"}"#).unwrap();
+    assert!(matches!(apps, ToolArguments::Apps(_)));
 }

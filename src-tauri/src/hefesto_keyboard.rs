@@ -13,9 +13,14 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use atlas_mac::keyboard::{KeyboardBridge, MOD_ALT, MOD_CMD, MOD_CTRL, MOD_SHIFT};
-use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation as CoreEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use objc2_app_kit::NSWorkspace;
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSWorkspace};
+// Justificación: el plan pide `CGEventPost`; el binding 0.3.2 lo marca obsoleto
+// en favor de `CGEvent::post`, que internamente llama al mismo símbolo público.
+#[allow(deprecated)]
+use objc2_core_graphics::{CGEventPost, CGEventTapLocation};
+use objc2_foundation::NSPoint;
 use tauri::AppHandle;
 
 /// Viaje máximo al hilo principal para una consulta o un posteo acotado.
@@ -112,7 +117,7 @@ fn post_text_on_main(text: &str) -> Result<(), String> {
             let event = CGEvent::new_keyboard_event(source.clone(), 0, key_down)
                 .map_err(|()| "no se pudo crear el evento de teclado".to_string())?;
             event.set_string(chunk);
-            event.post(CGEventTapLocation::HID);
+            event.post(CoreEventTapLocation::HID);
         }
     }
     Ok(())
@@ -125,7 +130,46 @@ fn post_combo_on_main(flags: CGEventFlags, keycode: u16) -> Result<(), String> {
         let event = CGEvent::new_keyboard_event(source.clone(), keycode, key_down)
             .map_err(|()| "no se pudo crear el evento de teclado".to_string())?;
         event.set_flags(flags);
-        event.post(CGEventTapLocation::HID);
+        event.post(CoreEventTapLocation::HID);
+    }
+    Ok(())
+}
+
+/// Bits públicos de estado de una tecla de sistema (`NX_KEYDOWN`/`NX_KEYUP`).
+const NX_KEYDOWN: isize = 0x0A00;
+const NX_KEYUP: isize = 0x0B00;
+/// `NX_SUBTYPE_AUX_CONTROL_BUTTONS` de `ev_keymap.h`.
+const NX_SUBTYPE_AUX_CONTROL_BUTTONS: i16 = 8;
+const SYSTEM_EVENT_ERROR: &str = "no se pudo crear el evento de tecla del sistema";
+
+fn system_key_data1(key: u32, down: bool) -> isize {
+    ((key as isize) << 16) | if down { NX_KEYDOWN } else { NX_KEYUP }
+}
+
+/// Postea `count` pulsaciones (down+up) de una tecla de sistema por el tap HID.
+// Justificación: `CGEventPost` es el símbolo público que pide el plan; el
+// binding lo marca obsoleto porque prefiere `CGEvent::post`, que hace lo mismo.
+#[allow(deprecated)]
+fn post_system_on_main(key: u32, count: u8) -> Result<(), String> {
+    for _ in 0..count {
+        for down in [true, false] {
+            let event = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+                NSEventType::SystemDefined,
+                NSPoint::ZERO,
+                NSEventModifierFlags::Function,
+                0.0,
+                0,
+                None,
+                NX_SUBTYPE_AUX_CONTROL_BUTTONS,
+                system_key_data1(key, down),
+                -1,
+            )
+            .ok_or_else(|| SYSTEM_EVENT_ERROR.to_string())?;
+            let cg = event
+                .CGEvent()
+                .ok_or_else(|| SYSTEM_EVENT_ERROR.to_string())?;
+            CGEventPost(CGEventTapLocation::HIDEventTap, Some(&cg));
+        }
     }
     Ok(())
 }
@@ -203,6 +247,10 @@ impl KeyboardBridge for CgKeyboard {
         let flags = cg_flags(modifiers);
         self.on_main(move || post_combo_on_main(flags, keycode))?
     }
+
+    fn press_system(&self, key: u32, count: u8) -> Result<(), String> {
+        self.on_main(move || post_system_on_main(key, count))?
+    }
 }
 
 #[cfg(test)]
@@ -244,5 +292,13 @@ mod tests {
             cg_flags(MOD_ALT | MOD_CTRL),
             CGEventFlags::CGEventFlagAlternate | CGEventFlags::CGEventFlagControl
         );
+    }
+
+    #[test]
+    fn data1_empaqueta_tecla_y_estado() {
+        assert_eq!(system_key_data1(0, true), 0x0A00);
+        assert_eq!(system_key_data1(0, false), 0x0B00);
+        assert_eq!(system_key_data1(16, true), (16 << 16) | 0x0A00);
+        assert_eq!(system_key_data1(18, false), (18 << 16) | 0x0B00);
     }
 }

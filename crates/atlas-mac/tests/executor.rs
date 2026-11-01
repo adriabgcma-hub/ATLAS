@@ -1019,6 +1019,9 @@ impl atlas_mac::KeyboardBridge for FakeKeyboard {
     fn press(&self, _: u8, _: u16) -> std::result::Result<(), String> {
         Ok(())
     }
+    fn press_system(&self, _: u32, _: u8) -> std::result::Result<(), String> {
+        Ok(())
+    }
 }
 
 fn keyboard_executor() -> Executor {
