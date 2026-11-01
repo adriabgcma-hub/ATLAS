@@ -13,6 +13,11 @@ use atlas_core::{codes, get_events, get_session, post_cancel, post_send, AtlasEr
 use atlas_mac::{Clock, HefestoClient, OpaqueId, Phase, Roots, Runtime, Snapshot};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
+/// Puente real de control de apps (`NSWorkspace`), solo en macOS: AppKit no
+/// está disponible en el resto de plataformas.
+#[cfg(target_os = "macos")]
+mod hefesto_apps;
+
 /// URL del cerebro en la red local. No es un secreto. Por nombre (.local):
 /// la IP del servidor puede cambiar, el nombre no.
 fn default_relay_url() -> String {
@@ -342,14 +347,15 @@ impl Hefesto {
                     .app_data_dir()
                     .ok()
                     .map(|dir| dir.join(HEFESTO_SUSPEND_MARKER));
-                hefesto_loop(
-                    Runtime::new(client, device_id, roots),
-                    Instant::now(),
-                    snapshot,
-                    commands,
-                    app,
-                    marker,
-                )
+                let mut runtime = Runtime::new(client, device_id, roots);
+                // El puente real de apps necesita el `AppHandle` para reenviar
+                // todo acceso a AppKit al hilo principal. Solo en macOS.
+                #[cfg(target_os = "macos")]
+                {
+                    runtime = runtime
+                        .with_app_bridge(Arc::new(hefesto_apps::WorkspaceApps::new(app.clone())));
+                }
+                hefesto_loop(runtime, Instant::now(), snapshot, commands, app, marker)
             });
         if spawned.is_err() {
             self.store(Snapshot::failed("thread_failed"));
