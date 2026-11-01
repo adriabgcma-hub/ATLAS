@@ -192,13 +192,23 @@ de prueba autorizados por el usuario (2026-10-28).
       sin API privada. Probado en vivo (abrir y cerrar TextEdit, lista real del Mac,
       app inexistente rechazada sin abrir). Commits `c17d993`…`355fa2a`, relay
       desplegado y bundle instalado en `/Applications/Atlas.app`.
-- [ ] Puerta 7 pendiente: teclado y ventanas (cortes 2 y 3), y luego multimedia,
-      terminal y accesibilidad según las puertas del plan.
+- [x] Teclado sintético (2026-11-01, puerta 7, corte 2): protocolo v5 con **una sola**
+      herramienta `hefesto_keyboard` (`type`/`combo`) y **tarjeta siempre**; solo la
+      app en primer plano, texto ≤4096 B sin controles, atajos con al menos un
+      modificador y teclas cerradas. El puente usa eventos Unicode de CGEvent en el
+      hilo principal, pide el permiso de Accesibilidad una vez por arranque y respeta
+      la entrada segura. El texto no se persiste, no se registra en el log ni genera
+      burbuja (la tarjeta con el texto recortado es el consentimiento). Probado en
+      vivo: tecleo verificado en un documento con fichero, `cmd+s` y rechazo por
+      entrada segura. Commits `2ef02eb`…`24ae479`, relay desplegado y bundle
+      instalado en `/Applications/Atlas.app`.
+- [ ] Puerta 7 pendiente: ventanas (corte 3), y luego multimedia, terminal y
+      accesibilidad según las puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
 la app Tauri cuando el entorno trae sus credenciales, y hoy cubre el eco, la lectura
-y escritura dentro de las raíces autorizadas y el control de las apps instaladas. La
-ventana de tablas permanece pendiente.
+y escritura dentro de las raíces autorizadas, el control de las apps instaladas y el
+teclado sintético con consentimiento. La ventana de tablas permanece pendiente.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

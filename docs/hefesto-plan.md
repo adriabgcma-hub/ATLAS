@@ -691,3 +691,73 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   Auditoría de procesos al terminar: solo vivo `Atlas.app` (PID 65581, ~75 MB,
   lanzado con las variables del dispositivo para la prueba); sin TextEdit, sin
   procesos Hefesto/Vite/Tauri ni descendientes huérfanos y sin RAM añadida.
+- 2026-11-01, teclado sintético (puerta 7, corte 2), implementado, desplegado y
+  probado en vivo:
+  1. **Protocolo v5**: `protocolVersion` sube de 4 a 5 en `wire.rs`, el journal y
+     los submits del relay, con sus fixtures. `crates/atlas-core` y
+     `src/types/contracts.ts` siguen sin declarar versión; el tercer espejo es
+     `docs/contracts.md`.
+  2. **Dispositivo**: `crates/atlas-mac/src/keyboard.rs` con la gramática cerrada
+     del atajo (`cmd|shift|alt|ctrl` + una tecla de `a-z`, `0-9`, `space`,
+     `return`, `tab`, `esc`, flechas, `delete`; 1–3 modificadores, al menos uno,
+     keycodes ANSI), la validación del texto (no vacío, ≤4096 B, sin controles)
+     y los textos estables, detrás del trait
+     `KeyboardBridge` (`can_post`, `secure_input`, `frontmost_app`, `type_text`,
+     `press`).
+  3. **Puente real**: `src-tauri/src/hefesto_keyboard.rs` (`CgKeyboard`) escribe
+     con eventos **Unicode** de CGEvent (keycode 0, trozos de ≤20 unidades
+     UTF-16, down+up, `CGEventTapLocation::HID`) y pulsa atajos con flags; todo
+     va al hilo principal con `run_on_main_thread` + canal y timeout. Comprueba
+     `CGPreflightPostEventAccess` y pide el permiso con
+     `CGRequestPostEventAccess` **una vez por arranque**; `IsSecureEventInputEnabled`
+     (Carbon paraguas, subframework HIToolbox) bloquea el tecleo con el texto
+     `hay un campo con entrada segura en primer plano; no tecleo ahí`.
+  4. **Journal v5**: `hefesto.keyboard` es efecto con contenido; el texto **no se
+     persiste** (solo `textBytes`/`textSha256` y el cuerpo en memoria), el
+     conjunto de claves se restringe a `action|text|combo` y una invocación en
+     vuelo tras reinicio queda `unknown` sin reejecutar.
+  5. **Relay**: una sola herramienta `hefesto_keyboard`
+     (`requiresConfirmation: True` + `planConfirmation: True`, una tarjeta por
+     llamada y ninguna si la entrada es inválida), validación previa, tarjeta
+     `Escribir «…» (recortado a 120 caracteres) en la app en primer plano` /
+     `Pulsar cmd+s en la app en primer plano` con riesgo `write`, y **sin burbuja**
+     (el texto no se replica a Telegram). El log nunca contiene el texto: los
+     args del teclado se redactan y `ask_confirmation` registra `summary_len` en
+     vez del resumen.
+  6. **Chat**: `HEFESTO_PHASES` añade `hefesto_keyboard` → órbita violeta
+     «Hefesto · Tecleando».
+  Commits: plan `2ef02eb`, protocolo `4b27fa4`, módulo teclado `02bee11`,
+  despacho `adb6234`, puente CGEvent `971b03b`, journal `8b7d443`, relay
+  `86d4d24` y su fix de logs `1895fb2`, docs y órbita `fea849f` + `0e13266`,
+  precisión del permiso en el spec `24ae479`. Pruebas: `cargo test --workspace`
+  126 correctas (2 ignoradas del panel), `cargo clippy --workspace --all-targets
+  -- -D warnings` limpio, `cargo fmt --all -- --check` limpio, Python 326 OK,
+  `npm test` 56, `npm run build` y `npm run lint` limpios. Desplegado con
+  `./scripts/deploy-relay.sh` (push de los 11 commits del corte, `atlas-relay`
+  activo y `/v1/health` OK) y bundle Apple Development instalado en
+  `/Applications/Atlas.app` con firma profunda válida (el paso del DMG vuelve a
+  fallar tras firmar el `.app`, como en builds anteriores).
+- 2026-11-01, matriz en vivo del teclado (relay v5 + bundle nuevo, disparada por
+  HTTP sin tocar la UI):
+  1. «Escribe exactamente esto en la ventana activa: PRUEBA-TECLADO-42» → tarjeta
+     `Escribir «PRUEBA-TECLADO-42» en la app en primer plano`, aprobada, y el texto
+     aparece en un documento de TextEdit **abierto desde fichero**: el autoguardado
+     dejó `PRUEBA-TECLADO-42` en `/tmp/hefesto-kbd.txt`, verificado en disco (sin
+     duplicados por el par down/up). El primer intento con ventanas sin título
+     pareció no escribir: había varias ventanas abiertas y el texto fue a otra; la
+     prueba controlada con fichero demuestra el tecleo.
+  2. «Escribe … EXTRA» + «Pulsa cmd+s» → el fichero pasó a
+     `PRUEBA-TECLADO-42EXTRA`: el atajo se aplicó y TextEdit guardó.
+  3. Diálogo `display dialog … with hidden answer` en primer plano → el
+     dispositivo devolvió `hay un campo con entrada segura en primer plano; no
+     tecleo ahí`, sin postear ninguna tecla; el diálogo quedó vacío y se cerró
+     matando su PID propio.
+  4. En todas las llamadas el log del relay muestra `args=` vacío (sin texto), la
+     tarjeta lleva el texto recortado y **no** se publica burbuja `agent: hefesto`.
+  5. El permiso de Accesibilidad ya estaba concedido a `Atlas.app`, así que no
+     apareció el diálogo de TCC; sin permiso la ruta devuelve el error estable y no
+     teclea (cubierto por los tests del puente y del dispositivo).
+  Auditoría al terminar: vivos `Atlas.app` (PID 95909, ~69 MB) y `TextEdit`
+  (PID 95930, ~54 MB) con el documento de prueba abierto; sin `osascript`, sin
+  procesos Vite/Tauri y sin huérfanos nuevos. El fichero de prueba
+  `/tmp/hefesto-kbd.txt` se deja para inspección del usuario.
