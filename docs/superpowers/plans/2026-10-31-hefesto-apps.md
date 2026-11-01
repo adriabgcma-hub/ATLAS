@@ -108,7 +108,7 @@ git commit -m "feat(hefesto): protocolo v4 de preparación para control de apps"
   - `pub struct AppRef { pub name: String, pub bundle_id: String, pub url: String }`.
   - `pub enum CloseOutcome { Gone, StillPresent }`.
   - `pub trait AppBridge: Send + Sync { fn running(&self) -> Vec<AppRef>; fn installed(&self) -> Vec<AppRef>; fn open(&self, target: &AppRef) -> Result<(), String>; fn terminate(&self, target: &AppRef) -> Result<CloseOutcome, String>; }`.
-  - `pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> OutputPayload`.
+  - `pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> crate::Result<OutputPayload>` (propaga con `?`, sin `unwrap`; corregido en el fix round de T2).
   - Funciones puras auxiliares: `find_installed`, `find_running`, `build_list`, `norm`.
 
 - [ ] **Step 1: Escribir los tipos wire**
@@ -275,6 +275,9 @@ Run: `cargo test -p atlas-mac --lib apps`
 Expected: FAIL (funciones aún sin implementar o sin compilar el resto de `apps.rs`).
 
 - [ ] **Step 4: Implementar `handle_apps` y los textos estables**
+
+> **Nota de corrección (fix round T2, commit `4ac2d02`):** `handle_apps` devuelve `crate::Result<OutputPayload>` y cada `OutputPayload::text(...)` usa `?` en vez de `.unwrap()`; `OutputPayload::Apps(...)` va envuelto en `Ok(...)`. El cuerpo de ejemplo abajo conserva los `.unwrap()` históricos por claridad; la implementación real va con `?`.
+
 
 Añade a `apps.rs`:
 
@@ -504,7 +507,7 @@ En el `match` de `execute()` (línea ~357, antes del `_ =>`), añade:
 
 ```rust
 (ToolId::Apps, ToolArguments::Apps(payload)) => match &self.app_bridge {
-    Some(bridge) => crate::apps::handle_apps(bridge.as_ref(), payload),
+            Some(bridge) => crate::apps::handle_apps(bridge.as_ref(), payload)?,
     None => OutputPayload::text("Hefesto no puede gestionar apps")?,
 },
 ```
