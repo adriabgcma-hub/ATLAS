@@ -916,6 +916,75 @@ class AppControlJournalTests(JournalTests):
         self.assertEqual(self.ok("submit", peer=CONTROLLER, **APPS_OPEN), {**ack, "state": "unknown"})
 
 
+KEYBOARD_TYPE = {"submissionId": "submission-kbd", "requestId": "request-1",
+                 "sessionId": "session-1", "taskId": "task-1",
+                 "toolId": "hefesto.keyboard",
+                 "arguments": {"action": "type", "text": "secreto"}}
+
+
+class KeyboardJournalTests(JournalTests):
+    def test_el_texto_no_se_guarda_en_sqlite(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **KEYBOARD_TYPE)
+        invocation = self.next()
+        self.assertEqual(invocation["arguments"]["text"], "secreto")
+        with sqlite3.connect(self.path) as db:
+            submission, stored_text = db.execute(
+                "SELECT submission, text FROM invocations").fetchone()
+        self.assertNotIn("secreto", submission)
+        self.assertEqual(stored_text, "")
+        self.assertIn("textSha256", submission)
+
+    def test_reinicio_sin_entregar_deja_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **KEYBOARD_TYPE)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+
+    def test_clave_extra_se_rechaza(self):
+        broken = json.loads(json.dumps(KEYBOARD_TYPE))
+        broken["arguments"]["content"] = "colado"
+        self.error("bad_argument", "submit", peer=CONTROLLER, **broken)
+
+    def test_type_sin_texto_se_rechaza(self):
+        broken = json.loads(json.dumps(KEYBOARD_TYPE))
+        del broken["arguments"]["text"]
+        self.error("missing_text", "submit", peer=CONTROLLER, **broken)
+
+    def test_texto_con_salto_o_control_se_rechaza(self):
+        for bad in ("a\nb", "a\tb", "a\x00b"):
+            broken = json.loads(json.dumps(KEYBOARD_TYPE))
+            broken["arguments"]["text"] = bad
+            self.error("invalid_text", "submit", peer=CONTROLLER, **broken)
+
+    def test_combo_valido_y_sin_combo(self):
+        combo = {"submissionId": "submission-kbd2", "requestId": "request-1",
+                 "sessionId": "session-1", "taskId": "task-2",
+                 "toolId": "hefesto.keyboard",
+                 "arguments": {"action": "combo", "combo": "cmd+s"}}
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **combo)
+        self.assertEqual(self.next()["arguments"]["combo"], "cmd+s")
+        broken = json.loads(json.dumps(combo))
+        del broken["arguments"]["combo"]
+        self.error("missing_combo", "submit", peer=CONTROLLER, **broken)
+
+    def test_acepta_salida_de_texto_y_rechaza_info(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **KEYBOARD_TYPE)
+        invocation = self.next()
+        self.ok("result", **self.result_fields(
+            invocation, output={"text": "Escrito 7 caracteres en «TextEdit»"}))
+        self.ok("submit", peer=CONTROLLER,
+                **{**KEYBOARD_TYPE, "submissionId": "submission-kbd3", "taskId": "task-3"})
+        second = self.next()
+        self.error("invalid_text", "result", **self.result_fields(
+            second, output={"exists": True, "size": 3, "sha256": "0" * 64}))
+
+
 class RegistryTests(unittest.TestCase):
     def test_peer_validation(self):
         for role, device in (("admin", "mac"), (None, "mac"), ([], "mac"), ("device", ""),

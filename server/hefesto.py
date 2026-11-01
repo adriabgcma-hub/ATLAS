@@ -10,6 +10,7 @@ import sqlite3
 import ssl
 import threading
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -166,7 +167,8 @@ def _validate(method, path, raw):
         raise _Rejected("invalid_action")
     if operation == "submit" and body["toolId"] not in (
             "hefesto.echo", "hefesto.list_dir", "hefesto.read_file",
-            "hefesto.write_file", "hefesto.rename", "hefesto.file_info", "hefesto.apps"):
+            "hefesto.write_file", "hefesto.rename", "hefesto.file_info", "hefesto.apps",
+            "hefesto.keyboard"):
         raise _Rejected("unsupported_tool")
     if operation == "submit":
         args = body["arguments"]
@@ -216,6 +218,31 @@ def _validate(method, path, raw):
                     raise _Rejected("bad_argument", 400)
             if action in ("open", "close") and not (args.get("name") or args.get("bundleId")):
                 raise _Rejected("missing_target", 400)
+        elif body["toolId"] == "hefesto.keyboard":
+            if not set(args) <= {"action", "text", "combo"}:
+                raise _Rejected("bad_argument", 400)
+            action = args.get("action")
+            if action not in ("type", "combo"):
+                raise _Rejected("bad_action", 400)
+            if action == "type":
+                text = args.get("text")
+                if type(text) is not str or not text:
+                    raise _Rejected("missing_text", 400)
+                try:
+                    if (len(text.encode("utf-8")) > 4096
+                            or any(unicodedata.category(c) == "Cc" for c in text)):
+                        raise _Rejected("invalid_text", 400)
+                except UnicodeError:
+                    raise _Rejected("invalid_text", 400) from None
+            else:
+                combo = args.get("combo")
+                if type(combo) is not str or not combo:
+                    raise _Rejected("missing_combo", 400)
+                try:
+                    if len(combo.encode("utf-8")) > 64:
+                        raise _Rejected("invalid_combo", 400)
+                except UnicodeError:
+                    raise _Rejected("invalid_combo", 400) from None
         else:
             if set(args) != {"path"}:
                 raise _Rejected("invalid_fields")
@@ -300,7 +327,7 @@ class Journal:
             # ya no existe (solo vivía en memoria): queda `unknown`, nunca se
             # reenvía. `hefesto.apps` (open/close) también es un efecto: aunque
             # sus argumentos si persisten, no se reejecuta tras un reinicio.
-            side_effects = ("hefesto.write_file", "hefesto.apps")
+            side_effects = ("hefesto.write_file", "hefesto.apps", "hefesto.keyboard")
             pending_effects = [
                 row["invocation_id"]
                 for row in self._db.execute(
@@ -444,12 +471,19 @@ class Journal:
         if operation == "submit":
             arguments = data["arguments"]
             redacted = {key: value for key, value in data.items() if key != "arguments"}
+            hidden = {"content"}
+            if data["toolId"] == "hefesto.keyboard":
+                hidden.add("text")
             redacted["arguments"] = {key: value for key, value in arguments.items()
-                                     if key != "content"}
+                                     if key not in hidden}
             if "content" in arguments:
                 encoded_content = arguments["content"].encode("utf-8")
                 redacted["arguments"]["contentBytes"] = len(encoded_content)
                 redacted["arguments"]["contentSha256"] = hashlib.sha256(encoded_content).hexdigest()
+            if data["toolId"] == "hefesto.keyboard" and "text" in arguments:
+                encoded_text = arguments["text"].encode("utf-8")
+                redacted["arguments"]["textBytes"] = len(encoded_text)
+                redacted["arguments"]["textSha256"] = hashlib.sha256(encoded_text).hexdigest()
             submission = json.dumps(redacted, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
             previous = self._db.execute("SELECT * FROM invocations WHERE device_id=? AND submission_id=?",
                                         (device_id, data["submissionId"])).fetchone()
@@ -461,15 +495,17 @@ class Journal:
             if self._active(device_id) is not None:
                 raise _Rejected("device_busy", 409)
             invocation_id = uuid.uuid4().hex
+            stored_text = ("" if data["toolId"] == "hefesto.keyboard"
+                           else data["arguments"].get("text", ""))
             self._db.execute("""INSERT INTO invocations
                              (invocation_id, device_id, submission_id, submission, instance_id, generation,
                               request_id, session_id, task_id, text, expires_ms, deadline_mono, state)
                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending')""",
                              (invocation_id, device_id, data["submissionId"], submission, device["instance_id"],
                               device["generation"], data["requestId"], data["sessionId"], data["taskId"],
-                              data["arguments"].get("text", ""), int(wall * 1000) + INVOCATION_SECONDS * 1000,
+                              stored_text, int(wall * 1000) + INVOCATION_SECONDS * 1000,
                               now + INVOCATION_SECONDS))
-            if "content" in data["arguments"]:
+            if "content" in data["arguments"] or data["toolId"] == "hefesto.keyboard":
                 self._contents[invocation_id] = data["arguments"]
             return {"protocolVersion": 5, "invocationId": invocation_id, "state": "pending"}
         if operation == "outcome":
@@ -493,7 +529,7 @@ class Journal:
             if active is not None:
                 submitted = json.loads(active["submission"])
                 arguments = submitted["arguments"]
-                if submitted["toolId"] == "hefesto.write_file":
+                if submitted["toolId"] in ("hefesto.write_file", "hefesto.keyboard"):
                     # El contenido no persiste: si el proceso se reinició entre
                     # submit y next, la escritura queda `unknown` y no se entrega.
                     arguments = self._contents.get(active["invocation_id"])
