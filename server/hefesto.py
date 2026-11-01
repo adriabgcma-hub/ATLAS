@@ -1,4 +1,4 @@
-"""Isolated, authenticated Hefesto v5 journal (echo, read-only and write tools) and HTTPS listener."""
+"""Isolated, authenticated Hefesto v6 journal (echo, read-only, write, apps, keyboard and media tools) and HTTPS listener."""
 
 from __future__ import annotations
 
@@ -24,6 +24,9 @@ REQUEST_DEADLINE = 5.0
 _ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z", re.ASCII)
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _PREFIX = "/v1/hefesto/"
+_MEDIA_ACTIONS = ("volume_up", "volume_down", "mute", "brightness_up",
+                  "brightness_down", "play_pause", "next", "previous")
+_MEDIA_COUNT_ACTIONS = ("volume_up", "volume_down", "brightness_up", "brightness_down")
 _FIELDS = {
     "register": {"instanceId"},
     "heartbeat": {"instanceId"},
@@ -168,7 +171,7 @@ def _validate(method, path, raw):
     if operation == "submit" and body["toolId"] not in (
             "hefesto.echo", "hefesto.list_dir", "hefesto.read_file",
             "hefesto.write_file", "hefesto.rename", "hefesto.file_info", "hefesto.apps",
-            "hefesto.keyboard"):
+            "hefesto.keyboard", "hefesto.media"):
         raise _Rejected("unsupported_tool")
     if operation == "submit":
         args = body["arguments"]
@@ -243,6 +246,18 @@ def _validate(method, path, raw):
                         raise _Rejected("invalid_combo", 400)
                 except UnicodeError:
                     raise _Rejected("invalid_combo", 400) from None
+        elif body["toolId"] == "hefesto.media":
+            if not set(args) <= {"action", "count"}:
+                raise _Rejected("bad_argument", 400)
+            action = args.get("action")
+            if action not in _MEDIA_ACTIONS:
+                raise _Rejected("bad_action", 400)
+            if "count" in args:
+                count = args["count"]
+                if type(count) is not int or not 1 <= count <= 10:
+                    raise _Rejected("bad_count", 400)
+                if action not in _MEDIA_COUNT_ACTIONS:
+                    raise _Rejected("bad_count", 400)
         else:
             if set(args) != {"path"}:
                 raise _Rejected("invalid_fields")
@@ -327,7 +342,8 @@ class Journal:
             # ya no existe (solo vivía en memoria): queda `unknown`, nunca se
             # reenvía. `hefesto.apps` (open/close) también es un efecto: aunque
             # sus argumentos si persisten, no se reejecuta tras un reinicio.
-            side_effects = ("hefesto.write_file", "hefesto.apps", "hefesto.keyboard")
+            side_effects = ("hefesto.write_file", "hefesto.apps", "hefesto.keyboard",
+                            "hefesto.media")
             pending_effects = [
                 row["invocation_id"]
                 for row in self._db.execute(

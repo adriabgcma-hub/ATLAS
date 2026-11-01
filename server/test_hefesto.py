@@ -985,6 +985,72 @@ class KeyboardJournalTests(JournalTests):
             second, output={"exists": True, "size": 3, "sha256": "0" * 64}))
 
 
+MEDIA = {"submissionId": "submission-m", "requestId": "request-1", "sessionId": "session-1",
+         "taskId": "task-m", "toolId": "hefesto.media",
+         "arguments": {"action": "volume_up", "count": 2}}
+
+
+class MediaJournalTests(JournalTests):
+    @staticmethod
+    def media(arguments, **changes):
+        return {**MEDIA, **changes, "arguments": arguments}
+
+    def test_media_submit_next_result(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **MEDIA)
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["toolId"], "hefesto.media")
+        self.assertEqual(invocation["arguments"], {"action": "volume_up", "count": 2})
+        result = self.ok("result", **self.result_fields(
+            invocation, output={"text": "Subido 2 pasos de volumen"}))
+        self.assertEqual(result["state"], "succeeded")
+
+    def test_media_action_invalida_se_rechaza(self):
+        self.ready()
+        self.error("bad_action", "submit", peer=CONTROLLER,
+                   **self.media({"action": "explode"}))
+
+    def test_media_count_fuera_de_rango_se_rechaza(self):
+        self.ready()
+        for count in (0, 11, "2", True):
+            self.error("bad_count", "submit", peer=CONTROLLER,
+                       **self.media({"action": "volume_down", "count": count},
+                                    submissionId=f"submission-mc-{count}",
+                                    taskId=f"task-mc-{count}"))
+
+    def test_media_count_no_aplica_se_rechaza(self):
+        self.ready()
+        self.error("bad_count", "submit", peer=CONTROLLER,
+                   **self.media({"action": "mute", "count": 1},
+                                submissionId="submission-mm", taskId="task-mm"))
+
+    def test_media_claves_extra_se_rechazan(self):
+        self.ready()
+        self.error("bad_argument", "submit", peer=CONTROLLER,
+                   **self.media({"action": "mute", "text": "x"},
+                                submissionId="submission-mx", taskId="task-mx"))
+
+    def test_reinicio_pendiente_de_media_queda_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **MEDIA)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+
+    def test_media_rechaza_output_malformado(self):
+        # La validación genérica de `output` rechaza cualquier forma que no sea
+        # texto, info de archivo o lista de apps con `invalid_output` (igual que
+        # el resto de herramientas); media solo admite `{text}`.
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **MEDIA)
+        invocation = self.next()
+        self.error("invalid_output", "result", **self.result_fields(
+            invocation, output={"volume": 2}))
+
+
 class RegistryTests(unittest.TestCase):
     def test_peer_validation(self):
         for role, device in (("admin", "mac"), (None, "mac"), ([], "mac"), ("device", ""),
