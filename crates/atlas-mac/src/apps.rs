@@ -11,7 +11,11 @@ pub struct AppRef {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloseOutcome {
+    /// Ya no está: o se cerró tras `terminate()` o no estaba corriendo.
     Gone,
+    /// No estaba corriendo: no había nada que cerrar.
+    NotRunning,
+    /// Sigue viva tras la espera acotada; no se fuerza.
     StillPresent,
 }
 
@@ -145,6 +149,10 @@ pub fn handle_apps(bridge: &dyn AppBridge, payload: &AppsPayload) -> crate::Resu
                 Ok(CloseOutcome::Gone) => {
                     Ok(OutputPayload::text(format!("Cerrada «{}»", target.name))?)
                 }
+                Ok(CloseOutcome::NotRunning) => Ok(OutputPayload::text(format!(
+                    "«{}» no está abierta",
+                    target.name
+                ))?),
                 Ok(CloseOutcome::StillPresent) => Ok(OutputPayload::text(format!(
                     "«{}» sigue abierta (¿tiene cambios sin guardar?); no la fuerzo",
                     target.name
@@ -288,6 +296,18 @@ mod tests {
             out.text_value().unwrap().contains("no la fuerzos")
                 || out.text_value().unwrap().contains("sigue abierta")
         );
+    }
+
+    #[test]
+    fn close_no_abierta_no_afirma_cierre() {
+        let bridge = FakeBridge {
+            running: vec![],
+            installed: vec![app("Mail", "com.apple.mail")],
+            open_result: Ok(()),
+            close_result: Ok(CloseOutcome::NotRunning),
+        };
+        let out = handle_apps(&bridge, &payload(AppsAction::Close, Some("Mail"), None)).unwrap();
+        assert_eq!(out.text_value(), Some("«Mail» no está abierta"));
     }
 
     #[test]

@@ -298,7 +298,9 @@ ejecución primero y `query` como filtro; el relay lo traduce a líneas `«nombr
 [bundleId] en ejecución|disponible` (`sin apps` si está vacío). El cierre es **solo
 suave** (`terminate`): si tras la espera la app sigue viva, el texto estable es
 `«X» sigue abierta (¿tiene cambios sin guardar?); no la fuerzo` y no se fuerza nada.
-Los rechazos vuelven también como texto: `no encuentro «X» entre las apps instaladas`,
+Si la app no estaba corriendo, el texto es `«X» no está abierta` (sin burbuja: no se
+afirma un cierre que no ocurrió). Los rechazos vuelven también como texto:
+`no encuentro «X» entre las apps instaladas`,
 `no se pudo abrir «X»`, `no se pudo cerrar «X»`, y en el relay, antes de delegar,
 `action inválida (open, close o list)` o `falta name o bundleId para open`.
 

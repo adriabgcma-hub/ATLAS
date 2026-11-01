@@ -128,7 +128,7 @@ fn bundle_is_running(bundle_id: &str) -> bool {
 
 /// Resultado del primer viaje al hilo principal en `terminate`.
 enum TerminateKick {
-    /// La app no estaba corriendo: cierre confirmado sin esperar.
+    /// La app no estaba corriendo: no hay nada que cerrar ni que esperar.
     AlreadyGone,
     /// Se envió `terminate()` una vez; queda por sondear la salida.
     Signalled,
@@ -241,7 +241,7 @@ impl AppBridge for WorkspaceApps {
                             == Some(bundle_id.as_str())
                     });
                 let Some(app) = found else {
-                    // No estaba corriente: ya se fue (Gone) sin esperar.
+                    // No estaba corriente: se informa sin afirmar que se cerró.
                     let _ = tx.send(TerminateKick::AlreadyGone);
                     return;
                 };
@@ -253,7 +253,7 @@ impl AppBridge for WorkspaceApps {
             .map_err(|_| "no se pudo reenviar al hilo principal".to_string())?;
 
         match rx.recv_timeout(MAIN_ROUNDTRIP) {
-            Ok(TerminateKick::AlreadyGone) => return Ok(CloseOutcome::Gone),
+            Ok(TerminateKick::AlreadyGone) => return Ok(CloseOutcome::NotRunning),
             Ok(TerminateKick::Signalled) => {}
             Err(_) => return Err("timeout del hilo principal".to_string()),
         }

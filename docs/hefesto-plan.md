@@ -592,11 +592,14 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
      y propaga los errores de texto sin `unwrap`.
   3. **Puente real**: `src-tauri/src/hefesto_apps.rs` (`WorkspaceApps`) usa
      `NSWorkspace.runningApplications` y un escaneo **cacheado** de `Info.plist`
-     en `/Applications`, `/System/Applications` y `~/Applications`, y reenvía
-     `openApplicationAtURL`/`terminate` al hilo principal con
-     `run_on_main_thread` + canal y timeout en todas las rutas. `atlas-mac` no
-     conoce el `AppHandle`. Sin API privada (`_LSCopyAllApplicationURLs`,
-     `LSApplicationWorkspace`) y sin lista de binarios.
+     en `/Applications`, `/System/Applications` y `~/Applications`, y reenvía al
+     hilo principal la apertura del bundle (`NSWorkspace.openURL`, API pública
+     equivalente a `openApplicationAtURL`) y `terminate`, con
+     `run_on_main_thread` + canal y timeout en todas las rutas. La espera del
+     cierre vive en el hilo llamante con sondas cortas, para que el runloop siga
+     girando. `atlas-mac` no conoce el `AppHandle`. Sin API privada
+     (`_LSCopyAllApplicationURLs`, `LSApplicationWorkspace`) y sin lista de
+     binarios.
   4. **Journal v4**: `hefesto.apps` es operación sin contenido persistido (solo
      toolId, estado e ids, como `file_info`); el conjunto de argumentos se
      restringe a `action|name|bundleId|query` **antes** de guardar, así `content`
@@ -610,10 +613,20 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
      sin burbuja.
   6. **Chat**: `HEFESTO_PHASES` añade la clave `hefesto_apps` → órbita violeta
      «Hefesto · Gestiona apps».
+  - **Revisión final de rama (corregido antes de cerrar):** cerrar una app
+    instalada pero **no abierta** devolvía «Cerrada «X»» y publicaba burbuja,
+    afirmando un cierre que no ocurrió. Ahora el puente distingue el caso con
+    `CloseOutcome::NotRunning` y el texto es `«X» no está abierta`, sin burbuja;
+    con test unitario. `docs/contracts.md` recoge las tres salidas del cierre
+    (`Cerrada`, `no está abierta`, `sigue abierta … no la fuerzo`). También se
+    corrigió en el registro que la apertura usa `NSWorkspace.openURL` (pública,
+    equivalente a `openApplicationAtURL`), no esta última.
   Commits: spec+plan `c17d993`, protocolo `77e1a62`, módulo apps `bb27b15` y su
   fix sin unwrap `4ac2d02`, despacho `23f0277`, puente NSWorkspace `7df0bf7`,
   journal `f731e67` y su restricción de claves `cab6dc7`, relay `a65f897`,
-  docs y órbita `bd71711` + `355fa2a`. Pruebas: `cargo test --workspace` 106
+  docs y órbita `bd71711` + `355fa2a`, registro `94cd2e0` y el fix de la
+  revisión final `fix(hefesto): cerrar una app no abierta no afirma cierre`.
+  Pruebas: `cargo test --workspace` 107
   correctas (2 ignoradas del panel), `cargo clippy --workspace --all-targets --
   -D warnings` limpio, `python3 -m unittest discover` 271 OK, `npm test` 55 y
   `npm run build`. Deuda **preexistente** que este corte no toca: `cargo fmt
@@ -634,6 +647,10 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
      desaparece (cierre suave, sin `forceTerminate`).
   4. «Abre NoExiste-QA-9999» → sin burbuja y sin abrir nada; el texto estable del
      dispositivo («no encuentro …») llega al modelo, que lo reporta.
+  5. «Cierra Mail» con Mail **no** abierta → ««Mail» no está abierta», sin burbuja
+     (antes de la corrección afirmaba «Cerrada «Mail»»); y la regresión «abre y
+     cierra TextEdit» vuelve a dar «Abierta …» y «Cerrada …» con sus burbujas y
+     los procesos creados y eliminados de verdad.
   Auditoría de procesos al terminar: solo vivo `Atlas.app` (PID 65581, ~75 MB,
   lanzado con las variables del dispositivo para la prueba); sin TextEdit, sin
   procesos Hefesto/Vite/Tauri ni descendientes huérfanos y sin RAM añadida.
