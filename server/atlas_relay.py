@@ -983,7 +983,7 @@ class Brain:
         if len(text.encode("utf-8")) > 256:
             return "delegación rechazada: texto demasiado largo (máx. 256 bytes)"
         submission = {
-            "protocolVersion": 5,
+            "protocolVersion": 6,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -1023,7 +1023,7 @@ class Brain:
             if job["request_id"] in self.cancelled:
                 return None, "cancelada a mitad de turno"
         submission = {
-            "protocolVersion": 5,
+            "protocolVersion": 6,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -1050,7 +1050,7 @@ class Brain:
             status, outcome = journal.dispatch(
                 hefesto.Peer("controller", device_id), "POST",
                 "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 5,
+                json.dumps({"protocolVersion": 6,
                             "invocationId": invocation_id}).encode("utf-8"))
             if status == 200 and outcome.get("state") in (
                     "succeeded", "expired", "cancelled", "unknown"):
@@ -1359,7 +1359,7 @@ class Brain:
                 return {"ok": False, "error": body.get("error", "status_failed")}
             status, body = journal.dispatch(
                 peer, "POST", "/v1/hefesto/control",
-                json.dumps({"protocolVersion": 5, "action": "abort",
+                json.dumps({"protocolVersion": 6, "action": "abort",
                             "expectedGeneration": body["generation"]}).encode("utf-8"))
             if status == 200:
                 return {"ok": True, "suspended": True}
@@ -1384,7 +1384,7 @@ class Brain:
         for entry in entries:
             status, response = journal.dispatch(
                 peer, "POST", "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 5,
+                json.dumps({"protocolVersion": 6,
                             "invocationId": entry["invocation_id"]}).encode("utf-8"))
             if status != 200:
                 dlog(self, "HEFESTO",

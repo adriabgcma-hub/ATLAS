@@ -53,7 +53,7 @@ pub struct ProtocolVersion;
 impl TryFrom<u64> for ProtocolVersion {
     type Error = Error;
     fn try_from(value: u64) -> Result<Self> {
-        if value == 5 {
+        if value == 6 {
             Ok(Self)
         } else {
             Err(Error::InvalidVersion)
@@ -63,7 +63,7 @@ impl TryFrom<u64> for ProtocolVersion {
 
 impl From<ProtocolVersion> for u64 {
     fn from(_: ProtocolVersion) -> Self {
-        5
+        6
     }
 }
 
@@ -694,9 +694,9 @@ mod tests {
     use super::ProtocolVersion;
 
     #[test]
-    fn protocol_version_is_five() {
-        assert_eq!(u64::from(ProtocolVersion), 5);
-        assert!(ProtocolVersion::try_from(5u64).is_ok());
-        assert!(ProtocolVersion::try_from(4u64).is_err());
+    fn protocol_version_is_six() {
+        assert_eq!(u64::from(ProtocolVersion), 6);
+        assert!(ProtocolVersion::try_from(6u64).is_ok());
+        assert!(ProtocolVersion::try_from(5u64).is_err());
     }
 }
