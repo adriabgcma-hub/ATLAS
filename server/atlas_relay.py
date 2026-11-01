@@ -1520,12 +1520,17 @@ class Brain:
             })
         # Avisar por Telegram si hay chat asociado (fuera del lock por red).
         if chat_id is not None:
-            dlog(self, "CONFIRM", f"enviando aviso a Telegram chat_id={chat_id} summary={text[:100]}")
+            # El resumen puede llevar contenido del usuario (p. ej. el texto del
+            # teclado): el log registra su longitud, nunca el texto.
+            dlog(self, "CONFIRM",
+                 f"enviando aviso a Telegram chat_id={chat_id} tool={tool_id} "
+                 f"summary_len={len(text)}")
             self._send_telegram(
                 chat_id,
                 f"⏳ Atlas necesita tu confirmación:\n{text}\n\n"
                 "Responde «sí» / «adelante» para aceptar, o «no» para denegar.\n"
-                "Tienes 5 minutos para responder.")
+                "Tienes 5 minutos para responder.",
+                log_text=False)
         else:
             dlog(self, "CONFIRM", f"sin chat_id (local), no se envía aviso Telegram request={request_id}")
         entry["event"].wait(CONFIRM_TIMEOUT_S)
@@ -1794,8 +1799,13 @@ class Brain:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.load(response)
 
-    def _send_telegram(self, chat_id: int, text: str) -> None:
-        dlog(self, "TELEGRAM", f"send chat_id={chat_id} text={text[:200]}")
+    def _send_telegram(self, chat_id: int, text: str, *, log_text: bool = True) -> None:
+        # `log_text=False` para avisos de consentimiento: el cuerpo lleva el
+        # texto (es la tarjeta), pero el log solo registra su longitud.
+        if log_text:
+            dlog(self, "TELEGRAM", f"send chat_id={chat_id} text={text[:200]}")
+        else:
+            dlog(self, "TELEGRAM", f"send chat_id={chat_id} text_len={len(text)}")
         try:
             self._telegram_call("sendMessage", {"chat_id": chat_id, "text": text}, 20)
         except Exception as exc:

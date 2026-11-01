@@ -938,8 +938,56 @@ class KeyboardFlowTests(unittest.TestCase):
                                             "output": {"text": "Escrito 4 caracteres en «TextEdit»"}}
         call = {"id": "c1", "function": {"name": "hefesto_keyboard",
                                          "arguments": json.dumps({"action": "type", "text": "secreto"})}}
-        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once"), \
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask, \
                 mock.patch("atlas_relay.dlog") as log:
             self.brain._handle_tool_call(JOB, call)
+        # Una llamada válida abre exactamente una tarjeta (invariante del plan).
+        self.assertEqual(ask.call_count, 1)
         joined = " ".join(str(c) for c in log.call_args_list)
         self.assertNotIn("secreto", joined)
+
+    def test_entrada_invalida_no_abre_tarjeta_ni_delega(self):
+        call = {"id": "c1", "function": {"name": "hefesto_keyboard",
+                                         "arguments": json.dumps({"action": "type",
+                                                                  "text": "a\nb"})}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch("atlas_relay.dlog"):
+            result = self.brain._handle_tool_call(JOB, call)
+        self.assertIn("texto no válido", result)
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_telegram_no_filtra_el_texto_al_log(self):
+        self.journal.accept("inv-kbd")
+        self.journal.outcomes["inv-kbd"] = {"state": "succeeded",
+                                            "output": {"text": "Escrito 15 caracteres en «TextEdit»"}}
+        call = {"id": "c1", "function": {"name": "hefesto_keyboard",
+                                         "arguments": json.dumps({"action": "type",
+                                                                  "text": "secreto-teclado"})}}
+        job = {**JOB, "source": "telegram", "chat_id": 42}
+
+        def approve_on_notice(chat_id, body, **kwargs):
+            # Simula al usuario aceptando desde Telegram al recibir el aviso.
+            entry = self.brain.confirmations.get(job["request_id"])
+            if entry is not None and entry["decision"] is None:
+                self.assertTrue(self.brain.confirm(job["request_id"], "allow_once"))
+
+        with mock.patch.object(self.brain, "_send_telegram",
+                               side_effect=approve_on_notice) as send, \
+                mock.patch("atlas_relay.dlog") as log:
+            result = self.brain._handle_tool_call(job, call)
+        self.assertEqual(result, "Escrito 15 caracteres en «TextEdit»")
+        # El log de CONFIRM (ruta real de ask_confirmation) no lleva el texto.
+        joined = " ".join(str(c) for c in log.call_args_list)
+        self.assertNotIn("secreto-teclado", joined)
+        notice = send.call_args_list[0]
+        # El cuerpo del aviso conserva el texto: es la superficie de consentimiento.
+        self.assertIn("secreto-teclado", notice.args[1])
+        self.assertIs(notice.kwargs.get("log_text"), False)
+        # Y el envío real (sin red) redacta el log de TELEGRAM a su longitud.
+        with mock.patch.object(self.brain, "_telegram_call") as api, \
+                mock.patch("atlas_relay.dlog") as telegram_log:
+            self.brain._send_telegram(42, "secreto-teclado", log_text=False)
+        self.assertEqual(api.call_args.args[1]["text"], "secreto-teclado")
+        joined = " ".join(str(c) for c in telegram_log.call_args_list)
+        self.assertNotIn("secreto-teclado", joined)
