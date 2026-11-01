@@ -60,9 +60,13 @@ un atajo— con la superficie mínima y sin abrir un canal de ejecución encubie
 
 ### 3.3 Permisos y entrada segura
 
-8. Antes de teclear se comprueba `AXIsProcessTrusted`. Si falta, se solicita el
-   diálogo del sistema **una sola vez por arranque** (variante con prompt) y se
-   devuelve el error estable; sin permiso no se postea ningún evento.
+8. Antes de teclear se comprueba el permiso de publicación de eventos con
+   `CGPreflightPostEventAccess` (es el permiso de Accesibilidad que macOS muestra en
+   Ajustes). Si falta, se solicita el diálogo del sistema **una sola vez por arranque**
+   con `CGRequestPostEventAccess` y se devuelve el error estable; sin permiso no se
+   postea ningún evento. (`AXIsProcessTrusted` cubre la misma intención, pero su
+   variante con aviso exige construir un `CFDictionary`; la API de CoreGraphics es
+   pública, equivalente y más simple.)
 9. Antes de teclear se comprueba `IsSecureEventInputEnabled`. Si está activa, no se
    postea nada y se devuelve el error estable.
 10. La app en primer plano se lee de `NSWorkspace.frontmostApplication` para el
