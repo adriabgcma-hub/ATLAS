@@ -338,6 +338,23 @@ pub struct AppsOutput {
     pub apps: Vec<AppRecord>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyboardAction {
+    Type,
+    Combo,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KeyboardPayload {
+    pub action: KeyboardAction,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub combo: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
@@ -346,6 +363,7 @@ pub enum ToolArguments {
     Write(WritePayload),
     Rename(RenamePayload),
     Apps(AppsPayload),
+    Keyboard(KeyboardPayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -434,6 +452,8 @@ pub enum ToolId {
     FileInfo,
     #[serde(rename = "hefesto.apps")]
     Apps,
+    #[serde(rename = "hefesto.keyboard")]
+    Keyboard,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

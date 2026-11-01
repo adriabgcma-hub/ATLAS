@@ -3,6 +3,7 @@
 pub mod apps;
 pub mod client;
 pub mod executor;
+pub mod keyboard;
 pub mod runtime;
 pub mod tools;
 pub mod wire;
@@ -10,6 +11,7 @@ pub mod wire;
 pub use apps::{handle_apps, AppBridge, AppRef, CloseOutcome};
 pub use client::HefestoClient;
 pub use executor::{Clock, Executor, RegistrationAttempt, ResumeAttempt};
+pub use keyboard::{handle_keyboard, KeyboardBridge};
 pub use runtime::{Phase, Runtime, Snapshot, Transport};
 pub use tools::Roots;
 pub use wire::*;

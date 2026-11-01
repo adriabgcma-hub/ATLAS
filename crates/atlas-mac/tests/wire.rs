@@ -315,3 +315,27 @@ fn la_salida_tipificada_se_parsea_y_se_serializa() {
     let json = serde_json::to_string(&text).unwrap();
     assert_eq!(json, r#"{"text":"hola"}"#);
 }
+
+#[test]
+fn teclado_v5_aterriza_en_su_variante_sin_robar_apps() {
+    let typed: ToolArguments = serde_json::from_str(r#"{"action":"type","text":"hola"}"#).unwrap();
+    assert_eq!(
+        typed,
+        ToolArguments::Keyboard(KeyboardPayload {
+            action: KeyboardAction::Type,
+            text: Some("hola".to_owned()),
+            combo: None,
+        })
+    );
+    let combo: ToolArguments =
+        serde_json::from_str(r#"{"action":"combo","combo":"cmd+s"}"#).unwrap();
+    assert!(matches!(
+        combo,
+        ToolArguments::Keyboard(KeyboardPayload {
+            action: KeyboardAction::Combo,
+            ..
+        })
+    ));
+    let list: ToolArguments = serde_json::from_str(r#"{"action":"list","query":"saf"}"#).unwrap();
+    assert!(matches!(list, ToolArguments::Apps(_)));
+}
