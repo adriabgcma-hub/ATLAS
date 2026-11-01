@@ -178,30 +178,36 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v5 — eco, lectura, escritura, apps y teclado
+## Hefesto v6 — eco, lectura, escritura, apps, teclado y multimedia
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v5-eco-lectura-escritura-apps-y-teclado).
-Usa `protocolVersion: 5`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output` tipado por herramienta. Ocho herramientas sobre el mismo protocolo:
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v6-eco-lectura-escritura-apps-teclado-y-multimedia).
+Usa `protocolVersion: 6`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Nueve herramientas sobre el mismo protocolo:
 `hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
 (`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
 Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
 `hefesto.rename` (`{from, to}`), `hefesto.apps` (`{action, name?, bundleId?,
-query?}`), `hefesto.keyboard` (`{action, text?, combo?}`) y la interna
-`hefesto.file_info` (`{path}`). El relay expone al modelo `hefesto_echo`
-(asíncrono), `hefesto_list_dir` y `hefesto_read_file` (lectura síncrona, con
-confirmación por operación), `hefesto_write_file` (`{path, content, mode}`) y
-`hefesto_rename`; `hefesto.file_info` no está en el catálogo. La de apps es **una
-sola** herramienta `hefesto_apps` (`{action, name?, bundleId?, query?}`) con
-`requiresConfirmation: False` —trivial por adaptador, como el eco—: tres acciones
-en vez de tres herramientas para no multiplicar el catálogo que viaja en cada
-petición. El teclado es `hefesto_keyboard` (`{action, text?, combo?}`), con
-`requiresConfirmation: True` y `planConfirmation: True`: cada invocación pasa por
-su tarjeta y no se abre ninguna confirmación genérica.
+query?}`), `hefesto.keyboard` (`{action, text?, combo?}`), `hefesto.media`
+(`{action, count?}`) y la interna `hefesto.file_info` (`{path}`). El relay expone
+al modelo `hefesto_echo` (asíncrono), `hefesto_list_dir` y `hefesto_read_file`
+(lectura síncrona, con confirmación por operación), `hefesto_write_file`
+(`{path, content, mode}`) y `hefesto_rename`; `hefesto.file_info` no está en el
+catálogo. La de apps es **una sola** herramienta `hefesto_apps` (`{action, name?,
+bundleId?, query?}`) con `requiresConfirmation: False` —trivial por adaptador,
+como el eco—: tres acciones en vez de tres herramientas para no multiplicar el
+catálogo que viaja en cada petición. El teclado es `hefesto_keyboard` (`{action,
+text?, combo?}`), con `requiresConfirmation: True` y `planConfirmation: True`:
+cada invocación pasa por su tarjeta y no se abre ninguna confirmación genérica.
+
+`hefesto.media` (`{action, count?}`) controla volumen, brillo y reproducción con
+teclas de sistema (acción cerrada; `count` 1–10 solo para volumen y brillo). El
+relay expone `hefesto_media` con `requiresConfirmation: True` y
+`planConfirmation: True`: cada invocación válida abre una tarjeta y no hay
+burbuja.
 
 Rutas del protocolo (cuerpo exacto, sin campos extra):
 
-| Método y ruta | Rol | Cuerpo además de `protocolVersion: 5` | Respuesta |
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 6` | Respuesta |
 | --- | --- | --- | --- |
 | GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
 | POST `/v1/hefesto/register` | device | `instanceId` | estado |
@@ -220,6 +226,7 @@ Rutas del protocolo (cuerpo exacto, sin campos extra):
 | `hefesto.rename` | `{from, to}` | `{text}` resumen |
 | `hefesto.apps` | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
 | `hefesto.keyboard` | `{action, text?, combo?}` | `{text}` resumen |
+| `hefesto.media` | `{action, count?}` | `{text}` resumen |
 | `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
@@ -237,7 +244,7 @@ type AppsOutput = { apps: AppRecord[] }
 type KeyboardPayload = { action: 'type' | 'combo'; text?: string; combo?: string }
 
 type HefestoOutput =
-  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps y teclado (≤64 KiB)
+  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado y media (≤64 KiB)
   | AppsOutput // hefesto.apps, action=list
   | { exists: boolean; size: number | null; sha256: string | null } // file_info
 ```

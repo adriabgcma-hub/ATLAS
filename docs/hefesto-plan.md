@@ -115,11 +115,11 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v5 (eco, lectura, escritura, apps y teclado)
+## 5. Protocolo v6 (eco, lectura, escritura, apps, teclado y multimedia)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 5` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 6` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 5, error: "codigo_estable"}`, nunca rutas/certificados.
+Errores `{protocolVersion: 6, error: "codigo_estable"}`, nunca rutas/certificados.
 Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
 escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
 16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB, los strings de apps
@@ -152,6 +152,7 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | `hefesto.rename` | `hefesto_rename` | `{from, to}` | `{text}` resumen |
 | `hefesto.apps` | `hefesto_apps` (`requiresConfirmation: False`) | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
 | `hefesto.keyboard` | `hefesto_keyboard` (`requiresConfirmation: True`) | `{action, text?, combo?}` | `{text}` resumen |
+| `hefesto.media` | `hefesto_media` (`requiresConfirmation: True`) | `{action, count?}` | `{text}` resumen |
 | `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
@@ -227,6 +228,21 @@ superficie de consentimiento— lo mantiene, igual que el aviso de Telegram cuan
 petición llegó por ahí. Un reinicio con el tecleo en vuelo lo deja `unknown`, sin
 reentregarlo ni reejecutarlo.
 
+`media` controla volumen, brillo y reproducción con **teclas de sistema**, no con
+valores absolutos: `action` es uno de `volume_up`, `volume_down`, `mute`,
+`brightness_up`, `brightness_down`, `play_pause`, `next` y `previous`; `count`
+(1–10, por defecto 1) solo aplica a volumen y brillo y se rechaza en el resto.
+El dispositivo postea la tecla `NX_KEYTYPE_*` correspondiente (subtipo 8,
+`NX_KEYDOWN`/`NX_KEYUP`, flag de función) por el tap HID desde el hilo
+principal, repitiendo down+up `count` veces, con el mismo permiso de
+Accesibilidad y las mismas comprobaciones de entrada segura que el teclado
+(`hay un campo con entrada segura en primer plano; no pulso teclas del
+sistema`). No lee estado: un «Subido 2 pasos de volumen» confirma la pulsación,
+no un valor concreto. Resúmenes estables `Subido/Bajado {n} pasos de volumen`,
+`Subido/Bajado {n} paso(s) de brillo` y `Pulsada la tecla de …`, sin estado
+`failed`; un reinicio con la pulsación en vuelo la deja `unknown`, sin
+reentregarla. La tarjeta es siempre obligatoria y no hay burbuja violeta.
+
 ### Estado, duplicados y fallos
 
 - Latido con lease de 15 s; reloj monótono para disponibilidad. Al registrar una
@@ -244,15 +260,15 @@ reentregarlo ni reejecutarlo.
   Cambiar control incrementa generación. Abortar cancela pendientes y marca una
   acción despachada como `unknown` si no se puede confirmar su efecto.
 - Submit requiere dispositivo vivo, no suspendido y libre; TTL de invocación 15 s
-  (eco, lectura, escritura, apps y teclado). No hay cola para dispositivos ausentes,
-  ni encargos para futuros arranques.
+  (eco, lectura, escritura, apps, teclado y multimedia). No hay cola para
+  dispositivos ausentes, ni encargos para futuros arranques.
 - `submissionId` es clave de idempotencia duradera por dispositivo: repetir el mismo
   contenido devuelve la misma invocación/estado; cambiarlo produce conflicto.
 - Estados persistidos en SQLite: `pending`, `dispatched`, `succeeded`, `cancelled`,
   `expired`, `unknown`. Reiniciar cancela los pendientes de eco/lectura, marca
-  `unknown` los pendientes con efecto —escrituras, apps y teclado, cuyo contenido no
-  se entregó— y también los despachados. Nunca reintentar automáticamente un efecto de
-  resultado desconocido.
+  `unknown` los pendientes con efecto —escrituras, apps, teclado y multimedia,
+  cuyo contenido no se entregó— y también los despachados. Nunca reintentar
+  automáticamente un efecto de resultado desconocido.
 - `next` puede repetir la misma entrega mientras es válida; Rust conserva el resultado
   por ID y rechaza argumentos modificados. Una entrega repetida no vuelve a ejecutar.
 - Resultados repetidos idénticos son idempotentes; diferentes, de otra instancia,
@@ -298,6 +314,10 @@ reentregarlo ni reejecutarlo.
 5. **Apps y multimedia:** adaptadores, cierre sin pérdida, permisos macOS por destino.
    El **control de apps** no espera a esta puerta: se ejecuta como corte 1 de la puerta 7
    (ver abajo); aquí queda la parte de multimedia.
+   **Corte multimedia (2026-11-01, protocolo v6):** `hefesto_media` con las ocho
+   acciones de volumen, brillo y reproducción por teclas de sistema; tarjeta
+   siempre, sin lectura de estado, sin subprocess y sin permisos nuevos. El
+   detalle y la matriz en vivo viven en §8 y en `docs/implemented.md`.
 6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
    terminal general solo tras acordar y verificar aislamiento/límites.
 7. **Accesibilidad, control del Mac y capturas (puerta 7; corte 1, control de apps,

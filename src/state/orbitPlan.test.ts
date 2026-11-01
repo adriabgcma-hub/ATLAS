@@ -45,6 +45,16 @@ describe('planPhaseOrbit', () => {
     expect(plan?.color).toBe(HEFESTO_ORBIT_COLOR)
   })
 
+  it('órbita violeta para multimedia', () => {
+    const plan = planPhaseOrbit('executing', 'hefesto_media')
+    expect(plan).toEqual({
+      key: 'executing:hefesto_media',
+      title: 'Hefesto · Multimedia',
+      detail: '',
+      color: HEFESTO_ORBIT_COLOR,
+    })
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({
