@@ -183,12 +183,22 @@ de prueba autorizados por el usuario (2026-10-28).
       y con visibilidad de Hefesto: burbuja violeta HEFESTO tras cada escritura o
       movimiento y tarjeta etiquetada HEFESTO. Commits `cf1f3ab`…`e1a4cee` más el de
       la burbuja/tarjeta, desplegado.
-- [ ] Apps/multimedia, terminal y accesibilidad, según puertas del plan.
+- [x] Control de apps (2026-11-01, puerta 7, corte 1): protocolo v4 con **una sola**
+      herramienta `hefesto_apps` (`open`/`close`/`list`, trivial por adaptador y sin
+      tarjeta), resolución híbrida de `NSWorkspace.runningApplications` + mapa
+      cacheado de `Info.plist`, cierre **solo suave**, lista cortada a ≤30 y burbuja
+      violeta HEFESTO solo en el éxito de abrir o cerrar; el puente AppKit vive en
+      `src-tauri` y se reenvía al hilo principal por el trait inyectado `AppBridge`,
+      sin API privada. Probado en vivo (abrir y cerrar TextEdit, lista real del Mac,
+      app inexistente rechazada sin abrir). Commits `c17d993`…`355fa2a`, relay
+      desplegado y bundle instalado en `/Applications/Atlas.app`.
+- [ ] Puerta 7 pendiente: teclado y ventanas (cortes 2 y 3), y luego multimedia,
+      terminal y accesibilidad según las puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
-la app Tauri cuando el entorno trae sus credenciales, y hoy se limita al eco y a la
-lectura de archivos dentro de las raíces autorizadas. La ventana de tablas y la
-escritura permanecen pendientes.
+la app Tauri cuando el entorno trae sus credenciales, y hoy cubre el eco, la lectura
+y escritura dentro de las raíces autorizadas y el control de las apps instaladas. La
+ventana de tablas permanece pendiente.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

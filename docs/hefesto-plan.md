@@ -578,3 +578,62 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   herramientas `hefesto_*` (antes ATLAS). Reutiliza el contrato `agent`/`taskId`
   existente; sin cambios de protocolo. Pruebas: Python 209, frontend 54,
   `cargo test --workspace`, clippy y fmt.
+- 2026-11-01, control de apps (puerta 7, corte 1), implementado, desplegado y
+  probado en vivo:
+  1. **Protocolo v4**: `protocolVersion` sube de 3 a 4 en `wire.rs` (que ya solo
+     acepta 4), en el journal y en los submits del relay, con sus fixtures.
+     `crates/atlas-core` y `src/types/contracts.ts` no declaran versión, así que
+     el tercer espejo es el documental (`docs/contracts.md`).
+  2. **Dispositivo**: `crates/atlas-mac/src/apps.rs` concentra la lógica pura —
+     resolver `name` (exacto, insensible a mayúsculas y variantes de acentos) o
+     `bundleId` directo, construir la lista con las en-ejecución primero y las
+     coincidencias de `query`, cortada a 30— detrás del trait `AppBridge`
+     (`installed`/`running`/`open`/`terminate`). `handle_apps` devuelve `Result`
+     y propaga los errores de texto sin `unwrap`.
+  3. **Puente real**: `src-tauri/src/hefesto_apps.rs` (`WorkspaceApps`) usa
+     `NSWorkspace.runningApplications` y un escaneo **cacheado** de `Info.plist`
+     en `/Applications`, `/System/Applications` y `~/Applications`, y reenvía
+     `openApplicationAtURL`/`terminate` al hilo principal con
+     `run_on_main_thread` + canal y timeout en todas las rutas. `atlas-mac` no
+     conoce el `AppHandle`. Sin API privada (`_LSCopyAllApplicationURLs`,
+     `LSApplicationWorkspace`) y sin lista de binarios.
+  4. **Journal v4**: `hefesto.apps` es operación sin contenido persistido (solo
+     toolId, estado e ids, como `file_info`); el conjunto de argumentos se
+     restringe a `action|name|bundleId|query` **antes** de guardar, así `content`
+     no puede colarse, y una invocación en vuelo tras reinicio queda `unknown`
+     sin reejecutar.
+  5. **Relay**: **una sola** herramienta `hefesto_apps` con
+     `requiresConfirmation: False` (nunca abre tarjeta), validación antes de
+     delegar (`action` fuera de vocabulario, o `open`/`close` sin `name` ni
+     `bundleId` → no se submit), revalidación de la cancelación y burbuja violeta
+     `agent: hefesto` solo en el éxito de `open`/`close`; `list` vuelve al modelo
+     sin burbuja.
+  6. **Chat**: `HEFESTO_PHASES` añade la clave `hefesto_apps` → órbita violeta
+     «Hefesto · Gestiona apps».
+  Commits: spec+plan `c17d993`, protocolo `77e1a62`, módulo apps `bb27b15` y su
+  fix sin unwrap `4ac2d02`, despacho `23f0277`, puente NSWorkspace `7df0bf7`,
+  journal `f731e67` y su restricción de claves `cab6dc7`, relay `a65f897`,
+  docs y órbita `bd71711` + `355fa2a`. Pruebas: `cargo test --workspace` 106
+  correctas (2 ignoradas del panel), `cargo clippy --workspace --all-targets --
+  -D warnings` limpio, `python3 -m unittest discover` 271 OK, `npm test` 55 y
+  `npm run build`. Deuda **preexistente** que este corte no toca: `cargo fmt
+  --all -- --check` sigue fallando en `crates/atlas-core` y `npm run lint`
+  conserva los tres avisos de `apps/panel`. Desplegado con
+  `./scripts/deploy-relay.sh` (push `8273df7..355fa2a`, `atlas-relay` activo y
+  `/v1/health` OK) y bundle con identidad Apple Development instalado en
+  `/Applications/Atlas.app` con firma profunda válida (el paso del DMG vuelve a
+  fallar tras firmar el `.app`, como en builds anteriores).
+- 2026-11-01, matriz en vivo del control de apps (relay v4 + bundle nuevo,
+  disparada por HTTP sin tocar la UI):
+  1. «Lista las apps en ejecución» → `executing` con `message: hefesto_apps`
+     (dispara la órbita violeta), sin tarjeta, y el modelo devuelve Finder, Qoder,
+     Safari y Atlas en ejecución con el resto como disponibles; **sin** burbuja.
+  2. «Abre TextEdit» → sin tarjeta, burbuja `agent: hefesto` «Abierta «TextEdit»»
+     y proceso real verificado (`TextEdit` PID 65748).
+  3. «Cierra TextEdit sin forzar» → burbuja «Cerrada «TextEdit»» y el proceso
+     desaparece (cierre suave, sin `forceTerminate`).
+  4. «Abre NoExiste-QA-9999» → sin burbuja y sin abrir nada; el texto estable del
+     dispositivo («no encuentro …») llega al modelo, que lo reporta.
+  Auditoría de procesos al terminar: solo vivo `Atlas.app` (PID 65581, ~75 MB,
+  lanzado con las variables del dispositivo para la prueba); sin TextEdit, sin
+  procesos Hefesto/Vite/Tauri ni descendientes huérfanos y sin RAM añadida.
