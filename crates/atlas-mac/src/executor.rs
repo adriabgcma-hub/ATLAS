@@ -383,6 +383,10 @@ impl Executor {
                 Some(bridge) => crate::keyboard::handle_keyboard(bridge.as_ref(), payload)?,
                 None => OutputPayload::text("Hefesto no puede teclear")?,
             },
+            (ToolId::Media, ToolArguments::Media(payload)) => match &self.keyboard_bridge {
+                Some(bridge) => crate::media::handle_media(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede controlar multimedia")?,
+            },
             _ => return Err(Error::InvalidArguments),
         };
         let result = ResultRequest {

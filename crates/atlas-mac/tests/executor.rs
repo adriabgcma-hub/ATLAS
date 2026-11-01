@@ -1,4 +1,5 @@
 use atlas_mac::*;
+use atlas_mac::{MediaAction, MediaPayload};
 use std::time::Duration;
 
 const WALL: u64 = 1_700_000_000_000;
@@ -1082,4 +1083,36 @@ fn keyboard_sin_puente_devuelve_texto_no_disponible() {
         )
         .unwrap();
     assert_eq!(out.output.text_value(), Some("Hefesto no puede teclear"));
+}
+
+fn media_invocation(action: MediaAction, count: Option<u8>, inv_id: &str) -> Invocation {
+    let mut inv = invocation();
+    inv.invocation_id = id(inv_id);
+    inv.tool_id = ToolId::Media;
+    inv.arguments = ToolArguments::Media(MediaPayload { action, count });
+    inv
+}
+
+#[test]
+fn media_se_enruta_por_el_puente_de_teclado_inyectado() {
+    let mut executor = keyboard_executor();
+    let out = executor
+        .execute(
+            &media_invocation(MediaAction::VolumeUp, Some(2), "m-volume"),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(out.output.text_value(), Some("Subido 2 pasos de volumen"));
+}
+
+#[test]
+fn media_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor
+        .execute(&media_invocation(MediaAction::Mute, None, "m-none"), at(3))
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Hefesto no puede controlar multimedia")
+    );
 }
