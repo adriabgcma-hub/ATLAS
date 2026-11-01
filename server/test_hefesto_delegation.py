@@ -712,3 +712,154 @@ class WriteFlowTests(unittest.TestCase):
                 {"path": "/Users/x/Documents/n.txt", "content": "x", "mode": "overwrite"},
                 {**JOB, "session_id": session_id})
         self.assertEqual(self._hefesto_notes(), [])
+
+
+class AppFlowTests(unittest.TestCase):
+    """Flujo de `hefesto_apps`: delegación síncrona y burbuja solo en éxito."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-apps-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def _hefesto_notes(self):
+        return [e for e in self.brain.events
+                if e.get("kind") == "message" and e.get("agent") == "hefesto"]
+
+    def test_catalogo_ofrece_apps_sin_confirmacion(self):
+        apps = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_apps")
+        self.assertFalse(apps["requiresConfirmation"])
+        self.assertEqual(sorted(apps["schema"]["properties"]),
+                         ["action", "bundleId", "name", "query"])
+        self.assertEqual(apps["schema"]["required"], ["action"])
+
+    def test_open_emite_burbuja_y_devuelve_texto(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-apps")
+        self.journal.outcomes["inv-apps"] = {"state": "succeeded",
+                                             "output": {"text": "Abierta «Spotify»"}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            out = self.brain.execute_tool("hefesto_apps", {"action": "open", "name": "Spotify"},
+                                          {**JOB, "session_id": sid})
+        self.assertEqual(out, "Abierta «Spotify»")
+        ask.assert_not_called()
+        notes = self._hefesto_notes()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["content"], "Abierta «Spotify»")
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.apps")
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "open", "name": "Spotify"})
+
+    def test_close_exitoso_emite_burbuja(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-apps")
+        self.journal.outcomes["inv-apps"] = {"state": "succeeded",
+                                             "output": {"text": "Cerrada «Spotify»"}}
+        out = self.brain.execute_tool("hefesto_apps",
+                                      {"action": "close", "bundleId": "com.spotify.client"},
+                                      {**JOB, "session_id": sid})
+        self.assertEqual(out, "Cerrada «Spotify»")
+        notes = self._hefesto_notes()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["content"], "Cerrada «Spotify»")
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "close", "bundleId": "com.spotify.client"})
+
+    def test_list_no_emite_burbuja(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-list")
+        self.journal.outcomes["inv-list"] = {"state": "succeeded",
+            "output": {"apps": [{"name": "Mail", "bundleId": "com.apple.mail",
+                                 "running": True},
+                                {"name": "Notes", "bundleId": "com.apple.Notes",
+                                 "running": False}]}}
+        out = self.brain.execute_tool("hefesto_apps", {"action": "list"},
+                                      {**JOB, "session_id": sid})
+        self.assertIn("Mail", out)
+        self.assertIn("[com.apple.mail] en ejecución", out)
+        self.assertIn("[com.apple.Notes] disponible", out)
+        self.assertEqual(self._hefesto_notes(), [])
+
+    def test_list_limita_a_treinta_lineas(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-list")
+        self.journal.outcomes["inv-list"] = {
+            "state": "succeeded",
+            "output": {"apps": [{"name": f"App{i}", "bundleId": f"id{i}", "running": True}
+                                for i in range(50)]}}
+        out = self.brain.execute_tool("hefesto_apps", {"action": "list"},
+                                      {**JOB, "session_id": sid})
+        self.assertEqual(len(out.splitlines()), 30)
+
+    def test_list_vacio_devuelve_texto_sin_burbuja(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-list")
+        self.journal.outcomes["inv-list"] = {"state": "succeeded", "output": {"apps": []}}
+        out = self.brain.execute_tool("hefesto_apps", {"action": "list", "query": "mail"},
+                                      {**JOB, "session_id": sid})
+        self.assertEqual(out, "sin apps")
+        self.assertEqual(self._hefesto_notes(), [])
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "list", "query": "mail"})
+
+    def test_cierre_sin_burbuja_no_emite_nota(self):
+        """Un cierre que no surte efecto (StillPresent) no dispara la burbuja."""
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-apps")
+        self.journal.outcomes["inv-apps"] = {
+            "state": "succeeded",
+            "output": {"text": "StillPresent: «Spotify» sigue abierta tras el cierre suave"}}
+        out = self.brain.execute_tool("hefesto_apps",
+                                      {"action": "close", "name": "Spotify"},
+                                      {**JOB, "session_id": sid})
+        self.assertIn("StillPresent", out)
+        self.assertEqual(self._hefesto_notes(), [])
+
+    def test_app_no_encontrada_no_emite_nota(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-apps")
+        self.journal.outcomes["inv-apps"] = {"state": "succeeded",
+                                             "output": {"text": "no encuentro «X»"}}
+        out = self.brain.execute_tool("hefesto_apps", {"action": "open", "name": "X"},
+                                      {**JOB, "session_id": sid})
+        self.assertEqual(out, "no encuentro «X»")
+        self.assertEqual(self._hefesto_notes(), [])
+
+    def test_timeout_no_emite_nota(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-apps")
+        self.journal.outcomes["inv-apps"] = {"state": "expired"}
+        out = self.brain.execute_tool("hefesto_apps", {"action": "open", "name": "Spotify"},
+                                      {**JOB, "session_id": sid})
+        self.assertIn("caducó", out)
+        self.assertEqual(self._hefesto_notes(), [])
+
+    def test_action_invalida_no_delega(self):
+        self.journal.accept("inv-x")
+        with mock.patch.object(self.brain, "_hefesto_submit") as submit:
+            out = self.brain.execute_tool("hefesto_apps", {"action": "kill"}, JOB)
+        self.assertIn("inválida", out)
+        submit.assert_not_called()
+
+    def test_open_sin_nombre_no_delega(self):
+        with mock.patch.object(self.brain, "_hefesto_submit") as submit:
+            out = self.brain.execute_tool("hefesto_apps", {"action": "open"}, JOB)
+        self.assertIn("name", out)
+        submit.assert_not_called()
+
+    def test_handle_tool_call_no_abre_tarjeta(self):
+        sid = self.brain._active()["id"]
+        self.journal.accept("inv-apps")
+        self.journal.outcomes["inv-apps"] = {"state": "succeeded",
+                                             "output": {"text": "Abierta «Mail»"}}
+        call = {"function": {"name": "hefesto_apps",
+                             "arguments": json.dumps({"action": "open", "name": "Mail"})}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            out = self.brain._handle_tool_call({**JOB, "session_id": sid}, call)
+        self.assertEqual(out, "Abierta «Mail»")
+        ask.assert_not_called()
+        # La delegación es síncrona: no queda encargos pendientes en el tracker.
+        self.assertEqual(self.brain._delegations, {})

@@ -263,8 +263,29 @@ HEFESTO_RENAME_TOOL = {
     },
 }
 
+HEFESTO_APPS_TOOL = {
+    "id": "hefesto_apps",
+    "risk": "external",
+    "requiresConfirmation": False,
+    "description": ("Gestiona aplicaciones del Mac con Hefesto: action=open lanza una "
+                    "app instalada (por name o bundleId), action=close la cierra de forma "
+                    "suave (sin descartar cambios), action=list enumera apps en ejecución y "
+                    "disponibles (≤30). No abre rutas arbitrarias ni binarios."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["open", "close", "list"],
+                       "description": "open, close o list"},
+            "name": {"type": "string", "description": "nombre visible de la app (open/close)"},
+            "bundleId": {"type": "string", "description": "identificador de bundle (alternativa a name)"},
+            "query": {"type": "string", "description": "filtro opcional para list"},
+        },
+        "required": ["action"],
+    },
+}
+
 HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
-                 HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL]
+                 HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL]
 
 
 def norm_name(name: str) -> str:
@@ -892,6 +913,8 @@ class Brain:
             return self._write_file(job, args)
         if tool_id == "hefesto_rename":
             return self._rename_file(job, args)
+        if tool_id == "hefesto_apps":
+            return self._apps(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -1111,8 +1134,46 @@ class Brain:
             self._hefesto_note(job["session_id"], result)
         return result
 
+    def _apps(self, job: dict, args: dict) -> str:
+        """Control de apps: delegación síncrona; burbuja solo en éxito de open/close."""
+        action = args.get("action")
+        if action not in ("open", "close", "list"):
+            return "action inválida (open, close o list)"
+        name = args.get("name")
+        bundle = args.get("bundleId")
+        if action in ("open", "close") and not (
+                (isinstance(name, str) and name) or (isinstance(bundle, str) and bundle)):
+            return "falta name o bundleId para " + action
+        arguments = {"action": action}
+        for key, value in (("name", name), ("bundleId", bundle), ("query", args.get("query"))):
+            if isinstance(value, str) and value:
+                arguments[key] = value
+        invocation_id, error = self._hefesto_submit("hefesto.apps", job, arguments)
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 20.0)
+        if isinstance(output, str):
+            return output
+        if "apps" in output:
+            return self._format_apps_list(output.get("apps") or [])
+        text = str(output.get("text") or "")
+        if action in ("open", "close") and (text.startswith("Abierta «")
+                                            or text.startswith("Cerrada «")):
+            self._hefesto_note(job["session_id"], text)
+        return text
+
+    def _format_apps_list(self, apps: list) -> str:
+        if not apps:
+            return "sin apps"
+        lines = []
+        for a in apps[:30]:
+            if isinstance(a, dict):
+                state = "en ejecución" if a.get("running") else "disponible"
+                lines.append(f"«{a.get('name')}» [{a.get('bundleId')}] {state}")
+        return "\n".join(lines) if lines else "sin apps"
+
     def _hefesto_note(self, session_id: str, content: str) -> None:
-        """Burbuja violeta de Hefesto tras una escritura o un movimiento."""
+        """Burbuja violeta de Hefesto tras un efecto aprobado (escritura, movido, app)."""
         task_id = new_id("tsk")
         request_id = new_id("req")
         with self.lock:
