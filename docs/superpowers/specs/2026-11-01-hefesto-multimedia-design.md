@@ -70,8 +70,11 @@ exponer contenido multimedia.
 ### 3.3 Errores (texto estable)
 
 9. `action inválida (volume_up, volume_down, mute, brightness_up,
-   brightness_down, play_pause, next o previous)`.
-10. `count fuera de rango (1–10)`; `count no aplica a esta acción`.
+   brightness_down, play_pause, next o previous)`: la produce el relay antes de
+   delegar (el `action` del wire es un enum cerrado y el journal rechaza otra).
+10. `count fuera de rango (1–10)`; `count no aplica a esta acción`: el relay las
+    devuelve antes de la tarjeta y el dispositivo revalida el rango por si la
+    invocación llegara por otra vía.
 11. Entrada segura: `hay un campo con entrada segura en primer plano; no pulso
     teclas del sistema`.
 12. Sin permiso: `falta el permiso de Accesibilidad; actívalo en Ajustes del
