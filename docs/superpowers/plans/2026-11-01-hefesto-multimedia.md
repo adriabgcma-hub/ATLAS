@@ -1205,10 +1205,16 @@ Añadir a las tablas de rutas y herramientas el valor `protocolVersion: 6` y la 
 | `hefesto.media` | `{action, count?}` | `{text}` resumen |
 ```
 
-- [ ] **Step 5: Verificar que no quedan referencias v5 en docs de Hefesto**
+- [ ] **Step 5: Verificar que no quedan referencias v5 en la parte vigente**
 
-Run: `rg -n "protocolo v5|protocolVersion: 5|Protocolo v5|Hefesto v5" docs/hefesto-plan.md docs/contracts.md`
-Expected: sin resultados (salvo la fila histórica de §8 que se añade en T7).
+Run: `rg -n "protocolo v5|protocolVersion: 5|Protocolo v5|Hefesto v5" docs/contracts.md`
+Expected: sin resultados.
+
+Run: `sed -n '118,270p' docs/hefesto-plan.md | rg -n "protocolo v5|protocolVersion: 5|Protocolo v5"`
+Expected: sin resultados.
+
+No tocar las entradas históricas de §8 del plan (registran los cortes v4/v5 y deben
+seguir diciendo lo que decían).
 
 - [ ] **Step 6: Commit**
 
