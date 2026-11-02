@@ -55,6 +55,16 @@ describe('planPhaseOrbit', () => {
     })
   })
 
+  it('órbita violeta para ventanas', () => {
+    const plan = planPhaseOrbit('executing', 'hefesto_windows')
+    expect(plan).toEqual({
+      key: 'executing:hefesto_windows',
+      title: 'Hefesto · Ventanas',
+      detail: '',
+      color: HEFESTO_ORBIT_COLOR,
+    })
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({

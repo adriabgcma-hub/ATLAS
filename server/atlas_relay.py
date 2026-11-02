@@ -334,9 +334,51 @@ HEFESTO_MEDIA_TOOL = {
     },
 }
 
+HEFESTO_WINDOWS_TOOL = {
+    "id": "hefesto_windows",
+    "risk": "external",
+    "requiresConfirmation": True,
+    # La tarjeta la abre _windows después de validar y solo en los efectos;
+    # list es lectura y no la abre. _handle_tool_call no debe abrir otra.
+    "planConfirmation": True,
+    "description": ("Lista, mueve, redimensiona o trae al frente ventanas de apps del Mac "
+                    "con Hefesto. action=list enumera las ventanas estándar (≤30, sin "
+                    "confirmación); move necesita app, x e y; resize, app, width y height "
+                    "(100–10000); focus, app. `title` concreta por título e `index` (1–99) "
+                    "por orden entre las ventanas de la app. Mover, redimensionar y traer "
+                    "al frente piden confirmación."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "move", "resize", "focus"],
+                       "description": "list enumera; move, resize y focus actúan"},
+            "app": {"type": "string",
+                    "description": "nombre visible o bundleId (obligatorio salvo en list)"},
+            "title": {"type": "string",
+                      "description": "título de la ventana (exacto y luego contiene)"},
+            "index": {"type": "integer", "minimum": 1, "maximum": 99,
+                      "description": "ventana 1-based entre las estándar de la app"},
+            "x": {"type": "integer", "minimum": -20000, "maximum": 20000,
+                  "description": "posición horizontal absoluta en puntos"},
+            "y": {"type": "integer", "minimum": -20000, "maximum": 20000,
+                  "description": "posición vertical absoluta en puntos"},
+            "width": {"type": "integer", "minimum": 100, "maximum": 10000,
+                      "description": "ancho en puntos"},
+            "height": {"type": "integer", "minimum": 100, "maximum": 10000,
+                       "description": "alto en puntos"},
+        },
+        "required": ["action"],
+    },
+}
+
 HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
                  HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL,
-                 HEFESTO_KEYBOARD_TOOL, HEFESTO_MEDIA_TOOL]
+                 HEFESTO_KEYBOARD_TOOL, HEFESTO_MEDIA_TOOL, HEFESTO_WINDOWS_TOOL]
+
+# Traducción de las acciones del modelo a las del wire v7 de ventanas (valores
+# distintos de hefesto.apps para que el enum untagged del dispositivo no confunda).
+_WINDOWS_WIRE = {"list": "list_windows", "move": "move_window",
+                 "resize": "resize_window", "focus": "focus_window"}
 
 
 # Gramática cerrada del atajo (misma que el dispositivo): 1–3 modificadores
@@ -980,6 +1022,8 @@ class Brain:
             return self._keyboard(job, args)
         if tool_id == "hefesto_media":
             return self._media(job, args)
+        if tool_id == "hefesto_windows":
+            return self._windows(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -1306,6 +1350,95 @@ class Brain:
             return output
         return str(output.get("text") or "")
 
+    def _windows(self, job: dict, args: dict) -> str:
+        """Ventanas: list es lectura sin tarjeta; move/resize/focus, un efecto."""
+        action = args.get("action")
+        if action not in _WINDOWS_WIRE:
+            return "action inválida (list, move, resize o focus)"
+        app = args.get("app")
+        if isinstance(app, str):
+            app = app.strip()
+        arguments = {"action": _WINDOWS_WIRE[action]}
+        if action == "list":
+            # Filtro opcional; el resto de campos no aplica a list y se ignora.
+            if app is not None:
+                if not isinstance(app, str) or len(app) > 256:
+                    return "app inválida (texto de hasta 256 caracteres)"
+                if app:
+                    arguments["app"] = app
+            # Listar es lectura: sin tarjeta y sin burbuja.
+            invocation_id, error = self._hefesto_submit("hefesto.windows", job, arguments)
+            if error is not None:
+                return error
+            output = self._hefesto_wait(invocation_id, job, 20.0)
+            if isinstance(output, str):
+                return output
+            if "windows" in output:
+                return self._format_windows_list(output.get("windows") or [])
+            return str(output.get("text") or "")
+        if not isinstance(app, str) or not app:
+            return "falta app"
+        if len(app) > 256:
+            return "app inválida (texto de hasta 256 caracteres)"
+        arguments["app"] = app
+        title = args.get("title")
+        if title is not None:
+            if not isinstance(title, str):
+                return "título inválido (texto de hasta 256 caracteres)"
+            title = title.strip()
+            if len(title) > 256:
+                return "título inválido (texto de hasta 256 caracteres)"
+            if title:
+                arguments["title"] = title
+        if "index" in args:
+            index = args["index"]
+            if type(index) is not int or not 1 <= index <= 99:
+                return "index fuera de rango (1–99)"
+            arguments["index"] = index
+        if action == "move":
+            for key in ("x", "y"):
+                value = args.get(key)
+                if type(value) is not int or not -20000 <= value <= 20000:
+                    return "x/y fuera de rango (-20000–20000)"
+                arguments[key] = value
+        elif action == "resize":
+            for key in ("width", "height"):
+                value = args.get(key)
+                if type(value) is not int or not 100 <= value <= 10000:
+                    return "width/height fuera de rango (100–10000)"
+                arguments[key] = value
+        # La tarjeta solo se abre con argumentos ya validados y sin burbuja.
+        # El tiempo del usuario no consume el plazo de la operación.
+        job["deadline"] += CONFIRM_TIMEOUT_S + 60
+        summary = self._confirm_summary("hefesto_windows", args)
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_windows", arguments,
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        invocation_id, error = self._hefesto_submit("hefesto.windows", job, arguments)
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 20.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
+    def _format_windows_list(self, windows: list) -> str:
+        if not windows:
+            return "sin ventanas"
+        lines = []
+        for window in windows[:30]:
+            if not isinstance(window, dict):
+                continue
+            flags = [label for key, label in (("focused", "foco"),
+                                              ("minimized", "minimizada"))
+                     if window.get(key)]
+            suffix = f" [{' · '.join(flags)}]" if flags else ""
+            lines.append(f"«{window.get('app')}» · «{window.get('title')}» — "
+                         f"{window.get('x')},{window.get('y')} "
+                         f"{window.get('width')}×{window.get('height')}{suffix}")
+        return "\n".join(lines) if lines else "sin ventanas"
+
     def _hefesto_note(self, session_id: str, content: str) -> None:
         """Burbuja violeta de Hefesto tras un efecto aprobado (escritura, movido, app)."""
         task_id = new_id("tsk")
@@ -1570,6 +1703,18 @@ class Brain:
                 "previous": "Volver a la pista anterior",
             }
             return (labels.get(action, f"Multimedia: {action}"), "write")
+        if tool_id == "hefesto_windows":
+            action = str(args.get("action", "?"))
+            app = str(args.get("app", "?")).strip() or "?"
+            if action == "move":
+                return (f"Mover la ventana de {app} a {args.get('x', '?')},{args.get('y', '?')}",
+                        "write")
+            if action == "resize":
+                return (f"Redimensionar la ventana de {app} a "
+                        f"{args.get('width', '?')}×{args.get('height', '?')}", "write")
+            if action == "focus":
+                return (f"Traer al frente la ventana de {app}", "write")
+            return (f"Listar ventanas de {app}", "write")
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,

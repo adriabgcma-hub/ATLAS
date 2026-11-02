@@ -1096,3 +1096,235 @@ class MediaFlowTests(unittest.TestCase):
         self.assertEqual(result, "count no aplica a esta acción")
         ask.assert_not_called()
         self.assertEqual(self.journal.submits, [])
+
+
+WINDOW_RECORD = {"app": "TextEdit", "title": "Documento", "x": 10, "y": 20,
+                 "width": 800, "height": 600, "focused": True, "minimized": False}
+
+
+class WindowsFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-windows-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def test_catalogo_expone_ventanas_con_plan_y_acciones_del_modelo(self):
+        tool = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_windows")
+        self.assertTrue(tool["requiresConfirmation"])
+        self.assertTrue(tool["planConfirmation"])
+        properties = tool["schema"]["properties"]
+        self.assertEqual(properties["action"]["enum"], ["list", "move", "resize", "focus"])
+        self.assertEqual((properties["index"]["minimum"], properties["index"]["maximum"]),
+                         (1, 99))
+        for key in ("x", "y"):
+            self.assertEqual((properties[key]["minimum"], properties[key]["maximum"]),
+                             (-20000, 20000))
+        for key in ("width", "height"):
+            self.assertEqual((properties[key]["minimum"], properties[key]["maximum"]),
+                             (100, 10000))
+
+    def test_list_no_abre_tarjeta_y_formatea_las_ventanas(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {
+            "state": "succeeded",
+            "output": {"windows": [
+                WINDOW_RECORD,
+                {"app": "Safari", "title": "Inicio", "x": 0, "y": 0,
+                 "width": 1200, "height": 800, "focused": False, "minimized": True},
+            ]}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch.object(self.brain, "_hefesto_note") as note:
+            result = self.brain.execute_tool("hefesto_windows", {"action": "list"}, JOB)
+        ask.assert_not_called()
+        note.assert_not_called()
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.windows")
+        self.assertEqual(self.journal.submits[0]["arguments"], {"action": "list_windows"})
+        self.assertEqual(result,
+                         "«TextEdit» · «Documento» — 10,20 800×600 [foco]\n"
+                         "«Safari» · «Inicio» — 0,0 1200×800 [minimizada]")
+
+    def test_list_con_app_normaliza_el_filtro_sin_tarjeta(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {"state": "succeeded", "output": {"windows": []}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_windows", {"action": "list", "app": "  TextEdit  "}, JOB)
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "list_windows", "app": "TextEdit"})
+        self.assertEqual(result, "sin ventanas")
+
+    def test_list_limita_a_treinta_lineas(self):
+        self.journal.accept("inv-win")
+        windows = [dict(WINDOW_RECORD, title=f"V{i}") for i in range(35)]
+        self.journal.outcomes["inv-win"] = {"state": "succeeded",
+                                            "output": {"windows": windows}}
+        with mock.patch.object(self.brain, "ask_confirmation"):
+            result = self.brain.execute_tool("hefesto_windows", {"action": "list"}, JOB)
+        lines = result.splitlines()
+        self.assertEqual(len(lines), 30)
+        self.assertIn("«V29»", lines[-1])
+
+    def test_move_pide_tarjeta_y_traduce_los_argumentos(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {
+            "state": "succeeded",
+            "output": {"text": "Ventana «Documento» de «TextEdit» movida a 10,20"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask, \
+                mock.patch.object(self.brain, "_hefesto_note") as note:
+            result = self.brain.execute_tool(
+                "hefesto_windows", {"action": "move", "app": "TextEdit",
+                                    "x": 10, "y": 20}, JOB)
+        self.assertEqual(result, "Ventana «Documento» de «TextEdit» movida a 10,20")
+        self.assertEqual(ask.call_count, 1)
+        self.assertEqual(ask.call_args.kwargs["summary"],
+                         ("Mover la ventana de TextEdit a 10,20", "write"))
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.windows")
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "move_window", "app": "TextEdit", "x": 10, "y": 20})
+        note.assert_not_called()
+
+    def test_resize_pide_tarjeta_y_traduce_los_argumentos(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {
+            "state": "succeeded",
+            "output": {"text": "Ventana «Documento» de «TextEdit» redimensionada a 900×700"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask, \
+                mock.patch.object(self.brain, "_hefesto_note") as note:
+            result = self.brain.execute_tool(
+                "hefesto_windows", {"action": "resize", "app": "TextEdit",
+                                    "width": 900, "height": 700}, JOB)
+        self.assertEqual(result, "Ventana «Documento» de «TextEdit» redimensionada a 900×700")
+        self.assertEqual(ask.call_count, 1)
+        self.assertEqual(ask.call_args.kwargs["summary"],
+                         ("Redimensionar la ventana de TextEdit a 900×700", "write"))
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "resize_window", "app": "TextEdit",
+                          "width": 900, "height": 700})
+        note.assert_not_called()
+
+    def test_focus_pide_tarjeta_y_traduce_los_argumentos(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {
+            "state": "succeeded",
+            "output": {"text": "Ventana «Documento» de «TextEdit» traída al frente"}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_windows", {"action": "focus", "app": "TextEdit",
+                                    "title": "  Documento  ", "index": 2}, JOB)
+        self.assertEqual(result, "Ventana «Documento» de «TextEdit» traída al frente")
+        self.assertEqual(ask.call_count, 1)
+        self.assertEqual(ask.call_args.kwargs["summary"],
+                         ("Traer al frente la ventana de TextEdit", "write"))
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"action": "focus_window", "app": "TextEdit",
+                          "title": "Documento", "index": 2})
+
+    def test_denegar_no_envia_ni_abre_burbuja(self):
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="deny"), \
+                mock.patch.object(self.brain, "_hefesto_note") as note:
+            result = self.brain.execute_tool(
+                "hefesto_windows", {"action": "move", "app": "TextEdit",
+                                    "x": 10, "y": 20}, JOB)
+        self.assertEqual(result, "denegada por el usuario")
+        self.assertEqual(self.journal.submits, [])
+        note.assert_not_called()
+
+    def test_extremos_validos_abren_tarjeta(self):
+        cases = (
+            ({"action": "move", "app": "TextEdit", "x": -20000, "y": 20000},
+             {"action": "move_window", "app": "TextEdit", "x": -20000, "y": 20000}),
+            ({"action": "resize", "app": "TextEdit", "width": 100, "height": 10000},
+             {"action": "resize_window", "app": "TextEdit", "width": 100, "height": 10000}),
+            ({"action": "focus", "app": "TextEdit", "index": 99},
+             {"action": "focus_window", "app": "TextEdit", "index": 99}),
+        )
+        for args, expected in cases:
+            self.journal.accept("inv-win")
+            self.journal.outcomes["inv-win"] = {"state": "succeeded",
+                                                "output": {"text": "ok"}}
+            with mock.patch.object(self.brain, "ask_confirmation",
+                                   return_value="allow_once") as ask:
+                self.assertEqual(self.brain.execute_tool("hefesto_windows", args, JOB), "ok")
+            self.assertEqual(ask.call_count, 1)
+            self.assertEqual(self.journal.submits[-1]["arguments"], expected)
+
+    def test_entrada_invalida_no_abre_tarjeta_ni_delega(self):
+        cases = (
+            ({"action": "explode"}, "action inválida (list, move, resize o focus)"),
+            ({}, "action inválida (list, move, resize o focus)"),
+            ({"action": "move", "x": 10, "y": 20}, "falta app"),
+            ({"action": "move", "app": "   ", "x": 10, "y": 20}, "falta app"),
+            ({"action": "resize", "app": 5, "height": 600},
+             "falta app"),
+            ({"action": "move", "app": "TextEdit", "x": 20001, "y": 0},
+             "x/y fuera de rango (-20000–20000)"),
+            ({"action": "move", "app": "TextEdit", "x": 0},
+             "x/y fuera de rango (-20000–20000)"),
+            ({"action": "move", "app": "TextEdit", "x": "10", "y": 0},
+             "x/y fuera de rango (-20000–20000)"),
+            ({"action": "move", "app": "TextEdit", "x": True, "y": 0},
+             "x/y fuera de rango (-20000–20000)"),
+            ({"action": "resize", "app": "TextEdit", "width": 99, "height": 600},
+             "width/height fuera de rango (100–10000)"),
+            ({"action": "resize", "app": "TextEdit", "width": 800},
+             "width/height fuera de rango (100–10000)"),
+            ({"action": "focus", "app": "TextEdit", "index": 0},
+             "index fuera de rango (1–99)"),
+            ({"action": "focus", "app": "TextEdit", "index": 100},
+             "index fuera de rango (1–99)"),
+            ({"action": "focus", "app": "TextEdit", "index": True},
+             "index fuera de rango (1–99)"),
+        )
+        for args, expected in cases:
+            with mock.patch.object(self.brain, "ask_confirmation") as ask:
+                self.assertEqual(self.brain.execute_tool("hefesto_windows", args, JOB),
+                                 expected)
+            ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_handle_tool_call_list_no_abre_tarjeta(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {"state": "succeeded",
+                                            "output": {"windows": [WINDOW_RECORD]}}
+        call = {"id": "c1", "function": {"name": "hefesto_windows",
+                                         "arguments": json.dumps({"action": "list"})}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch.object(self.brain, "_hefesto_note") as note, \
+                mock.patch("atlas_relay.dlog"):
+            result = self.brain._handle_tool_call(JOB, call)
+        ask.assert_not_called()
+        note.assert_not_called()
+        self.assertEqual(result, "«TextEdit» · «Documento» — 10,20 800×600 [foco]")
+
+    def test_handle_tool_call_move_abre_una_sola_tarjeta(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {
+            "state": "succeeded",
+            "output": {"text": "Ventana «Documento» de «TextEdit» movida a 1,2"}}
+        call = {"id": "c1", "function": {"name": "hefesto_windows",
+                                         "arguments": json.dumps({"action": "move",
+                                                                  "app": "TextEdit",
+                                                                  "x": 1, "y": 2})}}
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="allow_once") as ask, \
+                mock.patch.object(self.brain, "_hefesto_note") as note, \
+                mock.patch("atlas_relay.dlog"):
+            result = self.brain._handle_tool_call(JOB, call)
+        self.assertEqual(result, "Ventana «Documento» de «TextEdit» movida a 1,2")
+        self.assertEqual(ask.call_count, 1)
+        note.assert_not_called()
+
+    def test_handle_tool_call_invalida_no_abre_tarjeta(self):
+        call = {"id": "c1", "function": {"name": "hefesto_windows",
+                                         "arguments": json.dumps({"action": "move",
+                                                                  "app": "TextEdit",
+                                                                  "x": 20001, "y": 0})}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch("atlas_relay.dlog"):
+            result = self.brain._handle_tool_call(JOB, call)
+        self.assertEqual(result, "x/y fuera de rango (-20000–20000)")
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])

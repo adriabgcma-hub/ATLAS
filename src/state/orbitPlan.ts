@@ -23,6 +23,7 @@ const HEFESTO_PHASES: Record<string, string> = {
   hefesto_apps: 'Hefesto · Gestiona apps',
   hefesto_keyboard: 'Hefesto · Tecleando',
   hefesto_media: 'Hefesto · Multimedia',
+  hefesto_windows: 'Hefesto · Ventanas',
 }
 
 /**
