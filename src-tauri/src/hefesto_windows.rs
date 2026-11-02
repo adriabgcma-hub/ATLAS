@@ -49,6 +49,10 @@ const AX_VALUE_CGSIZE: u32 = 2;
 const MIN_VISIBLE_WIDTH: i32 = 200;
 const MIN_VISIBLE_TITLEBAR: i32 = 40;
 const MAIN_ROUNDTRIP: Duration = Duration::from_secs(5);
+/// La activación de AppKit es asíncrona: se comprueba el foco real con
+/// intentos cortos fuera del hilo principal.
+const FRONTMOST_ATTEMPTS: u32 = 12;
+const FRONTMOST_PAUSE: Duration = Duration::from_millis(50);
 /// Una app colgada no debe retener el hilo principal más de 2 s por mensaje.
 const MESSAGING_TIMEOUT: f32 = 2.0;
 
@@ -533,13 +537,27 @@ fn resize_on_main(
     refresh(&located.element, &located.info.app)
 }
 
-fn focus_on_main(target: &WindowTarget) -> Result<WindowInfo, WindowFailure> {
+/// Pide el foco para la app del objetivo (AXFrontmost + activación AppKit) y
+/// devuelve su PID. La activación es asíncrona; se confirma aparte.
+fn activate_on_main(target: &WindowTarget) -> Result<i32, WindowFailure> {
     let located = locate(target)?;
-    // La activación es pública y asíncrona; se hace primero para que una app
-    // en segundo plano acepte el foco. No se usa AppleScript ni shell.
-    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(located.pid) {
-        app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+    let app = app_element(located.pid)?;
+    // AXFrontmost es la vía que respeta el sistema aunque la activación de
+    // AppKit se rechace; si una app no expone el atributo, se sigue con la
+    // activación normal en vez de abortar.
+    let _ = set_bool(app.as_raw(), "AXFrontmost", true);
+    if let Some(running) =
+        NSRunningApplication::runningApplicationWithProcessIdentifier(located.pid)
+    {
+        running.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
     }
+    Ok(located.pid)
+}
+
+/// Deja la ventana concreta al frente y devuelve su estado real. Se llama
+/// solo cuando la app ya es la de primer plano.
+fn raise_on_main(target: &WindowTarget) -> Result<WindowInfo, WindowFailure> {
+    let located = locate(target)?;
     let element = located.element.as_CFTypeRef();
     set_bool(element, "AXMinimized", false)?;
     perform_action(element, "AXRaise")?;
@@ -573,6 +591,26 @@ impl AxWindows {
         rx.recv_timeout(MAIN_ROUNDTRIP)
             .map_err(|_| WindowFailure::Detail(TIMEOUT_ERROR.to_owned()))
     }
+
+    /// Espera a que la app sea la de primer plano. Cada consulta cruza al hilo
+    /// principal y la espera ocurre en el hilo llamante, para que el runloop
+    /// pueda completar la activación asíncrona entre intentos.
+    fn wait_frontmost(&self, pid: i32) -> Result<(), WindowFailure> {
+        for attempt in 0..FRONTMOST_ATTEMPTS {
+            let frontmost = self.on_main(|| {
+                NSWorkspace::sharedWorkspace()
+                    .frontmostApplication()
+                    .map(|app| app.processIdentifier())
+            })?;
+            if frontmost == Some(pid) {
+                return Ok(());
+            }
+            if attempt + 1 < FRONTMOST_ATTEMPTS {
+                std::thread::sleep(FRONTMOST_PAUSE);
+            }
+        }
+        Err(WindowFailure::Detail("la app no aceptó el foco".to_owned()))
+    }
 }
 
 impl WindowBridge for AxWindows {
@@ -602,8 +640,11 @@ impl WindowBridge for AxWindows {
     }
 
     fn focus(&self, target: &WindowTarget) -> Result<WindowInfo, WindowFailure> {
-        let target = target.clone();
-        self.on_main(move || focus_on_main(&target))?
+        let activating = target.clone();
+        let pid = self.on_main(move || activate_on_main(&activating))??;
+        self.wait_frontmost(pid)?;
+        let raising = target.clone();
+        self.on_main(move || raise_on_main(&raising))?
     }
 }
 
