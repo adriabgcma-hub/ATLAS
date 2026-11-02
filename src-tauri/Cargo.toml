@@ -27,7 +27,9 @@ plist = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSArray"] }
-objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSEvent", "NSGraphicsContext", "objc2-core-graphics"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSScreen", "NSEvent", "NSGraphicsContext", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3", features = ["CGEvent", "CGEventTypes"] }
 # CGEvent para el puente real de teclado (solo macOS).
 core-graphics = "0.24"
+# CFString/CFArray/CFBoolean para el puente real de ventanas (Accessibility).
+core-foundation = "0.10"

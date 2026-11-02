@@ -22,6 +22,10 @@ mod hefesto_apps;
 #[cfg(target_os = "macos")]
 mod hefesto_keyboard;
 
+/// Puente real de ventanas (`AXUIElement` + AppKit), solo en macOS.
+#[cfg(target_os = "macos")]
+mod hefesto_windows;
+
 /// URL del cerebro en la red local. No es un secreto. Por nombre (.local):
 /// la IP del servidor puede cambiar, el nombre no.
 fn default_relay_url() -> String {
@@ -360,7 +364,8 @@ impl Hefesto {
                         .with_app_bridge(Arc::new(hefesto_apps::WorkspaceApps::new(app.clone())))
                         .with_keyboard_bridge(Arc::new(hefesto_keyboard::CgKeyboard::new(
                             app.clone(),
-                        )));
+                        )))
+                        .with_window_bridge(Arc::new(hefesto_windows::AxWindows::new(app.clone())));
                 }
                 hefesto_loop(runtime, Instant::now(), snapshot, commands, app, marker)
             });
