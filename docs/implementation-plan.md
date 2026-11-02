@@ -210,17 +210,32 @@ de prueba autorizados por el usuario (2026-10-28).
       Accesibilidad y la guarda de entrada segura del teclado. Verificado en vivo
       subir volumen dos pasos (0→12, sin silencio) y el rechazo estable con
       entrada segura; la matriz de validación dio `bad_count`/`bad_action`/
-      `bad_argument`. Commits `1424ec2`…`6266fad`, relay desplegado y bundle
-      instalado en `/Applications/Atlas.app`. Queda repetir con la pantalla
-      desbloqueada bajar volumen, silenciar, brillo y play/pausa.
-- [ ] Puerta 7 pendiente: ventanas (corte 3), y luego terminal y accesibilidad
-      según las puertas del plan.
+      `bad_argument`. Con la pantalla desbloqueada se completó la matriz (bajar
+      volumen, silenciar dos veces, brillo y play/pausa con Music). Commits
+      `1424ec2`…`6266fad`, relay desplegado y bundle instalado en
+      `/Applications/Atlas.app`.
+- [x] Ventanas (2026-11-01/02, puerta 7, corte 3): protocolo v7 con **una sola**
+      herramienta `hefesto_windows` (`list`, `move`, `resize`, `focus`): `list` sin
+      tarjeta y cada efecto con exactamente una, sin burbuja. Resolución de app y
+      ventana (índice 1–99, título exacto/contiene/ambiguo) y validación estable en
+      `crates/atlas-mac/src/windows.rs`; puente con **Accessibility pública**
+      (`AXUIElement`) en `src-tauri`, timeout de 2 s por app y ventana, posición
+      acotada a las pantallas y foco verificado de verdad con `frontmostApplication`
+      (el defecto que devolvía éxito sin activar se corrigió en `f31a76a`). Journal
+      v7 con claves cerradas por acción; el relay omite los títulos de ventana en el
+      log. Probado en vivo (listar, mover, redimensionar, traer al frente desde otra
+      app, ambigüedad y matriz de validación por mTLS). Commits `85c5b14`…`f31a76a`,
+      relay desplegado y bundle instalado en `/Applications/Atlas.app`.
+- [ ] Pendiente: puerta 6 (terminal por adaptadores, presupuestos y supervisión de
+      procesos) y las capturas de la puerta 7 (TCC de grabación de pantalla y modelo
+      de visión), según las puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
 la app Tauri cuando el entorno trae sus credenciales, y hoy cubre el eco, la lectura
 y escritura dentro de las raíces autorizadas, el control de las apps instaladas,
-el teclado sintético con consentimiento y el control multimedia por teclas de
-sistema con tarjeta. La ventana de tablas permanece pendiente.
+el teclado sintético con consentimiento, el control multimedia por teclas de
+sistema con tarjeta y la gestión de ventanas por Accessibility. La ventana de
+tablas permanece pendiente.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

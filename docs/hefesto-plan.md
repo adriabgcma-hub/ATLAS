@@ -115,17 +115,18 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v6 (eco, lectura, escritura, apps, teclado y multimedia)
+## 5. Protocolo v7 (eco, lectura, escritura, apps, teclado, multimedia y ventanas)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 6` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 7` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 6, error: "codigo_estable"}`, nunca rutas/certificados.
+Errores `{protocolVersion: 7, error: "codigo_estable"}`, nunca rutas/certificados.
 Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
 escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
 16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB, los strings de apps
-(`name`/`bundleId`/`query`) a 256 caracteres y el teclado a 4096 bytes de texto o
-64 bytes de atajo. Campos desconocidos, bool por entero, versiones o tipos
-incorrectos se rechazan.
+(`name`/`bundleId`/`query`) a 256 caracteres, el teclado a 4096 bytes de texto o
+64 bytes de atajo y las ventanas a `app`/`title` de 256 bytes, `index` 1–99,
+`x`/`y` entre −20000 y 20000 y `width`/`height` entre 100 y 10000. Campos
+desconocidos, bool por entero, versiones o tipos incorrectos se rechazan.
 Generaciones entre 0 y `2^63-1`: cero representa un dispositivo aún no registrado,
 nunca una instancia viva. La expiración usa milisegundos Unix positivos hasta `2^63-1`.
 
@@ -153,6 +154,7 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | `hefesto.apps` | `hefesto_apps` (`requiresConfirmation: False`) | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
 | `hefesto.keyboard` | `hefesto_keyboard` (`requiresConfirmation: True`) | `{action, text?, combo?}` | `{text}` resumen |
 | `hefesto.media` | `hefesto_media` (`requiresConfirmation: True`) | `{action, count?}` | `{text}` resumen |
+| `hefesto.windows` | `hefesto_windows` (`requiresConfirmation: True`) | `{action, app?, title?, index?, x?, y?, width?, height?}` | `{text}` resumen o `{windows:[{app, title, x, y, width, height, focused, minimized}]}` (`list_windows`) |
 | `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
@@ -243,6 +245,16 @@ no un valor concreto. Resúmenes estables `Subido/Bajado {n} pasos de volumen`,
 `failed`; un reinicio con la pulsación en vuelo la deja `unknown`, sin
 reentregarla. La tarjeta es siempre obligatoria y no hay burbuja violeta.
 
+`windows` lista y mueve, redimensiona o trae al frente ventanas estándar de apps
+regulares por Accessibility pública: `action` vale `list_windows`, `move_window`,
+`resize_window` o `focus_window`; `app` y `title` admiten ≤256 bytes, `index` es
+1-based (1–99) y `title` se resuelve exacto y, si no hay exacto, por contenido,
+con error estable si hay varias coincidencias. El relay expone `hefesto_windows`
+con `requiresConfirmation: True` y `planConfirmation: True`: `list_windows` no
+abre tarjeta (lectura) y cada efecto válido abre exactamente una; sin burbuja.
+Los títulos de ventana son datos del usuario y no se registran en el log del
+relay.
+
 ### Estado, duplicados y fallos
 
 - Latido con lease de 15 s; reloj monótono para disponibilidad. Al registrar una
@@ -320,9 +332,9 @@ reentregarla. La tarjeta es siempre obligatoria y no hay burbuja violeta.
    detalle y la matriz en vivo viven en §8 y en `docs/implemented.md`.
 6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
    terminal general solo tras acordar y verificar aislamiento/límites.
-7. **Accesibilidad, control del Mac y capturas (puerta 7; corte 1, control de apps,
-   implementado 2026-11-01 con protocolo v4; corte 2, teclado, implementado 2026-11-01
-   con protocolo v5; pendiente la matriz en vivo de §8):**
+7. **Accesibilidad, control del Mac y capturas (puerta 7; cortes 1–3 —apps, teclado
+   y ventanas— implementados 2026-11-01 con protocolos v4, v5 y v7; matrices en vivo
+   registradas en §8; pendientes las capturas):**
    `hefesto.apps` (`open`/`close`/`list`) con las tres acciones como trivial por
    adaptador (`hefesto_apps`, `requiresConfirmation: False`, sin tarjeta), cierre **solo
    suave** (`terminate`, sin forzar ni descartar cambios), resolución híbrida
@@ -336,10 +348,20 @@ reentregarla. La tarjeta es siempre obligatoria y no hay burbuja violeta.
    con campo de entrada segura delante y permiso TCC de Accesibilidad pedido como mucho
    una vez por proceso; el texto tecleado no se persiste, no se registra ni emite
    burbuja (journal con `textBytes`/`textSha256`, en vuelo tras reinicio → `unknown`).
-   **Pendientes** los cortes de ventanas (mover/redimensionar/traer), las capturas y la
-   parte de multimedia, que exigen habilitación explícita y TCC, además del modelo de
-   visión si hace falta: bloqueo de sesión, consentimiento de envío y no activar
-   sensores por defecto.
+   **Corte 3 — ventanas (`hefesto_windows`, 2026-11-01, protocolo v7):**
+   `hefesto.windows` con `list_windows`/`move_window`/`resize_window`/`focus_window`
+   sobre `AXUIElement` público de ApplicationServices; resolución
+   NSWorkspace → ventanas estándar → índice 1–99, título exacto o contenido, con
+   error estable si hay varias coincidencias. `list` no abre tarjeta; los efectos
+   abren **exactamente una**, sin burbuja. La posición se acota a la unión de
+   pantallas conservando 200 pt de ancho y 40 pt de barra visibles; el tamaño, a
+   100–10000. Traer al frente combina `AXFrontmost`, activación de AppKit,
+   `AXRaise`, desminimizar y foco, y **verifica** que la app sea de verdad la de
+   primer plano antes de informar éxito. Los títulos de ventana son datos del
+   usuario: no se registran en el log del relay.
+   **Pendientes** las capturas y su modelo de visión, que exigen habilitación
+   explícita y TCC, además de bloqueo de sesión, consentimiento de envío y no
+   activar sensores por defecto.
 
 Cada entrega es local y comprobable antes de activar la siguiente. La base no es un
 agente funcional ni un anuncio de que Hefesto ya controle el Mac.
@@ -848,3 +870,64 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   Auditoría al terminar: vivo `Atlas.app` (PID 13012, ~52 MB) lanzado con las
   variables del dispositivo; sin Vite, sin relay local, sin `osascript` ni
   procesos huérfanos; el driver de prueba vive en `/tmp/hefesto_live.py`.
+- 2026-11-02, continuación de la matriz en vivo de multimedia con la pantalla
+  desbloqueada (mismo relay v6 y bundle v7): «Baja el volumen un paso» devolvió
+  «Bajado 1 paso de volumen» y el volumen pasó de 12 a 0; «Silencia el sonido»
+  dos veces devolvió «Pulsada la tecla de silencio» y el estado alternó
+  `true → false → true`; «Sube/Baja el brillo» devolvió «Subido/Bajado 1 paso de
+  brillo» y el cambio se vio en pantalla; «Pausa o reanuda la música» con Music
+  abierto pasó de detenido a reproduciendo y luego a pausa, y Music se cerró
+  después. Todas las llamadas abrieron su tarjeta, no emitieron burbuja y el
+  dispositivo devolvió el texto estable; la matriz de validación por mTLS ya
+  quedó registrada en el bloque anterior.
+- 2026-11-01/02, ventanas (puerta 7, corte 3), implementado, desplegado y probado
+  en vivo:
+  1. **Protocolo v7**: `protocolVersion` sube de 6 a 7 en `wire.rs`, el journal y
+     los submits del relay, con fixtures; ambos extremos rechazan 6.
+  2. **Dispositivo**: `crates/atlas-mac/src/windows.rs` con el módulo puro
+     (resolución por índice 1–99, título exacto/contiene/ambiguo, validación de
+     posición −20000…20000 y tamaño 100–10000, textos estables y
+     `handle_windows` detrás del trait `WindowBridge`), el brazo de despacho en
+     el ejecutor y la inyección del puente en el runtime.
+  3. **Puente real**: `src-tauri/src/hefesto_windows.rs` usa ApplicationServices
+     (`AXUIElementCreateApplication`, `AXCopyAttributeValue`, `AXSetAttributeValue`,
+     `AXPerformAction`, `AXValueCreate/GetValue`, `AXIsProcessTrusted`), con
+     timeout de mensajes de 2 s por app y por ventana, viaje al hilo principal y
+     espera fuera con timeout de 5 s; la pantalla primaria (`NSScreen::screens[0]`)
+     fija el eje AX y la posición se acota a la unión de pantallas. El foco se
+     arregló tras la prueba en vivo (`f31a76a`): `AXFrontmost` + activación de
+     AppKit y comprobación real con `frontmostApplication` durante ~600 ms fuera
+     del hilo principal; si la app no queda al frente, el texto es
+     `no se pudo traer la ventana: la app no aceptó el foco`, nunca un éxito falso.
+  4. **Journal v7**: `hefesto.windows` con claves cerradas por acción,
+     `bad_action`/`bad_argument` antes de crear fila, `output` de listado
+     `{windows:[…]}` validado (≤30, tipos estrictos) y `unknown` sin reentrega si
+     el dispositivo reinicia con una operación en vuelo.
+  5. **Relay**: `hefesto_windows` con `requiresConfirmation: True` y
+     `planConfirmation: True`; `list` sin tarjeta y cada efecto válido con
+     exactamente una tarjeta y sin burbuja. Los títulos son datos del usuario:
+     los argumentos no se escriben en el log y el resultado se registra solo por
+     longitud; una `action` no-string se rechaza sin `TypeError`.
+  6. **Chat**: `HEFESTO_PHASES` añade `hefesto_windows` → órbita violeta
+     «Hefesto · Ventanas».
+  7. **En vivo**: `list` de TextEdit devolvió «Sin título» en 141,64 586×488;
+     mover a 100,150 y redimensionar a 900×700 se verificaron con los bounds
+     reales de AppleScript (100,150,1000,850); «Trae al frente la ventana de
+     TextEdit» desde Safari dejó TextEdit como `frontmost` real (el primer
+     intento, antes del arreglo, devolvía éxito con Safari aún al frente); con
+     dos ventanas de Finder tituladas «adria» la operación se rechazó por
+     ambigüedad sin mover nada; `list` no abrió tarjeta y los efectos no
+     emitieron burbuja. Matriz por mTLS con el certificado `controller`:
+     `action` «explode» → `bad_action`; clave extra, `app` no-string, `index` 0,
+     `x` 20001, `width` 99, `title` no-string y clave desconocida →
+     `bad_argument`. Cero filas creadas por las inválidas.
+  Commits: spec y plan `85c5b14`; protocolo `41ec0f2`, wire y módulo `b254fa8`,
+  despacho `7afc569`, puente AX `24b4447` y `106a9ec`, journal `1c67051`, relay
+  `0dec531` y `ec0f5c3`, foco `f31a76a`.
+  Pruebas: `cargo test --workspace` 162 correctas (2 ignoradas), clippy
+  `--workspace --all-targets -- -D warnings` y `cargo fmt --check` limpios,
+  Python 444, frontend 58, `npm run build` y `npm run lint` limpios. Relay v7
+  desplegado y `/v1/health` OK; bundle Apple Development con firma profunda válida
+  instalado en `/Applications/Atlas.app` (el DMG vuelve a fallar tras firmar).
+  Auditoría al terminar: `Atlas.app`, TextEdit, Safari y las dos ventanas de
+  Finder de prueba cerrados; sin procesos de prueba ni huérfanos.

@@ -178,17 +178,18 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v6 — eco, lectura, escritura, apps, teclado y multimedia
+## Hefesto v7 — eco, lectura, escritura, apps, teclado, multimedia y ventanas
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v6-eco-lectura-escritura-apps-teclado-y-multimedia).
-Usa `protocolVersion: 6`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output` tipado por herramienta. Nueve herramientas sobre el mismo protocolo:
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v7-eco-lectura-escritura-apps-teclado-multimedia-y-ventanas).
+Usa `protocolVersion: 7`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Diez herramientas sobre el mismo protocolo:
 `hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
 (`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
 Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
 `hefesto.rename` (`{from, to}`), `hefesto.apps` (`{action, name?, bundleId?,
 query?}`), `hefesto.keyboard` (`{action, text?, combo?}`), `hefesto.media`
-(`{action, count?}`) y la interna `hefesto.file_info` (`{path}`). El relay expone
+(`{action, count?}`), `hefesto.windows` (`{action, app?, title?, index?, x?, y?,
+width?, height?}`) y la interna `hefesto.file_info` (`{path}`). El relay expone
 al modelo `hefesto_echo` (asíncrono), `hefesto_list_dir` y `hefesto_read_file`
 (lectura síncrona, con confirmación por operación), `hefesto_write_file`
 (`{path, content, mode}`) y `hefesto_rename`; `hefesto.file_info` no está en el
@@ -205,9 +206,14 @@ relay expone `hefesto_media` con `requiresConfirmation: True` y
 `planConfirmation: True`: cada invocación válida abre una tarjeta y no hay
 burbuja.
 
+`hefesto.windows` (`{action, app?, title?, index?, x?, y?, width?, height?}`)
+lista y mueve, redimensiona o trae al frente ventanas estándar. El relay expone
+`hefesto_windows` con `requiresConfirmation: True` y `planConfirmation: True`:
+`list` no abre tarjeta y cada efecto válido abre exactamente una; sin burbuja.
+
 Rutas del protocolo (cuerpo exacto, sin campos extra):
 
-| Método y ruta | Rol | Cuerpo además de `protocolVersion: 6` | Respuesta |
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 7` | Respuesta |
 | --- | --- | --- | --- |
 | GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
 | POST `/v1/hefesto/register` | device | `instanceId` | estado |
@@ -227,6 +233,7 @@ Rutas del protocolo (cuerpo exacto, sin campos extra):
 | `hefesto.apps` | `{action, name?, bundleId?, query?}` | `{text}` resumen (`open`/`close`) o `{apps:[{name, bundleId, running}]}` (`list`) |
 | `hefesto.keyboard` | `{action, text?, combo?}` | `{text}` resumen |
 | `hefesto.media` | `{action, count?}` | `{text}` resumen |
+| `hefesto.windows` | `{action, app?, title?, index?, x?, y?, width?, height?}` | `{text}` resumen o `WindowsOutput` (`list_windows`) |
 | `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
@@ -243,9 +250,37 @@ type AppsOutput = { apps: AppRecord[] }
 /** Argumentos de `hefesto.keyboard`: teclear `text` o pulsar `combo`. */
 type KeyboardPayload = { action: 'type' | 'combo'; text?: string; combo?: string }
 
+/** Argumentos de `hefesto.windows`: listar o actuar sobre una ventana. */
+type WindowPayload = {
+  action: 'list_windows' | 'move_window' | 'resize_window' | 'focus_window'
+  app?: string
+  title?: string
+  index?: number
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+}
+
+/** Fila de `hefesto.windows` (`action: list_windows`). */
+type WindowRecord = {
+  app: string
+  title: string
+  x: number
+  y: number
+  width: number
+  height: number
+  focused: boolean
+  minimized: boolean
+}
+
+/** Salida de `hefesto.windows` (`action: list_windows`), cortada a ≤30. */
+type WindowsOutput = { windows: WindowRecord[] }
+
 type HefestoOutput =
-  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado y media (≤64 KiB)
+  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado, media y efectos de ventanas (≤64 KiB)
   | AppsOutput // hefesto.apps, action=list
+  | WindowsOutput // hefesto.windows, action=list_windows
   | { exists: boolean; size: number | null; sha256: string | null } // file_info
 ```
 
@@ -383,6 +418,54 @@ por Telegram (es la misma superficie de consentimiento que la tarjeta). Un tecle
 narra. El journal trata `hefesto.keyboard` como efecto con contenido: un reinicio
 con la invocación en vuelo (pendiente o despachada) la deja `unknown`, sin
 reentregarla ni reejecutarla.
+
+### Ventanas
+
+`hefesto.windows` recibe `{action, app?, title?, index?, x?, y?, width?, height?}`
+con `action` obligatoria y solo `list_windows`, `move_window`, `resize_window` o
+`focus_window`. El conjunto de claves está cerrado **por acción**:
+`list_windows` admite `action|app`; `move_window`, `action|app|title|index|x|y`;
+`resize_window`, `action|app|title|index|width|height`; `focus_window`,
+`action|app|title|index`. Una clave extra se rechaza con `bad_argument`. `app`
+(de efecto) es texto no vacío ≤256 bytes; `title` ≤256 bytes; `index` es entero
+1–99; `x`/`y` están entre −20000 y 20000; `width`/`height`, entre 100 y 10000.
+El journal valida todo esto antes de crear fila (`bad_action`/`bad_argument`) y
+deja `unknown` una operación en vuelo si el dispositivo reinicia, sin reentrega.
+
+En el dispositivo, las apps regulares se localizan con
+`NSWorkspace.runningApplications` y sus ventanas estándar con Accessibility
+(`AXWindows`, solo las que exponen `AXStandardWindowSubrole`). El objetivo se
+elige por `index` (1-based), por `title` exacto y, si no hay exacto, por
+contenido; si varias ventanas coinciden el texto estable es
+`hay N ventanas de «App» que coinciden; concreta el título o el índice` y no se
+elige ninguna al azar. Sin `title` ni `index` se usa la ventana con foco o, si
+ninguna lo tiene, la primera. `list_windows` devuelve hasta 30 `WindowRecord`
+con `{app, title, x, y, width, height, focused, minimized}` (`WindowsOutput`).
+
+Los efectos usan Accessibility pública: `move_window` fija `AXPosition` con la
+posición acotada a la unión de todas las pantallas conservando 200 pt de ancho y
+40 pt de barra de título visibles; `resize_window` fija `AXSize` entre 100 y
+10000; `focus_window` combina `AXFrontmost` en el elemento de aplicación,
+activación de AppKit, `AXRaise`, desminimizar y foco de ventana, y **comprueba**
+que la app sea la de primer plano (`frontmostApplication`, ~600 ms) antes de
+informar éxito. Los rechazos son texto estable: `falta app`,
+`index fuera de rango (1–99)`, `x/y fuera de rango (-20000–20000)`,
+`width/height fuera de rango (100–10000)`, `no encuentro una ventana de «App»`,
+la ambigüedad anterior y `no se pudo {mover|redimensionar|traer} la ventana: …`
+(por ejemplo `la app no aceptó el foco`); sin permiso de Accesibilidad se
+devuelve el texto de permiso del teclado y no se toca nada. Los resúmenes de
+éxito son `Ventana «T» de «App» movida a X,Y`,
+`Ventana «T» de «App» redimensionada a W×H` y
+`Ventana «T» de «App» traída al frente`.
+
+Visibilidad: `hefesto_windows` usa `requiresConfirmation: True` y
+`planConfirmation: True`; `list` es lectura y no abre tarjeta, y cada efecto
+válido abre **exactamente una** tarjeta con riesgo `write` y resumen
+`Mover la ventana de App a X,Y`, `Redimensionar la ventana de App a W×H` o
+`Traer al frente la ventana de App`. No hay burbuja `agent: hefesto`. Los títulos de ventana son datos del usuario: el log del relay
+no escribe los argumentos de `hefesto_windows` y registra el resultado solo por
+longitud, así que ningún título sale del Mac por el log. El aviso de Telegram,
+cuando la petición llega por ahí, conserva el resumen de la tarjeta.
 
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
