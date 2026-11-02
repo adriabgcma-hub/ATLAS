@@ -1,4 +1,4 @@
-"""Isolated, authenticated Hefesto v7 journal (echo, read-only, write, apps, keyboard and media tools) and HTTPS listener."""
+"""Isolated, authenticated Hefesto v7 journal (echo, read-only, write, apps, keyboard, media and windows tools) and HTTPS listener."""
 
 from __future__ import annotations
 
@@ -27,6 +27,14 @@ _PREFIX = "/v1/hefesto/"
 _MEDIA_ACTIONS = ("volume_up", "volume_down", "mute", "brightness_up",
                   "brightness_down", "play_pause", "next", "previous")
 _MEDIA_COUNT_ACTIONS = ("volume_up", "volume_down", "brightness_up", "brightness_down")
+_WINDOW_ACTIONS = ("list_windows", "move_window", "resize_window", "focus_window")
+_WINDOW_KEYS = {
+    "list_windows": {"action", "app"},
+    "move_window": {"action", "app", "title", "index", "x", "y"},
+    "resize_window": {"action", "app", "title", "index", "width", "height"},
+    "focus_window": {"action", "app", "title", "index"},
+}
+_MAX_WINDOWS = 30
 _FIELDS = {
     "register": {"instanceId"},
     "heartbeat": {"instanceId"},
@@ -139,6 +147,40 @@ def _apps_output(value):
     return True
 
 
+def _windows_output(value):
+    """Shape of the hefesto.windows LIST result: {"windows": [{app, title, ...}]}.
+
+    Como maximo `_MAX_WINDOWS` ventanas estandar, con claves exactas y tipos
+    estrictos (bool no vale como int): cadenas de app/titulo acotadas a 256
+    bytes UTF-8 y geometria dentro de los rangos del wire.
+    """
+    if type(value) is not dict or set(value) != {"windows"} or type(value["windows"]) is not list:
+        return False
+    if len(value["windows"]) > _MAX_WINDOWS:
+        return False
+    for window in value["windows"]:
+        if type(window) is not dict or set(window) != {
+                "app", "title", "x", "y", "width", "height", "focused", "minimized"}:
+            return False
+        if type(window["focused"]) is not bool or type(window["minimized"]) is not bool:
+            return False
+        for key in ("app", "title"):
+            if type(window[key]) is not str:
+                return False
+            try:
+                if len(window[key].encode("utf-8")) > 256:
+                    return False
+            except UnicodeError:
+                return False
+        for key in ("x", "y"):
+            if type(window[key]) is not int or not -20000 <= window[key] <= 20000:
+                return False
+        for key in ("width", "height"):
+            if type(window[key]) is not int or not 100 <= window[key] <= 10000:
+                return False
+    return True
+
+
 def _validate(method, path, raw):
     if type(raw) is not bytes:
         raise _Rejected("invalid_body")
@@ -171,7 +213,7 @@ def _validate(method, path, raw):
     if operation == "submit" and body["toolId"] not in (
             "hefesto.echo", "hefesto.list_dir", "hefesto.read_file",
             "hefesto.write_file", "hefesto.rename", "hefesto.file_info", "hefesto.apps",
-            "hefesto.keyboard", "hefesto.media"):
+            "hefesto.keyboard", "hefesto.media", "hefesto.windows"):
         raise _Rejected("unsupported_tool")
     if operation == "submit":
         args = body["arguments"]
@@ -258,6 +300,26 @@ def _validate(method, path, raw):
                     raise _Rejected("bad_count", 400)
                 if action not in _MEDIA_COUNT_ACTIONS:
                     raise _Rejected("bad_count", 400)
+        elif body["toolId"] == "hefesto.windows":
+            action = args.get("action")
+            if action not in _WINDOW_ACTIONS:
+                raise _Rejected("bad_action", 400)
+            if not set(args) <= _WINDOW_KEYS[action]:
+                raise _Rejected("bad_argument", 400)
+            if action != "list_windows":
+                app = args.get("app")
+                if type(app) is not str or not app.strip() or len(app) > 256:
+                    raise _Rejected("bad_argument", 400)
+            if "title" in args and (type(args["title"]) is not str or len(args["title"]) > 256):
+                raise _Rejected("bad_argument", 400)
+            if "index" in args and (type(args["index"]) is not int or not 1 <= args["index"] <= 99):
+                raise _Rejected("bad_argument", 400)
+            for key in ("x", "y"):
+                if key in args and (type(args[key]) is not int or not -20000 <= args[key] <= 20000):
+                    raise _Rejected("bad_argument", 400)
+            for key in ("width", "height"):
+                if key in args and (type(args[key]) is not int or not 100 <= args[key] <= 10000):
+                    raise _Rejected("bad_argument", 400)
         else:
             if set(args) != {"path"}:
                 raise _Rejected("invalid_fields")
@@ -281,6 +343,8 @@ def _validate(method, path, raw):
             if not ok_size or not ok_hash:
                 raise _Rejected("invalid_output")
         elif _apps_output(value):
+            pass
+        elif _windows_output(value):
             pass
         else:
             raise _Rejected("invalid_output")
@@ -342,8 +406,10 @@ class Journal:
             # ya no existe (solo vivía en memoria): queda `unknown`, nunca se
             # reenvía. `hefesto.apps` (open/close) también es un efecto: aunque
             # sus argumentos si persisten, no se reejecuta tras un reinicio.
+            # `hefesto.windows` incluye `list_windows`: por precaución, toda
+            # invocación en vuelo queda `unknown` y no se reentrega.
             side_effects = ("hefesto.write_file", "hefesto.apps", "hefesto.keyboard",
-                            "hefesto.media")
+                            "hefesto.media", "hefesto.windows")
             pending_effects = [
                 row["invocation_id"]
                 for row in self._db.execute(
@@ -585,6 +651,11 @@ class Journal:
             # open/close devuelven texto; list puede devolver el formato
             # estructurado de apps. No se exige la forma apps para open/close.
             if not (_text_output(output) or _apps_output(output)):
+                raise _Rejected("invalid_output")
+        elif tool == "hefesto.windows":
+            # list_windows devuelve `{windows:[...]}`; move/resize/focus y los
+            # rechazos del dispositivo devuelven texto estable.
+            if not (_text_output(output) or _windows_output(output)):
                 raise _Rejected("invalid_output")
         elif set(output) != {"text"}:
             raise _Rejected("invalid_text")

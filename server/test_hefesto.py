@@ -1051,6 +1051,206 @@ class MediaJournalTests(JournalTests):
             invocation, output={"volume": 2}))
 
 
+WINDOWS_LIST = {"submissionId": "submission-win-list", "requestId": "request-1",
+                "sessionId": "session-1", "taskId": "task-win-1",
+                "toolId": "hefesto.windows", "arguments": {"action": "list_windows"}}
+WINDOWS_MOVE = {"submissionId": "submission-win-move", "requestId": "request-1",
+                "sessionId": "session-1", "taskId": "task-win-2",
+                "toolId": "hefesto.windows",
+                "arguments": {"action": "move_window", "app": "TextEdit",
+                              "title": "Notas", "index": 2, "x": 100, "y": 200}}
+WINDOW_RECORD = {"app": "TextEdit", "title": "Notas", "x": 100, "y": 200,
+                 "width": 800, "height": 600, "focused": True, "minimized": False}
+WINDOWS_OUTPUT = {"windows": [WINDOW_RECORD]}
+
+
+class WindowsJournalTests(JournalTests):
+    @staticmethod
+    def windows(arguments, **changes):
+        return {**WINDOWS_MOVE, **changes, "arguments": arguments}
+
+    def test_windows_list_submit_next_result_con_ventanas(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **WINDOWS_LIST)
+        self.assertEqual(ack["state"], "pending")
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["toolId"], "hefesto.windows")
+        self.assertEqual(invocation["arguments"], {"action": "list_windows"})
+        result = self.ok("result", **self.result_fields(invocation, output=WINDOWS_OUTPUT))
+        self.assertEqual(result["state"], "succeeded")
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["output"], WINDOWS_OUTPUT)
+
+    def test_windows_list_acepta_filtro_y_lista_vacia(self):
+        self.ready()
+        filtered = {"action": "list_windows", "app": "TextEdit"}
+        self.ok("submit", peer=CONTROLLER,
+                **self.windows(filtered, submissionId="submission-win-filter", taskId="task-win-3"))
+        invocation = self.next()
+        self.assertEqual(invocation["arguments"], filtered)
+        done = self.ok("result", **self.result_fields(invocation, output={"windows": []}))
+        self.assertEqual(done["state"], "succeeded")
+
+    def test_windows_move_argumentos_exactos(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **WINDOWS_MOVE)
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["toolId"], "hefesto.windows")
+        self.assertEqual(invocation["arguments"], WINDOWS_MOVE["arguments"])
+        done = self.ok("result", **self.result_fields(
+            invocation, output={"text": "Ventana «Notas» de «TextEdit» movida a 100,200"}))
+        self.assertEqual(done["state"], "succeeded")
+
+    def test_windows_resize_y_focus_aceptan_sus_claves_cerradas(self):
+        self.ready()
+        resize = {"action": "resize_window", "app": "TextEdit", "title": "Notas",
+                  "index": 1, "width": 100, "height": 10000}
+        focus = {"action": "focus_window", "app": "TextEdit", "title": "Notas", "index": 99}
+        for index, (arguments, summary) in enumerate((
+                (resize, "Ventana «Notas» de «TextEdit» redimensionada a 100×10000"),
+                (focus, "Ventana «Notas» de «TextEdit» traída al frente"))):
+            with self.subTest(action=arguments["action"]):
+                self.ok("submit", peer=CONTROLLER,
+                        **self.windows(arguments,
+                                       submissionId=f"submission-win-effect-{index}",
+                                       taskId=f"task-win-effect-{index}"))
+                invocation = self.next()
+                self.assertEqual(invocation["arguments"], arguments)
+                done = self.ok("result", **self.result_fields(invocation, output={"text": summary}))
+                self.assertEqual(done["state"], "succeeded")
+
+    def test_windows_accion_invalida_se_rechaza(self):
+        self.ready()
+        for action in ("maximize", "list", "", None, True, 1, [], {}):
+            with self.subTest(action=action):
+                self.error("bad_action", "submit", peer=CONTROLLER,
+                           **self.windows({"action": action, "app": "TextEdit"}))
+        self.error("bad_action", "submit", peer=CONTROLLER,
+                   **self.windows({"app": "TextEdit"}))
+
+    def test_windows_argumentos_invalidos_se_rechazan(self):
+        self.ready()
+        cases = (
+            {"action": "move_window", "x": 0, "y": 0},
+            {"action": "move_window", "app": "", "x": 0, "y": 0},
+            {"action": "move_window", "app": "   ", "x": 0, "y": 0},
+            {"action": "move_window", "app": "x" * 257, "x": 0, "y": 0},
+            {"action": "focus_window", "app": True},
+            {"action": "move_window", "app": "TextEdit", "x": 20001, "y": 0},
+            {"action": "move_window", "app": "TextEdit", "x": 0, "y": -20001},
+            {"action": "move_window", "app": "TextEdit", "x": "0", "y": 0},
+            {"action": "move_window", "app": "TextEdit", "x": True, "y": 0},
+            {"action": "move_window", "app": "TextEdit", "x": 1.0, "y": 0},
+            {"action": "resize_window", "app": "TextEdit", "width": 99, "height": 600},
+            {"action": "resize_window", "app": "TextEdit", "width": 800, "height": 10001},
+            {"action": "resize_window", "app": "TextEdit", "width": False, "height": 600},
+            {"action": "focus_window", "app": "TextEdit", "index": 0},
+            {"action": "focus_window", "app": "TextEdit", "index": 100},
+            {"action": "focus_window", "app": "TextEdit", "index": True},
+            {"action": "focus_window", "app": "TextEdit", "index": 1.0},
+            {"action": "focus_window", "app": "TextEdit", "title": 5},
+            {"action": "focus_window", "app": "TextEdit", "title": "x" * 257},
+            {"action": "list_windows", "x": 0},
+            {"action": "move_window", "app": "TextEdit", "width": 800},
+            {"action": "resize_window", "app": "TextEdit", "x": 0},
+            {"action": "move_window", "app": "TextEdit", "content": "cuerpo privado"},
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                self.error("bad_argument", "submit", peer=CONTROLLER,
+                           **self.windows(arguments))
+        # Ningún rechazo deja fila, contenido ni cola: el set cerrado se aplica
+        # antes de persistir y `content` no reabre `_contents`.
+        self.assertIsNone(self.ok("status")["activeInvocationId"])
+        with contextlib.closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM invocations").fetchone()[0], 0)
+        ack = self.ok("submit", peer=CONTROLLER, **WINDOWS_MOVE)
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["arguments"], WINDOWS_MOVE["arguments"])
+
+    def test_windows_list_rechaza_output_malformado(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **WINDOWS_LIST)
+        invocation = self.next()
+        broken = (
+            {"windows": [{"app": "TextEdit", "title": "Notas"}]},
+            {"windows": [{**WINDOW_RECORD, "extra": 1}]},
+            {"windows": [{**WINDOW_RECORD, "x": True}]},
+            {"windows": [{**WINDOW_RECORD, "x": 20001}]},
+            {"windows": [{**WINDOW_RECORD, "width": 99}]},
+            {"windows": [{**WINDOW_RECORD, "height": "600"}]},
+            {"windows": [{**WINDOW_RECORD, "focused": 1}]},
+            {"windows": [{**WINDOW_RECORD, "minimized": "no"}]},
+            {"windows": [{**WINDOW_RECORD, "app": "x" * 257}]},
+            {"windows": [{**WINDOW_RECORD, "title": 7}]},
+            {"windows": [WINDOW_RECORD] * 31},
+            {"windows": "no-es-lista"},
+            {"windows": [], "extra": 0},
+            {"apps": []},
+            [WINDOW_RECORD],
+        )
+        for output in broken:
+            with self.subTest(output=output):
+                self.error("invalid_output", "result",
+                           **self.result_fields(invocation, output=output))
+        self.assertEqual(self.ok("status")["activeInvocationId"], invocation["invocationId"])
+        # Los límites exactos sí valen: 30 ventanas, cadenas de 256 bytes UTF-8 y
+        # los extremos de los rangos de posición y tamaño.
+        edge = {**WINDOW_RECORD, "app": "é" * 128, "title": "x" * 256,
+                "x": -20000, "y": 20000, "width": 100, "height": 10000}
+        full = {"windows": [dict(edge) for _ in range(30)]}
+        done = self.ok("result", **self.result_fields(invocation, output=full))
+        self.assertEqual(done["state"], "succeeded")
+
+    def test_la_salida_de_ventanas_no_vale_para_otra_herramienta(self):
+        self.ready()
+        self.ok("submit", peer=CONTROLLER, **MEDIA)
+        invocation = self.next()
+        self.error("invalid_text", "result",
+                   **self.result_fields(invocation, output=WINDOWS_OUTPUT))
+
+    def test_windows_reinicio_con_move_pendiente_queda_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **WINDOWS_MOVE)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+        # Un re-submit idempotente devuelve el unknown: la acción nunca se repite.
+        self.assertEqual(self.ok("submit", peer=CONTROLLER, **WINDOWS_MOVE),
+                         {**ack, "state": "unknown"})
+
+    def test_windows_reinicio_con_move_despachado_queda_unknown_y_el_result_tardio_no_sustituye(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **WINDOWS_MOVE)
+        invocation = self.next()
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        self.error("invocation_not_dispatched", "result",
+                   **self.result_fields(invocation, output={"text": "tarde"}))
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+
+    def test_windows_reinicio_con_list_pendiente_queda_unknown_por_precaucion(self):
+        # `list_windows` no muta nada, pero se trata como efecto (conservador,
+        # documentado en el spec): sin reentrega tras reiniciar.
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **WINDOWS_LIST)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+
+
 class RegistryTests(unittest.TestCase):
     def test_peer_validation(self):
         for role, device in (("admin", "mac"), (None, "mac"), ([], "mac"), ("device", ""),
