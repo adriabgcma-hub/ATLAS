@@ -294,13 +294,13 @@ mod tests {
             Err(Error::ResponseTooLarge)
         );
         assert_eq!(
-            parse_response::<Status>(false, br#"{"protocolVersion":6,"error":"access_denied"}"#),
+            parse_response::<Status>(false, br#"{"protocolVersion":7,"error":"access_denied"}"#),
             Err(Error::RemoteRejected)
         );
         assert_eq!(
             parse_response::<Status>(
                 false,
-                br#"{"protocolVersion":6,"error":"/private/certificate.pem"}"#
+                br#"{"protocolVersion":7,"error":"/private/certificate.pem"}"#
             ),
             Err(Error::InvalidResponse)
         );

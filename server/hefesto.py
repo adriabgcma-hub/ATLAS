@@ -1,4 +1,4 @@
-"""Isolated, authenticated Hefesto v6 journal (echo, read-only, write, apps, keyboard and media tools) and HTTPS listener."""
+"""Isolated, authenticated Hefesto v7 journal (echo, read-only, write, apps, keyboard and media tools) and HTTPS listener."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ class _Rejected(Exception):
 
 
 def _error(code):
-    return {"protocolVersion": 6, "error": code}
+    return {"protocolVersion": 7, "error": code}
 
 
 def _pairs(pairs):
@@ -158,7 +158,7 @@ def _validate(method, path, raw):
     body = _decode(raw)
     if type(body) is not dict or set(body) != _FIELDS[operation] | {"protocolVersion"}:
         raise _Rejected("invalid_fields")
-    if type(body["protocolVersion"]) is not int or body["protocolVersion"] != 6:
+    if type(body["protocolVersion"]) is not int or body["protocolVersion"] != 7:
         raise _Rejected("invalid_version")
     for key in ("instanceId", "submissionId", "requestId", "sessionId", "taskId", "invocationId"):
         if key in body and not _is_id(body[key]):
@@ -430,14 +430,14 @@ class Journal:
 
     def _status(self, device_id):
         device, active = self._device(device_id), self._active(device_id)
-        return {"protocolVersion": 6, "deviceId": device_id, "instanceId": device["instance_id"],
+        return {"protocolVersion": 7, "deviceId": device_id, "instanceId": device["instance_id"],
                 "generation": device["generation"], "suspended": bool(device["suspended"]),
                 "online": device["instance_id"] is not None,
                 "activeInvocationId": active["invocation_id"] if active else None}
 
     @staticmethod
     def _ack(invocation):
-        return {"protocolVersion": 6, "invocationId": invocation["invocation_id"], "state": invocation["state"]}
+        return {"protocolVersion": 7, "invocationId": invocation["invocation_id"], "state": invocation["state"]}
 
     @staticmethod
     def _live(device, instance=None, generation=None, *, ready=False):
@@ -523,7 +523,7 @@ class Journal:
                               now + INVOCATION_SECONDS))
             if "content" in data["arguments"] or data["toolId"] == "hefesto.keyboard":
                 self._contents[invocation_id] = data["arguments"]
-            return {"protocolVersion": 6, "invocationId": invocation_id, "state": "pending"}
+            return {"protocolVersion": 7, "invocationId": invocation_id, "state": "pending"}
         if operation == "outcome":
             invocation = self._db.execute(
                 "SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
@@ -536,7 +536,7 @@ class Journal:
                     output = json.loads(invocation["output_text"])
                 except ValueError:
                     output = {"text": invocation["output_text"]}
-            return {"protocolVersion": 6, "invocationId": invocation["invocation_id"],
+            return {"protocolVersion": 7, "invocationId": invocation["invocation_id"],
                     "state": invocation["state"], "output": output}
         if operation == "next":
             self._live(device, data["instanceId"], data["generation"], ready=True)
@@ -553,16 +553,16 @@ class Journal:
                         self._db.execute(
                             "UPDATE invocations SET state='unknown' WHERE invocation_id=?",
                             (active["invocation_id"],))
-                        return {"protocolVersion": 6, "invocation": None}
+                        return {"protocolVersion": 7, "invocation": None}
                 self._db.execute("UPDATE invocations SET state='dispatched' WHERE invocation_id=?",
                                  (active["invocation_id"],))
-                invocation = {"protocolVersion": 6, "invocationId": active["invocation_id"],
+                invocation = {"protocolVersion": 7, "invocationId": active["invocation_id"],
                               "requestId": active["request_id"], "sessionId": active["session_id"],
                               "taskId": active["task_id"], "deviceId": device_id,
                               "instanceId": active["instance_id"], "generation": active["generation"],
                               "toolId": submitted["toolId"], "arguments": arguments,
                               "expiresAtUnixMs": active["expires_ms"]}
-            return {"protocolVersion": 6, "invocation": invocation}
+            return {"protocolVersion": 7, "invocation": invocation}
         invocation = self._db.execute("SELECT * FROM invocations WHERE invocation_id=? AND device_id=?",
                                       (data["invocationId"], device_id)).fetchone()
         if invocation is None:
@@ -604,7 +604,7 @@ class Journal:
         self._db.execute("UPDATE invocations SET state='succeeded', output_text=? WHERE invocation_id=?",
                          (canonical, invocation["invocation_id"]))
         self._contents.pop(invocation["invocation_id"], None)
-        return {"protocolVersion": 6, "invocationId": invocation["invocation_id"], "state": "succeeded"}
+        return {"protocolVersion": 7, "invocationId": invocation["invocation_id"], "state": "succeeded"}
 
 
 class _Handler(BaseHTTPRequestHandler):
