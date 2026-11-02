@@ -137,6 +137,12 @@ fn ax_copy(element: AXUIElementRef, attribute: &str) -> Result<CFType, WindowFai
     let code =
         unsafe { AXUIElementCopyAttributeValue(element, attribute.as_CFTypeRef(), &mut value) };
     if code != AX_ERROR_SUCCESS || value.is_null() {
+        if !value.is_null() {
+            // Justificación: Apple deja `value` indefinido si la copia falla;
+            // si aun así devolvió un objeto, tendría regla de creación y se
+            // libera al soltarlo para no filtrarlo.
+            drop(unsafe { CFType::wrap_under_create_rule(value) });
+        }
         let code = if code == AX_ERROR_SUCCESS {
             AX_ERROR_FAILURE
         } else {
@@ -287,7 +293,14 @@ fn ax_windows(element: AXUIElementRef) -> Result<Vec<CFType>, WindowFailure> {
             } else {
                 // Justificación: los elementos de un `CFArray` siguen la regla
                 // get; se retienen para sobrevivir a la liberación del array.
-                Some(unsafe { CFType::wrap_under_get_rule(raw) })
+                let window = unsafe { CFType::wrap_under_get_rule(raw) };
+                // Justificación: el timeout de mensajes de AX es por objeto;
+                // sin fijarlo en la ventana, sus lecturas y escrituras usarían
+                // el default del sistema y podrían bloquear sin cota.
+                unsafe {
+                    AXUIElementSetMessagingTimeout(raw, MESSAGING_TIMEOUT);
+                }
+                Some(window)
             }
         })
         .collect())
@@ -319,16 +332,21 @@ fn window_info(element: AXUIElementRef, app: &str) -> Option<WindowInfo> {
 }
 
 /// Ventanas estándar con su índice dentro del array crudo, para poder operar
-/// sobre el mismo `AXUIElement` que se describió.
-fn standard_windows(windows: &[CFType], app: &str) -> Vec<(WindowInfo, usize)> {
-    windows
-        .iter()
-        .enumerate()
-        .filter(|(_, window)| is_standard_window(window.as_CFTypeRef()))
-        .filter_map(|(index, window)| {
-            window_info(window.as_CFTypeRef(), app).map(|info| (info, index))
-        })
-        .collect()
+/// sobre el mismo `AXUIElement` que se describió. Deja de leer atributos en
+/// cuanto ha recogido `limit` ventanas; los listados no necesitan más.
+fn standard_windows(windows: &[CFType], app: &str, limit: usize) -> Vec<(WindowInfo, usize)> {
+    let mut out = Vec::new();
+    for (index, window) in windows.iter().enumerate() {
+        if out.len() >= limit {
+            break;
+        }
+        if is_standard_window(window.as_CFTypeRef()) {
+            if let Some(info) = window_info(window.as_CFTypeRef(), app) {
+                out.push((info, index));
+            }
+        }
+    }
+    out
 }
 
 fn to_i32(value: f64) -> i32 {
@@ -384,9 +402,11 @@ fn ax_union(frames: &[(f64, f64, f64, f64)], main_height: f64) -> Option<(f64, f
 fn screen_bounds() -> Option<(f64, f64, f64, f64)> {
     // Si el runtime no nos marca como hilo principal, no se acota a ciegas.
     let mtm = MainThreadMarker::new()?;
-    let main_height = NSScreen::mainScreen(mtm)?.frame().size.height;
-    let frames: Vec<(f64, f64, f64, f64)> = NSScreen::screens(mtm)
-        .to_vec()
+    let screens = NSScreen::screens(mtm).to_vec();
+    // Las coordenadas AX/CG se anclan a la pantalla principal (la del menú),
+    // que es la primera de `NSScreen::screens`, no la de la ventana clave.
+    let main_height = screens.first()?.frame().size.height;
+    let frames: Vec<(f64, f64, f64, f64)> = screens
         .iter()
         .map(|screen| {
             let frame = screen.frame();
@@ -428,7 +448,8 @@ fn locate(target: &WindowTarget) -> Result<LocatedWindow, WindowFailure> {
     let (pid, name) = running_pid(&target.app)?;
     let app = app_element(pid)?;
     let mut windows = ax_windows(app.as_raw())?;
-    let standard = standard_windows(&windows, &name);
+    // El objetivo puede estar más allá del corte de los listados.
+    let standard = standard_windows(&windows, &name, usize::MAX);
     let infos: Vec<WindowInfo> = standard.iter().map(|(info, _)| info.clone()).collect();
     let position = resolve_target(&target.app, &infos, target.title.as_deref(), target.index)?;
     let (info, index) = standard.get(position).cloned().ok_or_else(|| {
@@ -449,7 +470,9 @@ fn list_on_main(filter: Option<&str>) -> Result<Vec<WindowInfo>, WindowFailure> 
         let (pid, name) = running_pid(app)?;
         let element = app_element(pid)?;
         let windows = ax_windows(element.as_raw())?;
-        return Ok(standard_windows(&windows, &name)
+        // Corte temprano: no se leen siete atributos por ventana más allá del
+        // máximo que se devuelve.
+        return Ok(standard_windows(&windows, &name, MAX_WINDOWS)
             .into_iter()
             .map(|(info, _)| info)
             .take(MAX_WINDOWS)
@@ -476,8 +499,10 @@ fn list_on_main(filter: Option<&str>) -> Result<Vec<WindowInfo>, WindowFailure> 
         let Ok(windows) = ax_windows(element.as_raw()) else {
             continue;
         };
+        // Se pide solo lo que falta para el máximo total, sin leer de más.
+        let remaining = MAX_WINDOWS.saturating_sub(out.len());
         out.extend(
-            standard_windows(&windows, &name)
+            standard_windows(&windows, &name, remaining)
                 .into_iter()
                 .map(|(info, _)| info),
         );
@@ -510,15 +535,15 @@ fn resize_on_main(
 
 fn focus_on_main(target: &WindowTarget) -> Result<WindowInfo, WindowFailure> {
     let located = locate(target)?;
+    // La activación es pública y asíncrona; se hace primero para que una app
+    // en segundo plano acepte el foco. No se usa AppleScript ni shell.
+    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(located.pid) {
+        app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+    }
     let element = located.element.as_CFTypeRef();
     set_bool(element, "AXMinimized", false)?;
     perform_action(element, "AXRaise")?;
     set_bool(element, "AXFocused", true)?;
-    // La activación es pública y asíncrona; si la app ya no está, la relectura
-    // posterior lo detecta. No se usa AppleScript ni shell.
-    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(located.pid) {
-        app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
-    }
     refresh(&located.element, &located.info.app)
 }
 
