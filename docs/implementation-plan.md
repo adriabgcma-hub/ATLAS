@@ -202,13 +202,25 @@ de prueba autorizados por el usuario (2026-10-28).
       vivo: tecleo verificado en un documento con fichero, `cmd+s` y rechazo por
       entrada segura. Commits `2ef02eb`…`24ae479`, relay desplegado y bundle
       instalado en `/Applications/Atlas.app`.
-- [ ] Puerta 7 pendiente: ventanas (corte 3), y luego multimedia, terminal y
-      accesibilidad según las puertas del plan.
+- [x] Multimedia (2026-11-01, puerta 5): protocolo v6 con **una sola** herramienta
+      `hefesto_media` (volumen, brillo, silencio y reproducción) por teclas de
+      sistema, `count` 1–10 solo para volumen/brillo y **tarjeta siempre**; sin
+      lectura de estado, sin subprocess y sin permisos nuevos. El puente usa
+      eventos system-defined de AppKit al hilo principal y reutiliza el permiso de
+      Accesibilidad y la guarda de entrada segura del teclado. Verificado en vivo
+      subir volumen dos pasos (0→12, sin silencio) y el rechazo estable con
+      entrada segura; la matriz de validación dio `bad_count`/`bad_action`/
+      `bad_argument`. Commits `1424ec2`…`6266fad`, relay desplegado y bundle
+      instalado en `/Applications/Atlas.app`. Queda repetir con la pantalla
+      desbloqueada bajar volumen, silenciar, brillo y play/pausa.
+- [ ] Puerta 7 pendiente: ventanas (corte 3), y luego terminal y accesibilidad
+      según las puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
 la app Tauri cuando el entorno trae sus credenciales, y hoy cubre el eco, la lectura
-y escritura dentro de las raíces autorizadas, el control de las apps instaladas y el
-teclado sintético con consentimiento. La ventana de tablas permanece pendiente.
+y escritura dentro de las raíces autorizadas, el control de las apps instaladas,
+el teclado sintético con consentimiento y el control multimedia por teclas de
+sistema con tarjeta. La ventana de tablas permanece pendiente.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

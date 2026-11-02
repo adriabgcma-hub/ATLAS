@@ -781,3 +781,70 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   (PID 95930, ~54 MB) con el documento de prueba abierto; sin `osascript`, sin
   procesos Vite/Tauri y sin huérfanos nuevos. El fichero de prueba
   `/tmp/hefesto-kbd.txt` se deja para inspección del usuario.
+- 2026-11-01, multimedia (puerta 5), implementado, desplegado y probado en vivo:
+  1. **Protocolo v6**: `protocolVersion` sube de 5 a 6 en `wire.rs`, el journal y
+     los submits del relay, con todos sus fixtures; ambos extremos rechazan 5.
+  2. **Dispositivo**: `crates/atlas-mac/src/media.rs` con el mapa cerrado
+     `MediaAction → NX_KEYTYPE_*` (0/1/2/3/7/16/17/18), la validación de `count`
+     (1–10 solo para volumen y brillo, por defecto 1; presencia en el resto es
+     error), los textos estables y `handle_media` (validar → entrada segura →
+     permiso → pulsar), detrás del trait `KeyboardBridge`, al que se añade
+     `press_system`. No lee estado: los resúmenes confirman la pulsación, no un
+     valor (`Subido 2 pasos de volumen`, `Pulsada la tecla de silencio`, …).
+  3. **Puente real**: `src-tauri/src/hefesto_keyboard.rs` postea eventos
+     **system-defined** de AppKit (`NSEventType::SystemDefined`, subtipo 8,
+     `NX_KEYDOWN`/`NX_KEYUP` en `data1`, flag de función) al tap HID desde el
+     hilo principal, `count` veces y sin dormir; reutiliza el permiso de
+     Accesibilidad y las comprobaciones de entrada segura del teclado, sin
+     subprocess ni API privada.
+  4. **Journal v6**: `hefesto.media` es efecto **sin contenido**: claves cerradas
+     `action|count`, `bad_action`/`bad_count` antes de crear fila, sin
+     `_contents` ni redacción (nada que ocultar) y `unknown` sin reentrega si el
+     dispositivo reinicia con la pulsación en vuelo.
+  5. **Relay**: una sola herramienta `hefesto_media`
+     (`requiresConfirmation: True` + `planConfirmation: True`), validación antes
+     de la tarjeta, normalización de `count` (siempre presente en volumen/brillo,
+     ausente en el resto), tarjeta con resumen «Subir el volumen 2 pasos» /
+     «Silenciar o reactivar el sonido» / «Pausar» y riesgo `write`, y **sin
+     burbuja** `agent: hefesto`.
+  6. **Chat**: `HEFESTO_PHASES` añade `hefesto_media` → órbita violeta
+     «Hefesto · Multimedia».
+  Commits: spec `1424ec2`, plan `0d67bd6`, protocolo `760fe2e`, media pura y
+  puente `4404e02`, despacho `47e00de`, journal `dd63828`, relay `d2537a7`,
+  órbita/contratos/plan `6266fad` y este registro. Pruebas: `cargo test
+  --workspace` 139 correctas (2 ignoradas del panel), clippy
+  `--workspace --all-targets -- -D warnings` limpio, `cargo fmt --check` limpio,
+  Python 380 OK, frontend 57, `npm run build` y `npm run lint` limpios.
+  Desplegado con `./scripts/deploy-relay.sh` (commits del corte, `atlas-relay`
+  activo y `/v1/health` OK) y bundle Apple Development con firma profunda válida
+  instalado en `/Applications/Atlas.app` (el paso del DMG vuelve a fallar tras
+  firmar el `.app`).
+- 2026-11-01, matriz en vivo de multimedia (relay v6 + bundle nuevo, disparada
+  por HTTP sin tocar la UI):
+  1. «Sube el volumen dos pasos» → tarjeta «Subir el volumen 2 pasos» (riesgo
+     `write`), aprobada; el dispositivo devolvió «Subido 2 pasos de volumen» y el
+     Mac pasó de volumen 0 y silenciado a volumen 12 sin silencio (leído con
+     `osascript`): las dos pulsaciones de tecla de sistema llegaron de verdad.
+     Sin burbuja `agent: hefesto`; el log del relay muestra
+     `args={"action":"volume_up","count":2}` (sin contenido que ocultar).
+  2. La segunda llamada («Baja el volumen un paso») devolvió
+     `hay un campo con entrada segura en primer plano; no pulso teclas del
+     sistema` y el volumen siguió en 12: la pantalla estaba **bloqueada** y
+     `loginwindow` (PID 435) sostenía la entrada segura, así que el guard actuó
+     correctamente y no se posteó nada. La misma llamada, minutos antes, había
+     quedado `device_offline` tras dos minutos sin latido con la pantalla
+     bloqueada (macOS suspendió los timers del proceso): el dispositivo se
+     re-registró solo al volver la actividad, sin reejecutar nada.
+  3. Matriz de validación del journal por mTLS con el certificado `controller`:
+     `count` 0, 11, `"2"` y `true` → `bad_count`; `count` en `mute` →
+     `bad_count`; `action` «explode» → `bad_action`; claves `content`/`text` →
+     `bad_argument`; `count` 10 → aceptado (rechazado después por dispositivo
+     offline). Cero filas creadas por las inválidas y ninguna tarjeta.
+  4. Pendiente de repetir con la pantalla desbloqueada: bajar volumen, silenciar,
+     brillo y play/pausa (el guard de entrada segura los rechaza, con razón,
+     mientras `loginwindow` tiene el foco). La tarjeta, la validación, el texto
+     del dispositivo, la ausencia de burbuja y el camino real de teclas de
+     volumen quedaron verificados.
+  Auditoría al terminar: vivo `Atlas.app` (PID 13012, ~52 MB) lanzado con las
+  variables del dispositivo; sin Vite, sin relay local, sin `osascript` ni
+  procesos huérfanos; el driver de prueba vive en `/tmp/hefesto_live.py`.
