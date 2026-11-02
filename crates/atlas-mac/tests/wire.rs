@@ -357,3 +357,26 @@ fn media_v7_aterriza_en_su_variante_sin_robar_teclado_ni_apps() {
     let apps: ToolArguments = serde_json::from_str(r#"{"action":"list"}"#).unwrap();
     assert!(matches!(apps, ToolArguments::Apps(_)));
 }
+
+#[test]
+fn ventanas_v7_aterrizan_en_su_variante_sin_robar_apps() {
+    let list: ToolArguments = serde_json::from_str(r#"{"action":"list_windows"}"#).unwrap();
+    assert!(matches!(list, ToolArguments::Windows(_)));
+    let move_it: ToolArguments =
+        serde_json::from_str(r#"{"action":"move_window","app":"TextEdit","x":10,"y":20}"#).unwrap();
+    assert_eq!(
+        move_it,
+        ToolArguments::Windows(WindowsPayload {
+            action: WindowAction::MoveWindow,
+            app: Some("TextEdit".to_owned()),
+            title: None,
+            index: None,
+            x: Some(10),
+            y: Some(20),
+            width: None,
+            height: None,
+        })
+    );
+    let apps: ToolArguments = serde_json::from_str(r#"{"action":"list"}"#).unwrap();
+    assert!(matches!(apps, ToolArguments::Apps(_)));
+}

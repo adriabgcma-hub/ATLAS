@@ -7,6 +7,7 @@ pub mod keyboard;
 pub mod media;
 pub mod runtime;
 pub mod tools;
+pub mod windows;
 pub mod wire;
 
 pub use apps::{handle_apps, AppBridge, AppRef, CloseOutcome};
@@ -16,6 +17,7 @@ pub use keyboard::{handle_keyboard, KeyboardBridge};
 pub use media::handle_media;
 pub use runtime::{Phase, Runtime, Snapshot, Transport};
 pub use tools::Roots;
+pub use windows::handle_windows;
 pub use wire::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

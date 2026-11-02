@@ -376,6 +376,54 @@ pub struct MediaPayload {
     pub count: Option<u8>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowAction {
+    ListWindows,
+    MoveWindow,
+    ResizeWindow,
+    FocusWindow,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsPayload {
+    pub action: WindowAction,
+    #[serde(default)]
+    pub app: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub index: Option<u8>,
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowRecord {
+    pub app: String,
+    pub title: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub focused: bool,
+    pub minimized: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowsOutput {
+    pub windows: Vec<WindowRecord>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
@@ -386,6 +434,7 @@ pub enum ToolArguments {
     Apps(AppsPayload),
     Keyboard(KeyboardPayload),
     Media(MediaPayload),
+    Windows(WindowsPayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -441,6 +490,7 @@ pub enum OutputPayload {
     Text(TextPayload),
     Info(FileInfoOutput),
     Apps(AppsOutput),
+    Windows(WindowsOutput),
 }
 
 impl OutputPayload {
@@ -453,7 +503,7 @@ impl OutputPayload {
     pub fn text_value(&self) -> Option<&str> {
         match self {
             Self::Text(payload) => Some(payload.text.as_str()),
-            Self::Info(_) | Self::Apps(_) => None,
+            Self::Info(_) | Self::Apps(_) | Self::Windows(_) => None,
         }
     }
 }
@@ -478,6 +528,8 @@ pub enum ToolId {
     Keyboard,
     #[serde(rename = "hefesto.media")]
     Media,
+    #[serde(rename = "hefesto.windows")]
+    Windows,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
