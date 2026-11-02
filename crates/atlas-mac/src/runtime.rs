@@ -208,6 +208,7 @@ pub struct Runtime<T: Transport> {
     roots: crate::tools::Roots,
     app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
     keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
+    window_bridge: Option<std::sync::Arc<dyn crate::windows::WindowBridge>>,
     session: Option<Session>,
     phase: Phase,
     detail: Option<&'static str>,
@@ -229,6 +230,7 @@ impl<T: Transport> Runtime<T> {
             roots,
             app_bridge: None,
             keyboard_bridge: None,
+            window_bridge: None,
             session: None,
             phase: Phase::Connecting,
             detail: None,
@@ -259,6 +261,17 @@ impl<T: Transport> Runtime<T> {
         bridge: std::sync::Arc<dyn crate::keyboard::KeyboardBridge>,
     ) -> Self {
         self.keyboard_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS window bridge into every executor session this runtime
+    /// spawns, enabling `hefesto.windows`. Optional: without it the tool only
+    /// reports unavailability.
+    pub fn with_window_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::windows::WindowBridge>,
+    ) -> Self {
+        self.window_bridge = Some(bridge);
         self
     }
 
@@ -371,6 +384,9 @@ impl<T: Transport> Runtime<T> {
         }
         if let Some(bridge) = &self.keyboard_bridge {
             executor = executor.with_keyboard_bridge(bridge.clone());
+        }
+        if let Some(bridge) = &self.window_bridge {
+            executor = executor.with_window_bridge(bridge.clone());
         }
         self.session = Some(Session { instance, executor });
         self.registered = false;

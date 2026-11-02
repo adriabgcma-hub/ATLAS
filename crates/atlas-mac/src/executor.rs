@@ -95,6 +95,7 @@ pub struct Executor {
     completed: HashMap<OpaqueId, CompletedInvocation>,
     app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
     keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
+    window_bridge: Option<std::sync::Arc<dyn crate::windows::WindowBridge>>,
 }
 
 impl Executor {
@@ -119,6 +120,7 @@ impl Executor {
             completed: HashMap::new(),
             app_bridge: None,
             keyboard_bridge: None,
+            window_bridge: None,
         }
     }
 
@@ -136,6 +138,17 @@ impl Executor {
         bridge: std::sync::Arc<dyn crate::keyboard::KeyboardBridge>,
     ) -> Self {
         self.keyboard_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS window bridge so `hefesto.windows` can list, move,
+    /// resize and focus windows. Without it the tool reports unavailability as
+    /// text.
+    pub fn with_window_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::windows::WindowBridge>,
+    ) -> Self {
+        self.window_bridge = Some(bridge);
         self
     }
 
@@ -386,6 +399,10 @@ impl Executor {
             (ToolId::Media, ToolArguments::Media(payload)) => match &self.keyboard_bridge {
                 Some(bridge) => crate::media::handle_media(bridge.as_ref(), payload)?,
                 None => OutputPayload::text("Hefesto no puede controlar multimedia")?,
+            },
+            (ToolId::Windows, ToolArguments::Windows(payload)) => match &self.window_bridge {
+                Some(bridge) => crate::windows::handle_windows(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede gestionar ventanas")?,
             },
             _ => return Err(Error::InvalidArguments),
         };

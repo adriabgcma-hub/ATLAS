@@ -1116,3 +1116,147 @@ fn media_sin_puente_devuelve_texto_no_disponible() {
         Some("Hefesto no puede controlar multimedia")
     );
 }
+
+struct FakeWindows;
+
+fn two_windows() -> Vec<atlas_mac::windows::WindowInfo> {
+    vec![
+        atlas_mac::windows::WindowInfo {
+            app: "TextEdit".into(),
+            title: "Documento".into(),
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+            focused: true,
+            minimized: false,
+        },
+        atlas_mac::windows::WindowInfo {
+            app: "TextEdit".into(),
+            title: "Notas".into(),
+            x: 40,
+            y: 50,
+            width: 640,
+            height: 480,
+            focused: false,
+            minimized: false,
+        },
+    ]
+}
+
+impl atlas_mac::windows::WindowBridge for FakeWindows {
+    fn permission(&self) -> bool {
+        true
+    }
+    fn list(
+        &self,
+        _: Option<&str>,
+    ) -> std::result::Result<Vec<atlas_mac::windows::WindowInfo>, atlas_mac::windows::WindowFailure>
+    {
+        Ok(two_windows())
+    }
+    fn move_to(
+        &self,
+        _: &atlas_mac::windows::WindowTarget,
+        x: i32,
+        y: i32,
+    ) -> std::result::Result<atlas_mac::windows::WindowInfo, atlas_mac::windows::WindowFailure>
+    {
+        let mut info = two_windows().remove(0);
+        info.x = x;
+        info.y = y;
+        Ok(info)
+    }
+    fn resize(
+        &self,
+        _: &atlas_mac::windows::WindowTarget,
+        width: u32,
+        height: u32,
+    ) -> std::result::Result<atlas_mac::windows::WindowInfo, atlas_mac::windows::WindowFailure>
+    {
+        let mut info = two_windows().remove(0);
+        info.width = width;
+        info.height = height;
+        Ok(info)
+    }
+    fn focus(
+        &self,
+        _: &atlas_mac::windows::WindowTarget,
+    ) -> std::result::Result<atlas_mac::windows::WindowInfo, atlas_mac::windows::WindowFailure>
+    {
+        Ok(two_windows().remove(0))
+    }
+}
+
+fn windows_payload(action: WindowAction) -> WindowsPayload {
+    WindowsPayload {
+        action,
+        app: None,
+        title: None,
+        index: None,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+    }
+}
+
+fn windows_executor() -> Executor {
+    apps_executor(None).with_window_bridge(Arc::new(FakeWindows))
+}
+
+fn windows_invocation(payload: WindowsPayload) -> Invocation {
+    let mut inv = invocation();
+    inv.invocation_id = id("w");
+    inv.tool_id = ToolId::Windows;
+    inv.arguments = ToolArguments::Windows(payload);
+    inv
+}
+
+#[test]
+fn windows_list_se_enruta_por_el_puente_inyectado() {
+    let mut executor = windows_executor();
+    let out = executor
+        .execute(
+            &windows_invocation(windows_payload(WindowAction::ListWindows)),
+            at(3),
+        )
+        .unwrap();
+    let OutputPayload::Windows(list) = out.output else {
+        panic!("la lista debe producir OutputPayload::Windows");
+    };
+    assert_eq!(list.windows.len(), 2);
+}
+
+#[test]
+fn windows_move_se_enruta_por_el_puente_inyectado() {
+    let mut executor = windows_executor();
+    let payload = WindowsPayload {
+        app: Some("TextEdit".into()),
+        x: Some(10),
+        y: Some(20),
+        ..windows_payload(WindowAction::MoveWindow)
+    };
+    let out = executor
+        .execute(&windows_invocation(payload), at(3))
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Ventana «Documento» de «TextEdit» movida a 10,20")
+    );
+}
+
+#[test]
+fn windows_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor
+        .execute(
+            &windows_invocation(windows_payload(WindowAction::ListWindows)),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Hefesto no puede gestionar ventanas")
+    );
+}
