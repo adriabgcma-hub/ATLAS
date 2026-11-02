@@ -1328,3 +1328,39 @@ class WindowsFlowTests(unittest.TestCase):
         self.assertEqual(result, "x/y fuera de rango (-20000–20000)")
         ask.assert_not_called()
         self.assertEqual(self.journal.submits, [])
+
+    def test_el_log_no_contiene_titulos(self):
+        self.journal.accept("inv-win")
+        self.journal.outcomes["inv-win"] = {
+            "state": "succeeded",
+            "output": {"text": "Ventana «Secreto-QA-42» de «TextEdit» movida a 1,2"}}
+        call = {"id": "c1", "function": {
+            "name": "hefesto_windows",
+            "arguments": json.dumps({"action": "move", "app": "TextEdit",
+                                     "title": "Secreto-QA-42", "x": 1, "y": 2})}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once"), \
+                mock.patch("atlas_relay.dlog") as dlog:
+            result = self.brain._handle_tool_call(JOB, call)
+        # El contenido que ve el modelo y el usuario no se toca.
+        self.assertIn("Secreto-QA-42", result)
+        # Ningún registro del relay puede llevar el título.
+        for logged in dlog.call_args_list:
+            self.assertNotIn("Secreto-QA-42", str(logged))
+        tool_logs = [c.args[2] for c in dlog.call_args_list
+                     if len(c.args) >= 3 and c.args[1] == "TOOL"]
+        self.assertTrue(any("tool=hefesto_windows" in line and "request=req-1" in line
+                            for line in tool_logs))
+        # El log de resultado de ventanas solo lleva la longitud.
+        redacted = atlas_relay.tool_log_result("hefesto_windows", result)
+        self.assertNotIn("Secreto-QA-42", redacted)
+        self.assertEqual(redacted, f"<{len(result)} chars>")
+
+    def test_action_no_string_no_delega(self):
+        for args in ({"action": ["list"]}, {"action": {}}, {}, {"action": 1}):
+            with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                    mock.patch("atlas_relay.dlog"):
+                result = self.brain.execute_tool("hefesto_windows", args, JOB)
+            self.assertEqual(result, "action inválida (list, move, resize o focus)")
+            ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])

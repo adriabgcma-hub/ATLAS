@@ -421,6 +421,12 @@ def dlog(brain: "Brain", category: str, message: str, **extra) -> None:
     print(f"[relay {time.strftime('%H:%M:%S')}] {category}: {message}", file=sys.stderr, flush=True)
 
 
+def tool_log_result(name: str, result: str) -> str:
+    """Resultado apto para el log: teclado y ventanas solo registran longitud."""
+    return (f"<{len(result)} chars>"
+            if name in ("hefesto_keyboard", "hefesto_windows") else result[:200])
+
+
 def fail_config(message: str) -> NoReturn:
     log(f"config: {message}")
     raise SystemExit(2)
@@ -1353,7 +1359,7 @@ class Brain:
     def _windows(self, job: dict, args: dict) -> str:
         """Ventanas: list es lectura sin tarjeta; move/resize/focus, un efecto."""
         action = args.get("action")
-        if action not in _WINDOWS_WIRE:
+        if type(action) is not str or action not in _WINDOWS_WIRE:
             return "action inválida (list, move, resize o focus)"
         app = args.get("app")
         if isinstance(app, str):
@@ -1925,8 +1931,10 @@ class Brain:
     def _handle_tool_call(self, job: dict, call: dict) -> str:
         """Ejecuta una tool_call del modelo (con confirmación si toca)."""
         function = call.get("function", {}) if isinstance(call, dict) else {}
-        # El contenido de una escritura o del teclado nunca se registra.
-        logged = ("" if function.get("name") in ("hefesto_write_file", "hefesto_keyboard")
+        # El contenido de una escritura, del teclado o los títulos de ventana
+        # nunca se registra.
+        logged = ("" if function.get("name") in
+                  ("hefesto_write_file", "hefesto_keyboard", "hefesto_windows")
                   else str(function.get("arguments") or "")[:300])
         dlog(self, "TOOL", f"call tool={function.get('name')} args={logged} request={job.get('request_id')}")
         try:
@@ -2002,7 +2010,10 @@ class Brain:
             for call in calls:
                 result = self._handle_tool_call(job, call if isinstance(call, dict) else {})
                 call_id = call.get("id", "") if isinstance(call, dict) else ""
-                dlog(self, "TOOL", f"tool={call.get('function', {}).get('name')} result={result[:200]} request={request_id}")
+                name = (call.get("function", {}).get("name")
+                        if isinstance(call, dict) else None)
+                dlog(self, "TOOL", f"tool={name} result={tool_log_result(name, result)} "
+                                   f"request={request_id}")
                 messages.append({"role": "tool", "tool_call_id": call_id,
                                  "content": result})
         dlog(self, "PROCESS", f"max turns reached request={request_id}")
