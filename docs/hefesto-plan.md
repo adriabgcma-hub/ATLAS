@@ -27,7 +27,7 @@ sin permiso adicional.** La revisión de seguridad sustituye al borrador convers
   Mandos: app, atajo local y Hub Panel a través del relay.
 - Accesibilidad requiere habilitación explícita persistida y permisos macOS.
 - Raíces: Documents, Desktop, Downloads, Pictures, Music, Movies y proyectos dados
-  de alta. La ventana de tablas/CSV no forma parte de esta entrega.
+  de alta. La ventana de tablas/CSV vive en la app y no es una herramienta de Hefesto.
 
 ## 3. Límites y valores iniciales conservadores
 
@@ -39,8 +39,10 @@ Estos valores permiten construir la base sin resolver decisiones sensibles por e
   Antes de las herramientas reales se implementará consentimiento de exportación
   delimitado por contenido y destino; compartir chat no comparte todos los datos.
 - No `sudo`, llaveros, claves, `.env`, dotfiles ni LaunchAgents. Las prohibiciones no
-  se levantan mediante un botón de confirmación. El terminal general no se habilitará
-  hasta definir su aislamiento y declarar sus limitaciones reales.
+  se levantan mediante un botón de confirmación. El terminal general solo ejecuta
+  argv directo dentro de las raíces de binarios del sistema, con intérpretes y vías
+  de elevación o persistencia denegados por nombre; nunca concede `sudo`, shell ni
+  autoarranque.
 - La automatización de interfaz se pausará al bloquear/dormir el Mac y no se reanudará
   automáticamente. Las operaciones sin interfaz tendrán una política explícita propia.
 - 12 turnos, 5 min de trabajo, 30 s por comando y 64 KiB de salida son presupuestos
@@ -115,18 +117,20 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v8 (eco, lectura, escritura, apps, teclado, multimedia, ventanas y sistema)
+## 5. Protocolo v9 (eco, lectura, escritura, apps, teclado, multimedia, ventanas, sistema, terminal y capturas)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 8` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 9` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 8, error: "codigo_estable"}`, nunca rutas/certificados.
+Errores `{protocolVersion: 9, error: "codigo_estable"}`, nunca rutas/certificados.
 Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
 escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
 16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB, los strings de apps
 (`name`/`bundleId`/`query`) a 256 caracteres, el teclado a 4096 bytes de texto o
-64 bytes de atajo y las ventanas a `app`/`title` de 256 bytes, `index` 1–99,
-`x`/`y` entre −20000 y 20000 y `width`/`height` entre 100 y 10000. Campos
-desconocidos, bool por entero, versiones o tipos incorrectos se rechazan.
+64 bytes de atajo, las ventanas a `app`/`title` de 256 bytes, `index` 1–99,
+`x`/`y` entre −20000 y 20000 y `width`/`height` entre 100 y 10000; el terminal a
+`program` ≤1024 bytes, ≤32 argumentos de ≤1024 bytes y ≤4096 bytes en total, y
+la captura solo admite `target: screen`. Campos desconocidos, bool por entero,
+versiones o tipos incorrectos se rechazan.
 Generaciones entre 0 y `2^63-1`: cero representa un dispositivo aún no registrado,
 nunca una instancia viva. La expiración usa milisegundos Unix positivos hasta `2^63-1`.
 
@@ -156,6 +160,8 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | `hefesto.media` | `hefesto_media` (`requiresConfirmation: True`) | `{action, count?}` | `{text}` resumen |
 | `hefesto.windows` | `hefesto_windows` (`requiresConfirmation: True`) | `{action, app?, title?, index?, x?, y?, width?, height?}` | `{text}` resumen o `{windows:[{app, title, x, y, width, height, focused, minimized}]}` (`list_windows`) |
 | `hefesto.system` | `hefesto_system` (`requiresConfirmation: False`) | `{action: os\|disk\|uptime\|memory}` | `{text}` con la salida acotada |
+| `hefesto.terminal` | `hefesto_terminal` (`requiresConfirmation: True`) | `{program, args}` | `{text}` con la salida acotada |
+| `hefesto.capture` | `hefesto_capture` (`requiresConfirmation: True`) | `{target: screen}` | `{text}` con el nombre del PNG y el texto reconocido |
 | `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
@@ -338,17 +344,24 @@ sistema trivial por adaptador, sin tarjeta y sin burbuja.
    acciones de volumen, brillo y reproducción por teclas de sistema; tarjeta
    siempre, sin lectura de estado, sin subprocess y sin permisos nuevos. El
    detalle y la matriz en vivo viven en §8 y en `docs/implemented.md`.
-6. **Terminal de consulta (implementado 2026-11-03, protocolo v8):**
+6. **Sistema y terminal general (implementados 2026-11-02/03, protocolo v9):**
    `hefesto_system` con cuatro adaptadores cerrados (`os`, `disk`, `uptime`,
    `memory`) sobre binarios y argumentos fijos, sin shell, entorno limpio,
    timeout de 2 s, grupo de procesos propio con `SIGKILL` al vencer y salida
    acotada a 16 KiB. Sin tarjeta ni burbuja; el journal valida `{action}` y
-   deja `unknown` una consulta en vuelo tras reinicio. El **terminal general**
-   sigue pendiente de aislamiento y límites acordados; nunca es trivial por el
-   nombre del binario.
-7. **Accesibilidad, control del Mac y capturas (puerta 7; cortes 1–3 —apps, teclado
-   y ventanas— implementados 2026-11-01 con protocolos v4, v5 y v7; matrices en vivo
-   registradas en §8; pendientes las capturas):**
+   deja `unknown` una consulta en vuelo tras reinicio.
+   El **terminal general** (`hefesto_terminal`, protocolo v9) ejecuta argv
+   directo sin shell: ruta absoluta dentro de `/usr/bin`, `/bin`, `/usr/sbin`,
+   `/sbin`, `/usr/local/bin` u `/opt/homebrew/bin`, ≤32 argumentos y ≤4096 bytes
+   de comando, con los intérpretes y las vías de elevación/persistencia
+   denegados por nombre. Corre con entorno limpio, `stdin` nulo, grupo propio,
+   timeout de 10 s con `SIGKILL` del grupo y 24 KiB por tubería; **cada
+   ejecución pide confirmación** con el comando exacto y no emite burbuja. El
+   journal no guarda el comando (solo `commandBytes`/`commandSha256`) y deja
+   `unknown` una ejecución en vuelo tras reinicio. Detalle en §8.
+7. **Accesibilidad, control del Mac y capturas (puerta 7; cortes 1–4 —apps, teclado,
+   ventanas y capturas— implementados 2026-11-01/03 con protocolos v4, v5, v7 y v9;
+   matrices en vivo registradas en §8):**
    `hefesto.apps` (`open`/`close`/`list`) con las tres acciones como trivial por
    adaptador (`hefesto_apps`, `requiresConfirmation: False`, sin tarjeta), cierre **solo
    suave** (`terminate`, sin forzar ni descartar cambios), resolución híbrida
@@ -373,9 +386,15 @@ sistema trivial por adaptador, sin tarjeta y sin burbuja.
    `AXRaise`, desminimizar y foco, y **verifica** que la app sea de verdad la de
    primer plano antes de informar éxito. Los títulos de ventana son datos del
    usuario: no se registran en el log del relay.
-   **Pendientes** las capturas y su modelo de visión, que exigen habilitación
-   explícita y TCC, además de bloqueo de sesión, consentimiento de envío y no
-   activar sensores por defecto.
+   **Corte 4 — capturas (`hefesto_capture`, 2026-11-03, protocolo v9):**
+   `hefesto.capture` con `target: screen` captura con `/usr/sbin/screencapture`,
+   guarda el PNG en `~/Documents/Atlas/capturas/` y reconoce el texto en local
+   con Apple Vision (`Accurate`, `es-ES`/`en-US`); la imagen nunca sale del Mac
+   y solo el texto vuelve al modelo. Exige el TCC de Grabación de pantalla
+   (comprobado y solicitado como mucho una vez por proceso), tarjeta siempre con
+   riesgo `external`, timeout de 10 s en captura y en OCR, y journal que deja
+   `unknown` una captura en vuelo tras reinicio. Al modelo solo se le devuelve el
+   nombre del archivo, nunca la ruta.
 
 Cada entrega es local y comprobable antes de activar la siguiente. La base no es un
 agente funcional ni un anuncio de que Hefesto ya controle el Mac.
@@ -983,3 +1002,55 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   Python 495, frontend 59, `npm run build` y `npm run lint` limpios. Relay v8
   desplegado y `/v1/health` OK; bundle Apple Development con firma profunda válida
   instalado en `/Applications/Atlas.app` (el DMG vuelve a fallar tras firmar).
+- 2026-11-03, terminal general (puerta 6, corte 2), capturas (puerta 7, corte 4) y
+  ventana de tablas, implementados, desplegados y probados hasta donde permite el
+  TCC:
+  1. **Protocolo v9**: `protocolVersion` sube de 8 a 9 en `wire.rs`, el journal y
+     los submits del relay; `TerminalPayload {program, args}`,
+     `CapturePayload {target: screen}`, `hefesto.terminal` y `hefesto.capture`.
+     Ambos extremos rechazan 8.
+  2. **Terminal**: `crates/atlas-mac/src/terminal.rs` valida ruta absoluta dentro
+     de las seis raíces, sin `.`/`..`, con la lista de intérpretes y vías de
+     elevación denegada, ≤32 argumentos y ≤4096 B; `handle_terminal` devuelve
+     `Salida (código N):` con stdout, `[stderr]` o `sin salida`. El puente
+     `src-tauri/src/hefesto_terminal.rs` canonicaliza, exige archivo ejecutable,
+     ejecuta argv directo con entorno limpio, grupo propio, timeout de 10 s y
+     `SIGKILL` al grupo, y corta cada tubería a 24 KiB.
+  3. **Capturas**: `crates/atlas-mac/src/capture.rs` compone el encabezado con el
+     nombre del PNG y el texto recortado a 64 KiB; `src-tauri/src/hefesto_capture.rs`
+     comprueba y solicita el TCC de Grabación de pantalla en el hilo principal,
+     captura con `screencapture -x -t png` (timeout 10 s) a
+     `~/Documents/Atlas/capturas/captura-AAAAMMDD-HHMMSS.png` y reconoce el texto
+     con Apple Vision (`Accurate`, `es-ES`/`en-US`, timeout 10 s). La imagen no
+     sale del Mac y no se devuelve la ruta.
+  4. **Journal v9**: `hefesto.terminal` es efecto con contenido (solo
+     `commandBytes`/`commandSha256` en disco; comando en memoria) y
+     `hefesto.capture` guarda `{target}`; una invocación en vuelo tras reinicio
+     queda `unknown`, sin reentrega. La validación es cerrada
+     (`bad_argument`/`bad_action`) antes de crear fila.
+  5. **Relay**: `hefesto_terminal` (riesgo `destructive`) y `hefesto_capture`
+     (riesgo `external`), ambos con `requiresConfirmation` + `planConfirmation`:
+     una tarjeta por invocación válida y ninguna con entrada inválida; sin
+     burbuja. Los argumentos del terminal se omiten del log y los resultados de
+     terminal y captura se registran solo por longitud. El tiempo de espera del
+     usuario no consume el plazo de la operación.
+  6. **Ventana de tablas**: `src-tauri/src/table.rs` guarda `TablePayload` en
+     memoria y crea `table-N` (`table.html`, `Atlas · Tabla`, 920×640) con
+     `WebviewWindowBuilder`; `export_table_csv` escribe BOM UTF-8, CRLF y comillas
+     RFC 4180 en `~/Documents/Atlas/tablas/<título>-<epoch>.csv` de forma atómica.
+     Límites: título ≤120, 1–64 columnas, ≤2000 filas, celda ≤2000 y payload
+     ≤512 KiB. En el chat, cada tabla GFM muestra `Abrir en ventana` solo dentro
+     de Tauri.
+  7. **En vivo**: `hefesto_terminal` con `/bin/echo hola` abrió la tarjeta
+     `Ejecutar /bin/echo hola — la salida volverá al modelo` (riesgo
+     `destructive`); tras aprobar, el modelo recibió `hola`. `hefesto_capture`
+     abrió la tarjeta de captura (riesgo `external`) y devolvió el texto estable
+     de permiso denegado porque el Mac aún no tiene concedido el TCC de Grabación
+     de pantalla; la ruta OCR real queda pendiente de conceder ese permiso y
+     reiniciar Atlas. La ventana de tablas está cubierta por pruebas de unidad y
+     build; su comprobación visual en la app queda pendiente.
+  Commit `3cfe4da`. Pruebas: `cargo test --workspace` 207 (2 ignoradas), clippy
+  `--workspace --all-targets -- -D warnings` y `cargo fmt --check` limpios,
+  Python 586, frontend 61, `npm run build` y `npm run lint` limpios. Relay v9
+  desplegado y `/v1/health` OK; bundle Apple Development con firma profunda válida
+  e instalado en `/Applications/Atlas.app` (el DMG también se generó esta vez).

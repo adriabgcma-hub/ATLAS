@@ -178,11 +178,12 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v8 — eco, lectura, escritura, apps, teclado, multimedia, ventanas y sistema
+## Hefesto v9 — eco, lectura, escritura, apps, teclado, multimedia, ventanas, sistema, terminal y capturas
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v8-eco-lectura-escritura-apps-teclado-multimedia-ventanas-y-sistema).
-Usa `protocolVersion: 8`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output` tipado por herramienta. Once herramientas sobre el mismo protocolo:
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v9-eco-lectura-escritura-apps-teclado-multimedia-ventanas-sistema-terminal-y-capturas).
+Usa `protocolVersion: 9`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Trece `toolId` sobre el mismo protocolo (doce
+visibles y la interna `hefesto.file_info`):
 `hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
 (`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
 Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
@@ -215,9 +216,24 @@ lista y mueve, redimensiona o trae al frente ventanas estándar. El relay expone
 solo lectura por adaptadores fijos. El relay expone `hefesto_system` con
 `requiresConfirmation: False`: sin tarjeta y sin burbuja.
 
+`hefesto.terminal` (`{program, args}`) ejecuta un binario del sistema con argv
+directo, sin shell: `program` es una ruta absoluta dentro de `/usr/bin`, `/bin`,
+`/usr/sbin`, `/sbin`, `/usr/local/bin` u `/opt/homebrew/bin` (≤1024 B) y `args`
+una lista de hasta 32 argumentos de ≤1024 B cada uno y ≤4096 B en total. El
+relay expone `hefesto_terminal` con `requiresConfirmation: True` y
+`planConfirmation: True`: cada ejecución válida abre **exactamente una** tarjeta
+con el comando exacto y riesgo `destructive`; sin burbuja.
+
+`hefesto.capture` (`{target: screen}`) captura la pantalla, guarda el PNG en
+`~/Documents/Atlas/capturas/` y reconoce su texto en local con Apple Vision. El
+relay expone `hefesto_capture` con `requiresConfirmation: True` y
+`planConfirmation: True`: cada captura válida abre **exactamente una** tarjeta
+con riesgo `external`; sin burbuja. La imagen nunca sale del Mac: al modelo solo
+vuelve el texto reconocido.
+
 Rutas del protocolo (cuerpo exacto, sin campos extra):
 
-| Método y ruta | Rol | Cuerpo además de `protocolVersion: 8` | Respuesta |
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 9` | Respuesta |
 | --- | --- | --- | --- |
 | GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
 | POST `/v1/hefesto/register` | device | `instanceId` | estado |
@@ -239,6 +255,8 @@ Rutas del protocolo (cuerpo exacto, sin campos extra):
 | `hefesto.media` | `{action, count?}` | `{text}` resumen |
 | `hefesto.windows` | `{action, app?, title?, index?, x?, y?, width?, height?}` | `{text}` resumen o `WindowsOutput` (`list_windows`) |
 | `hefesto.system` | `{action: os\|disk\|uptime\|memory}` | `{text}` con la salida acotada |
+| `hefesto.terminal` | `{program, args}` | `{text}` con la salida acotada |
+| `hefesto.capture` | `{target: screen}` | `{text}` con el nombre del PNG y el texto reconocido |
 | `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
@@ -285,8 +303,14 @@ type WindowsOutput = { windows: WindowRecord[] }
 /** Argumentos de `hefesto.system`: consulta cerrada del sistema. */
 type SystemPayload = { action: 'os' | 'disk' | 'uptime' | 'memory' }
 
+/** Argumentos de `hefesto.terminal`: binario absoluto y argv exacto, sin shell. */
+type TerminalPayload = { program: string; args: string[] }
+
+/** Argumentos de `hefesto.capture`: pantalla completa. */
+type CapturePayload = { target: 'screen' }
+
 type HefestoOutput =
-  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado, media, efectos de ventanas y sistema (≤64 KiB)
+  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado, media, efectos de ventanas, sistema, terminal y captura (≤64 KiB)
   | AppsOutput // hefesto.apps, action=list
   | WindowsOutput // hefesto.windows, action=list_windows
   | { exists: boolean; size: number | null; sha256: string | null } // file_info
@@ -504,6 +528,80 @@ efecto sin contenido y un reinicio con la invocación en vuelo la deja `unknown`
 sin reejecutarla. El log registra solo la acción en los argumentos y el
 resultado por longitud.
 
+### Terminal
+
+`hefesto_terminal` recibe `{program, args}`: `program` es una ruta absoluta
+(≤1024 B) dentro de `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, `/usr/local/bin` u
+`/opt/homebrew/bin`, sin componentes `.`/`..`; `args` es una lista de hasta 32
+cadenas de ≤1024 B cada una y ≤4096 B en total. El conjunto de claves es
+cerrado. No hay shell: el binario se ejecuta con argv directo. Se rechazan por
+nombre los intérpretes y las vías de elevación o persistencia (`sh`, `bash`,
+`zsh`, `csh`, `tcsh`, `fish`, `dash`, `ksh`, `sudo`, `su`, `doas`, `launchctl`,
+`systemsetup`, `shutdown`, `reboot`, `halt`, `kill`, `killall`, `pkill`, `env`,
+`xargs`), aunque vivan en una raíz permitida.
+
+En el dispositivo, el puente canonicaliza el programa, comprueba que sea un
+archivo ejecutable y lo lanza con el entorno vacío salvo
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `LANG=C` y `LC_ALL=C`, `stdin` nulo,
+`stdout` y `stderr` canalizados, directorio `/` y grupo de procesos propio. El
+timeout es de 10 s; al vencer se mata el grupo con `SIGKILL` y se espera el
+cierre de los lectores, de modo que no queda ningún descendiente vivo. Cada
+tubería se corta a 24 KiB y añade `… (recortado)`; si se corta, se mata el grupo
+para que el hijo no quede bloqueado escribiendo. La salida es
+`Salida (código N):`, seguida del `stdout`, de `[stderr]` si lo hay, o de
+`sin salida` cuando ambos están vacíos. Los rechazos estables son
+`programa no válido`, `programa no permitido`, `programa no encontrado`,
+`programa no ejecutable`, `demasiados argumentos`, `argumentos no válidos` y
+`comando demasiado largo`; un fallo de arranque o de ejecución se envuelve como
+`no se pudo ejecutar el comando: …` (por ejemplo
+`el comando no respondió a tiempo`). El relay valida antes de abrir la tarjeta y
+responde `argumentos inválidos (program y args)` o `programa no permitido`.
+
+Visibilidad: `hefesto_terminal` usa `requiresConfirmation: True` y
+`planConfirmation: True`; cada ejecución válida abre **exactamente una** tarjeta
+con riesgo `destructive` y resumen
+`Ejecutar <comando> — la salida volverá al modelo` (los argumentos con espacios
+o caracteres especiales se muestran entre «»). No hay burbuja `agent: hefesto`.
+El journal trata `hefesto.terminal` como efecto con contenido: en disco solo
+guarda `commandBytes` y `commandSha256`, el comando completo vive en memoria del
+relay y del dispositivo para entregarlo y deduplicar, y una invocación en vuelo
+tras reinicio queda `unknown`, sin reentrega. El log del relay omite los
+argumentos de `hefesto_terminal` y registra el resultado solo por longitud.
+
+### Capturas
+
+`hefesto_capture` recibe `{target}` con `target` obligatorio y único valor
+`screen`. El conjunto de claves es cerrado; el relay responde
+`acción inválida (screen)` o `argumentos inválidos (solo target)` antes de
+delegar.
+
+En el dispositivo, el permiso TCC de Grabación de pantalla se comprueba con
+`CGPreflightScreenCaptureAccess` y se solicita como mucho una vez por proceso con
+`CGRequestScreenCaptureAccess`, siempre en el hilo principal. Sin permiso no se
+captura nada y el texto estable es
+`falta el permiso de Grabación de pantalla; actívalo en Ajustes del Sistema ›
+Privacidad y seguridad › Grabación de pantalla y reinicia Atlas`. Con permiso se
+ejecuta `/usr/sbin/screencapture -x -t png <ruta>` con entorno limpio, `stdin`
+nulo, directorio `/`, grupo propio y timeout de 10 s con `SIGKILL` al grupo; el
+PNG queda en `~/Documents/Atlas/capturas/captura-AAAAMMDD-HHMMSS.png` (UTC). El
+texto se reconoce en local con Apple Vision (`VNRecognizeTextRequest`, nivel
+`Accurate`, idiomas `es-ES` y `en-US`) con un timeout de 10 s; ningún dato sale
+del Mac salvo el texto reconocido. La salida es
+`Captura guardada: <nombre>\nTexto reconocido:\n<texto>` o
+`Captura guardada: <nombre>\nno se reconoció texto`; solo se devuelve el nombre
+del archivo, nunca la ruta, y el texto se recorta a 64 KiB. Los fallos se
+envuelven como `no se pudo capturar la pantalla: …` (por ejemplo
+`la captura no respondió a tiempo` o
+`el reconocimiento de texto no respondió a tiempo`).
+
+Visibilidad: `hefesto_capture` usa `requiresConfirmation: True` y
+`planConfirmation: True`; cada captura válida abre **exactamente una** tarjeta
+con riesgo `external` y resumen
+`Capturar la pantalla y reconocer texto (la imagen queda en el Mac; el texto
+volverá al modelo)`. No hay burbuja `agent: hefesto`. El journal guarda
+`{target}` y deja `unknown` una captura en vuelo tras reinicio, sin reentrega; el
+log del relay omite los argumentos y registra el resultado solo por longitud.
+
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):
 
@@ -565,3 +663,36 @@ en memoria las invocaciones completadas —cada una puede incluir hasta 16 KiB d
 contenido de escritura— para deduplicar entregas y responder a un ACK perdido;
 ese contenido muere con el proceso, y el badge de estado solo transporta texto de
 eco, nunca contenido de archivos.
+
+## Ventana de tablas
+
+Cada tabla GFM de una respuesta del chat ofrece `Abrir en ventana` (solo dentro
+de la app Tauri; en el navegador el botón no existe). La tabla se extrae del DOM
+renderizado y se envía por IPC; el webview nunca elige rutas.
+
+```ts
+type TablePayload = { title: string; headers: string[]; rows: string[][] }
+```
+
+| Comando IPC | Entrada | Salida |
+| --- | --- | --- |
+| `open_table_window` | `{payload: TablePayload}` | etiqueta de la ventana (`table-N`) |
+| `table_payload` | `{label}` | `TablePayload` de esa ventana |
+| `export_table_csv` | `{label}` | ruta absoluta del CSV escrito |
+
+Límites antes de abrir o exportar: título ≤120 caracteres, 1–64 columnas,
+≤2000 filas, cada celda ≤2000 caracteres, todas las filas con el número exacto
+de columnas y payload ≤512 KiB. Los errores son estables (`título demasiado
+largo`, `número de columnas inválido`, `demasiadas filas`, `fila con columnas
+distintas`, `celda demasiado larga`, `tabla demasiado grande`, `tabla no
+encontrada`).
+
+La ventana se crea con `WebviewWindowBuilder` (etiqueta `table-N`, `table.html`,
+título `Atlas · Tabla`, 920×640, mínimo 480×320) y su contenido vive solo en
+memoria: al destruirse la ventana se elimina la tabla. La capability cubre
+`main` y `table-*`. `Exportar CSV` escribe en
+`~/Documents/Atlas/tablas/<título-saneado>-<epoch>.csv` con BOM UTF-8, saltos
+CRLF y comillas solo cuando la celda contiene coma, comilla, salto de línea o
+retorno; las comillas internas se duplican. El nombre se sanea a ASCII
+minúsculas, guiones y ≤60 caracteres (`tabla` si queda vacío), y la escritura es
+atómica (temporal + `rename`).

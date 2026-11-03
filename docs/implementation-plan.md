@@ -128,9 +128,14 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       violeta aparece tras permitir la lectura. Pruebas: 51 frontend, 150
       Python, `cargo test --workspace`, clippy y fmt (los 3 errores de lint de
       Hub Panel siguen siendo previos).
-- [ ] Tablas en ventana aparte (`Atlas · Tabla`) con detección + botón
-      "Abrir en ventana" y exportar CSV a `~/Documents/Atlas/tablas/`
-      (diseñado; pendiente de implementar).
+- [x] Tablas en ventana aparte (2026-11-03, `3cfe4da`): cada tabla GFM muestra
+      `Abrir en ventana` dentro de Tauri; el payload viaja por IPC a una ventana
+      `table-N` (`table.html`, `Atlas · Tabla`, 920×640) que lo guarda en memoria y
+      ofrece `Exportar CSV` a `~/Documents/Atlas/tablas/` (BOM UTF-8, CRLF,
+      comillas RFC 4180, nombre saneado y escritura atómica). Límites: título
+      ≤120, 1–64 columnas, ≤2000 filas, celda ≤2000 caracteres, payload ≤512 KiB.
+      Cubierto por pruebas Rust de validación/CSV y de frontend del botón; la
+      comprobación visual de la ventana en la app queda pendiente.
 
 ## Hefesto — especialista del Mac (2026-10-27)
 
@@ -238,18 +243,38 @@ de prueba autorizados por el usuario (2026-10-28).
       ni burbuja) y con las pruebas de journal para acciones y claves inválidas.
       Commit `c440380`, relay v8 desplegado y bundle v8 instalado en
       `/Applications/Atlas.app`.
-- [ ] Pendiente: terminal general (ejecución con aislamiento, presupuestos y
-      supervisión de descendientes) y las capturas de la puerta 7 (TCC de grabación
-      de pantalla y modelo de visión), según las puertas del plan.
+- [x] Terminal general (2026-11-03, puerta 6, corte 2): protocolo v9 con **una
+      sola** herramienta `hefesto_terminal` (`{program, args}`), argv directo sin
+      shell y **tarjeta por invocación** con riesgo `destructive`. Rutas absolutas
+      solo en `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, `/usr/local/bin` y
+      `/opt/homebrew/bin`; intérpretes y elevación denegados por nombre; ≤32
+      argumentos y ≤4096 B de comando. Entorno limpio, grupo propio, timeout de
+      10 s con `SIGKILL` del grupo y 24 KiB por tubería. Journal v9 con el comando
+      redactado en disco (`commandBytes`/`commandSha256`) y `unknown` tras
+      reinicio. Probado en vivo (`/bin/echo hola` → tarjeta → `hola`).
+      Commit `3cfe4da`.
+- [x] Capturas con OCR local (2026-11-03, puerta 7, corte 4): protocolo v9 con
+      **una sola** herramienta `hefesto_capture` (`{target: screen}`), tarjeta por
+      invocación con riesgo `external`. TCC de Grabación de pantalla comprobado y
+      solicitado como mucho una vez por proceso; PNG en
+      `~/Documents/Atlas/capturas/`; OCR con Apple Vision (`Accurate`,
+      `es-ES`/`en-US`); timeouts de 10 s; solo vuelve el texto, nunca la imagen ni
+      la ruta. Probado en vivo hasta el rechazo estable por TCC pendiente; la ruta
+      OCR real queda pendiente de conceder el permiso y reiniciar Atlas.
+      Commit `3cfe4da`.
+- [ ] Pendiente: comprobación visual de la ventana de tablas en la app y captura
+      real con OCR tras conceder el TCC de Grabación de pantalla.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo se inicia dentro de la
 app Tauri al abrirla, leyendo sus credenciales del entorno o de
 `~/Library/Application Support/com.atlas.next/hefesto/`, y hoy cubre el eco, la lectura
 y escritura dentro de las raíces autorizadas, el control de las apps instaladas,
 el teclado sintético con consentimiento, el control multimedia por teclas de
-sistema con tarjeta, la gestión de ventanas por Accessibility y las consultas de
-sistema por adaptadores. La ventana de tablas y la terminal general permanecen
-pendientes.
+sistema con tarjeta, la gestión de ventanas por Accessibility, las consultas de
+sistema por adaptadores, el terminal general por argv directo con tarjeta y la
+captura de pantalla con OCR local. La ventana de tablas ya existe en la app; su
+comprobación visual y la captura real con TCC concedido quedan como verificación
+final.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 
