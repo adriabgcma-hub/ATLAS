@@ -502,9 +502,13 @@ encargos. Activar borra el marcador. El marcador no guarda datos, solo la
 intención; si no se puede leer, se asume suspendido.
 
 Las credenciales (`ATLAS_HEFESTO_CA`, `ATLAS_HEFESTO_CERT`, `ATLAS_HEFESTO_KEY`,
-`ATLAS_HEFESTO_DEVICE_ID` y `ATLAS_HEFESTO_URL` opcional) se leen solo del
-entorno del proceso Tauri. Sin ellas, `phase` es `unconfigured` y el frontal
-oculta el indicador: no existe un Hefesto inerte.
+`ATLAS_HEFESTO_DEVICE_ID` y `ATLAS_HEFESTO_URL` opcional) se leen primero del
+entorno del proceso Tauri y, si faltan, de
+`~/Library/Application Support/com.atlas.next/hefesto/`: `ca.pem`, `device.pem`,
+`device-key.pem`, `device-id` y `url` opcional. La clave debe tener permisos sin
+grupo ni otros (600); si no, `phase` es `failed` con `credentials_unreadable`.
+Sin ninguna de las dos fuentes, `phase` es `unconfigured` y el frontal oculta el
+indicador: no existe un Hefesto inerte.
 
 `deviceId` se deriva del certificado mTLS, nunca del cuerpo del cliente. `instanceId`
 identifica un arranque; `generation` invalida trabajo anterior; `submissionId` evita

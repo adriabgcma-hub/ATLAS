@@ -385,6 +385,12 @@ ficticios. No tocar `.env`, certificados, llaveros, permisos TCC, firewall, syst
 `authorized_keys` reales en esta ronda. Firmar siempre con identidad estable; no asumir
 que cada build pierde TCC ni que notarizar conserva permisos. Verificarlo en su fase.
 
+Credenciales del dispositivo: el entorno `ATLAS_HEFESTO_*` tiene prioridad; si
+falta, el bundle lee `~/Library/Application Support/com.atlas.next/hefesto/`
+(`ca.pem`, `device.pem`, `device-key.pem` con permisos 600, `device-id` y `url`
+opcional). Así el agente arranca al abrir la app sin variables ni lanzadores
+auxiliares; el webview nunca ve los ficheros.
+
 `docs/implemented.md` mantiene implementaciones publicadas y sus commits exactos:
 no añadir un commit ficticio para cambios todavía locales. Registrar aquí pruebas y
 resultados y mantener `docs/implementation-plan.md` sincronizado. El deploy habitual

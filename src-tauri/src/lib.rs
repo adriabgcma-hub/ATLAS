@@ -276,6 +276,12 @@ const HEFESTO_DEFAULT_URL: &str = "https://atlas-hub.local:8767";
 /// Suspensión pendiente de reactivación manual: mientras exista, abrir la app
 /// no vuelve a habilitar la ejecución por su cuenta.
 const HEFESTO_SUSPEND_MARKER: &str = "hefesto-suspended";
+const HEFESTO_CONFIG_DIR: &str = "hefesto";
+const HEFESTO_CA_FILE: &str = "ca.pem";
+const HEFESTO_CERT_FILE: &str = "device.pem";
+const HEFESTO_KEY_FILE: &str = "device-key.pem";
+const HEFESTO_DEVICE_ID_FILE: &str = "device-id";
+const HEFESTO_URL_FILE: &str = "url";
 
 #[derive(Clone, serde::Serialize)]
 struct HefestoEvent {
@@ -334,7 +340,7 @@ impl Hefesto {
                 // Credenciales, TLS y resolución del nombre fuera del arranque
                 // de la ventana: la consulta mDNS puede tardar y la app no
                 // debe esperar a que termine.
-                let (client, device_id) = match hefesto_transport() {
+                let (client, device_id) = match hefesto_transport(&app) {
                     Ok(transport) => transport,
                     Err(state) => {
                         if let Ok(mut slot) = snapshot.lock() {
@@ -375,19 +381,64 @@ impl Hefesto {
     }
 }
 
-/// Credenciales y URL solo por entorno: los ficheros viven fuera del repo.
-/// Sin las cuatro variables de identidad, Hefesto queda sin configurar.
-fn hefesto_transport() -> std::result::Result<(HefestoClient, OpaqueId), Snapshot> {
-    let (Ok(ca_path), Ok(cert_path), Ok(key_path), Ok(device_id)) = (
-        std::env::var("ATLAS_HEFESTO_CA"),
-        std::env::var("ATLAS_HEFESTO_CERT"),
-        std::env::var("ATLAS_HEFESTO_KEY"),
-        std::env::var("ATLAS_HEFESTO_DEVICE_ID"),
+/// Ruta de entorno si no está vacía; si no, la ruta del fichero dentro de la
+/// configuración persistente de la app (para CA, certificado y clave).
+fn config_path(env: Option<String>, dir: Option<&Path>, file: &str) -> Option<String> {
+    env.filter(|value| !value.trim().is_empty()).or_else(|| {
+        let path = dir?.join(file);
+        path.is_file().then(|| path.to_string_lossy().into_owned())
+    })
+}
+
+/// Valor de entorno si no está vacío; si no, el contenido recortado del
+/// fichero (para el identificador del dispositivo y la URL).
+fn config_value(env: Option<String>, dir: Option<&Path>, file: &str) -> Option<String> {
+    env.filter(|value| !value.trim().is_empty()).or_else(|| {
+        let text = std::fs::read_to_string(dir?.join(file)).ok()?;
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    })
+}
+
+/// La clave privada no debe ser legible por grupo ni por otros usuarios.
+#[cfg(unix)]
+fn private_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.permissions().mode() & 0o077 == 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn private_file(_path: &Path) -> bool {
+    true
+}
+
+/// Credenciales por entorno o, si faltan, desde
+/// `~/Library/Application Support/<bundle>/hefesto/` (`ca.pem`, `device.pem`,
+/// `device-key.pem`, `device-id` y, opcional, `url`). Los ficheros viven fuera
+/// del repo; el entorno tiene prioridad para desarrollo y pruebas.
+fn hefesto_transport(app: &AppHandle) -> std::result::Result<(HefestoClient, OpaqueId), Snapshot> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|path| path.join(HEFESTO_CONFIG_DIR));
+    let path = |env: &str, file: &str| config_path(std::env::var(env).ok(), dir.as_deref(), file);
+    let value = |env: &str, file: &str| config_value(std::env::var(env).ok(), dir.as_deref(), file);
+    let (Some(ca_path), Some(cert_path), Some(key_path), Some(device_id)) = (
+        path("ATLAS_HEFESTO_CA", HEFESTO_CA_FILE),
+        path("ATLAS_HEFESTO_CERT", HEFESTO_CERT_FILE),
+        path("ATLAS_HEFESTO_KEY", HEFESTO_KEY_FILE),
+        value("ATLAS_HEFESTO_DEVICE_ID", HEFESTO_DEVICE_ID_FILE),
     ) else {
         return Err(Snapshot::unconfigured());
     };
-    let url =
-        std::env::var("ATLAS_HEFESTO_URL").unwrap_or_else(|_| HEFESTO_DEFAULT_URL.to_string());
+    if !private_file(Path::new(&key_path)) {
+        return Err(Snapshot::failed("credentials_unreadable"));
+    }
+    let url = value("ATLAS_HEFESTO_URL", HEFESTO_URL_FILE)
+        .unwrap_or_else(|| HEFESTO_DEFAULT_URL.to_string());
     let read =
         |path: &str| std::fs::read(path).map_err(|_| Snapshot::failed("credentials_unreadable"));
     let ca = read(&ca_path)?;
@@ -730,5 +781,104 @@ mod tests {
             next_visibility(false, false),
             VisibilityAction::Show
         ));
+    }
+
+    fn config_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("atlas-config-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("directorio temporal");
+        dir
+    }
+
+    #[test]
+    fn el_entorno_gana_al_fichero_de_configuracion() {
+        use super::config_value;
+        let dir = config_dir("entorno");
+        std::fs::write(dir.join("device-id"), "desde-fichero").expect("fichero");
+        assert_eq!(
+            config_value(Some("desde-entorno".to_owned()), Some(&dir), "device-id").as_deref(),
+            Some("desde-entorno")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sin_entorno_se_lee_el_fichero_recortado() {
+        use super::config_value;
+        let dir = config_dir("fichero");
+        std::fs::write(dir.join("device-id"), "  mac-one\n").expect("fichero");
+        assert_eq!(
+            config_value(None, Some(&dir), "device-id").as_deref(),
+            Some("mac-one")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn un_entorno_vacio_no_tapa_el_fichero() {
+        use super::config_value;
+        let dir = config_dir("vacio");
+        std::fs::write(dir.join("device-id"), "mac-one").expect("fichero");
+        assert_eq!(
+            config_value(Some("  ".to_owned()), Some(&dir), "device-id").as_deref(),
+            Some("mac-one")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sin_fichero_ni_entorno_no_hay_configuracion() {
+        use super::config_value;
+        let dir = config_dir("ausente");
+        assert_eq!(config_value(None, Some(&dir), "device-id"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn el_entorno_de_ruta_gana_al_fichero() {
+        use super::config_path;
+        let dir = config_dir("ruta-entorno");
+        std::fs::write(dir.join("ca.pem"), b"certificado").expect("fichero");
+        assert_eq!(
+            config_path(Some("/tmp/ca.pem".to_owned()), Some(&dir), "ca.pem").as_deref(),
+            Some("/tmp/ca.pem")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sin_entorno_la_ruta_apunta_al_fichero() {
+        use super::config_path;
+        let dir = config_dir("ruta-fichero");
+        let expected = dir.join("ca.pem");
+        std::fs::write(&expected, b"certificado").expect("fichero");
+        assert_eq!(
+            config_path(None, Some(&dir), "ca.pem").as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sin_fichero_no_hay_ruta() {
+        use super::config_path;
+        let dir = config_dir("ruta-ausente");
+        assert_eq!(config_path(None, Some(&dir), "ca.pem"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn la_clave_privada_exige_permisos_sin_grupo_ni_otros() {
+        use super::private_file;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = config_dir("permisos");
+        let path = dir.join("device-key.pem");
+        std::fs::write(&path, b"clave").expect("clave");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("permisos");
+        assert!(private_file(&path));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("permisos");
+        assert!(!private_file(&path));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

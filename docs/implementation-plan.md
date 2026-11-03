@@ -152,7 +152,8 @@ de prueba autorizados por el usuario (2026-10-28).
       (`atlas-mac::Runtime`) con heartbeat, sondeo de eco, aborto local con reintento
       acotado y reconexión con instancia nueva; comandos `hefesto_status/resume/abort`,
       evento `hefesto-state-changed` e indicador violeta con Activar/Suspender y último
-      eco. Credenciales solo por entorno; sin ellas no hay hilo ni indicador.
+      eco. Credenciales por entorno o Application Support; sin ellas no hay hilo
+      ni indicador.
 - [x] Arranque listo y suspensión persistente (2026-10-29): al abrir, el dispositivo
       se activa solo si no hay suspensión pendiente (Hefesto queda disponible por
       intención, no por un interruptor); suspender —local, Hub Panel o remoto— deja
@@ -230,8 +231,9 @@ de prueba autorizados por el usuario (2026-10-28).
       procesos) y las capturas de la puerta 7 (TCC de grabación de pantalla y modelo
       de visión), según las puertas del plan.
 
-La API HTTP actual no puede lanzar Hefesto; el dispositivo solo se inicia dentro de
-la app Tauri cuando el entorno trae sus credenciales, y hoy cubre el eco, la lectura
+La API HTTP actual no puede lanzar Hefesto; el dispositivo se inicia dentro de la
+app Tauri al abrirla, leyendo sus credenciales del entorno o de
+`~/Library/Application Support/com.atlas.next/hefesto/`, y hoy cubre el eco, la lectura
 y escritura dentro de las raíces autorizadas, el control de las apps instaladas,
 el teclado sintético con consentimiento, el control multimedia por teclas de
 sistema con tarjeta y la gestión de ventanas por Accessibility. La ventana de
@@ -244,7 +246,9 @@ tablas permanece pendiente.
 - `TELEGRAM_ALLOWED_USER_IDS` — IDs de Telegram autorizados (rechazar el resto).
 - `ATLAS_HEFESTO_URL` (por defecto `https://atlas-hub.local:8767`), `ATLAS_HEFESTO_CA`,
   `ATLAS_HEFESTO_CERT`, `ATLAS_HEFESTO_KEY`, `ATLAS_HEFESTO_DEVICE_ID` — identidad mTLS
-  del dispositivo Hefesto en la app; los ficheros viven fuera del repo.
+  del dispositivo Hefesto en la app; tienen prioridad sobre los ficheros de
+  `~/Library/Application Support/com.atlas.next/hefesto/` (`ca.pem`, `device.pem`,
+  `device-key.pem` 600, `device-id` y `url` opcional). Los ficheros viven fuera del repo.
 
 ## Regla de avance
 
