@@ -227,17 +227,29 @@ de prueba autorizados por el usuario (2026-10-28).
       log. Probado en vivo (listar, mover, redimensionar, traer al frente desde otra
       app, ambigüedad y matriz de validación por mTLS). Commits `85c5b14`…`f31a76a`,
       relay desplegado y bundle instalado en `/Applications/Atlas.app`.
-- [ ] Pendiente: puerta 6 (terminal por adaptadores, presupuestos y supervisión de
-      procesos) y las capturas de la puerta 7 (TCC de grabación de pantalla y modelo
-      de visión), según las puertas del plan.
+- [x] Terminal de consulta (2026-11-02/03, puerta 6, corte 1): protocolo v8 con
+      **una sola** herramienta `hefesto_system` (`os`, `disk`, `uptime`, `memory`),
+      sin tarjeta ni burbuja. El dispositivo solo elige entre adaptadores cerrados
+      con binario y argumentos fijos (`sw_vers`, `df -kH /`, `uptime`, `vm_stat`),
+      sin shell, entorno limpio, grupo de procesos propio, timeout de 2 s con
+      `SIGKILL` del grupo y tope de 16 KiB. Journal v8 con `action` cerrada y
+      validación estable; el relay omite el contenido del resultado en el log.
+      Probado en vivo por HTTP (`os` → macOS 27.0.1 y `disk` → 42 GB, sin tarjeta
+      ni burbuja) y con las pruebas de journal para acciones y claves inválidas.
+      Commit `c440380`, relay v8 desplegado y bundle v8 instalado en
+      `/Applications/Atlas.app`.
+- [ ] Pendiente: terminal general (ejecución con aislamiento, presupuestos y
+      supervisión de descendientes) y las capturas de la puerta 7 (TCC de grabación
+      de pantalla y modelo de visión), según las puertas del plan.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo se inicia dentro de la
 app Tauri al abrirla, leyendo sus credenciales del entorno o de
 `~/Library/Application Support/com.atlas.next/hefesto/`, y hoy cubre el eco, la lectura
 y escritura dentro de las raíces autorizadas, el control de las apps instaladas,
 el teclado sintético con consentimiento, el control multimedia por teclas de
-sistema con tarjeta y la gestión de ventanas por Accessibility. La ventana de
-tablas permanece pendiente.
+sistema con tarjeta, la gestión de ventanas por Accessibility y las consultas de
+sistema por adaptadores. La ventana de tablas y la terminal general permanecen
+pendientes.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

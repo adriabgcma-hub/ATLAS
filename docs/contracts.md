@@ -178,11 +178,11 @@ type AtlasError = {
 
 Los detalles internos, rutas privadas, tokens y respuestas completas de proveedores solo pueden aparecer en logs locales protegidos, y nunca en eventos de UI.
 
-## Hefesto v7 — eco, lectura, escritura, apps, teclado, multimedia y ventanas
+## Hefesto v8 — eco, lectura, escritura, apps, teclado, multimedia, ventanas y sistema
 
-Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v7-eco-lectura-escritura-apps-teclado-multimedia-y-ventanas).
-Usa `protocolVersion: 7`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
-`output` tipado por herramienta. Diez herramientas sobre el mismo protocolo:
+Contrato independiente del chat, especificado en [Hefesto §5](./hefesto-plan.md#5-protocolo-v8-eco-lectura-escritura-apps-teclado-multimedia-ventanas-y-sistema).
+Usa `protocolVersion: 8`, IDs opacos, campos estrictos, cuerpo máximo 128 KiB y
+`output` tipado por herramienta. Once herramientas sobre el mismo protocolo:
 `hefesto.echo` (`{text}`, ≤256 B), `hefesto.list_dir` y `hefesto.read_file`
 (`{path}` absoluto, raíces autorizadas Documents/Desktop/Downloads/Pictures/
 Music/Movies), `hefesto.write_file` (`{path, content, expectedHash|null}`),
@@ -211,9 +211,13 @@ lista y mueve, redimensiona o trae al frente ventanas estándar. El relay expone
 `hefesto_windows` con `requiresConfirmation: True` y `planConfirmation: True`:
 `list` no abre tarjeta y cada efecto válido abre exactamente una; sin burbuja.
 
+`hefesto.system` (`{action: os|disk|uptime|memory}`) ejecuta cuatro consultas de
+solo lectura por adaptadores fijos. El relay expone `hefesto_system` con
+`requiresConfirmation: False`: sin tarjeta y sin burbuja.
+
 Rutas del protocolo (cuerpo exacto, sin campos extra):
 
-| Método y ruta | Rol | Cuerpo además de `protocolVersion: 7` | Respuesta |
+| Método y ruta | Rol | Cuerpo además de `protocolVersion: 8` | Respuesta |
 | --- | --- | --- | --- |
 | GET `/v1/hefesto/status` | ambos | — | estado del dispositivo |
 | POST `/v1/hefesto/register` | device | `instanceId` | estado |
@@ -234,6 +238,7 @@ Rutas del protocolo (cuerpo exacto, sin campos extra):
 | `hefesto.keyboard` | `{action, text?, combo?}` | `{text}` resumen |
 | `hefesto.media` | `{action, count?}` | `{text}` resumen |
 | `hefesto.windows` | `{action, app?, title?, index?, x?, y?, width?, height?}` | `{text}` resumen o `WindowsOutput` (`list_windows`) |
+| `hefesto.system` | `{action: os\|disk\|uptime\|memory}` | `{text}` con la salida acotada |
 | `hefesto.file_info` (interna) | `{path}` | `{exists, size, sha256}` o `{text}` si rechaza |
 
 Operación del journal usada por el controlador: `POST /v1/hefesto/outcome` (rol controller)
@@ -277,8 +282,11 @@ type WindowRecord = {
 /** Salida de `hefesto.windows` (`action: list_windows`), cortada a ≤30. */
 type WindowsOutput = { windows: WindowRecord[] }
 
+/** Argumentos de `hefesto.system`: consulta cerrada del sistema. */
+type SystemPayload = { action: 'os' | 'disk' | 'uptime' | 'memory' }
+
 type HefestoOutput =
-  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado, media y efectos de ventanas (≤64 KiB)
+  | { text: string } // eco, list_dir, read_file, write_file, rename, open/close de apps, teclado, media, efectos de ventanas y sistema (≤64 KiB)
   | AppsOutput // hefesto.apps, action=list
   | WindowsOutput // hefesto.windows, action=list_windows
   | { exists: boolean; size: number | null; sha256: string | null } // file_info
@@ -466,6 +474,35 @@ válido abre **exactamente una** tarjeta con riesgo `write` y resumen
 no escribe los argumentos de `hefesto_windows` y registra el resultado solo por
 longitud, así que ningún título sale del Mac por el log. El aviso de Telegram,
 cuando la petición llega por ahí, conserva el resumen de la tarjeta.
+
+### Sistema
+
+`hefesto.system` recibe `{action}` con `action` obligatoria y solo `os`, `disk`,
+`uptime` o `memory`; cualquier otra clave se rechaza con `bad_argument` y una
+acción desconocida con `bad_action`. Es una consulta de solo lectura: no ejecuta
+comandos del usuario ni acepta binarios, rutas ni argumentos libres. El relay la
+expone como `hefesto_system` (`{action}`, `action` requerida) con
+`requiresConfirmation: False`, sin tarjeta y sin burbuja; valida la acción y el
+conjunto de claves antes de delegar, y devuelve el texto síncrono al modelo.
+
+En el dispositivo, cada acción tiene un adaptador fijo con binario y argumentos
+cerrados: `os` → `/usr/bin/sw_vers`; `disk` → `/bin/df -kH /`; `uptime` →
+`/usr/bin/uptime`; `memory` → `/usr/bin/vm_stat`. Se lanzan sin shell, con el
+entorno vacío salvo `LANG=C` y `LC_ALL=C`, `stdin` nulo, `stderr` descartado,
+directorio de trabajo `/`, grupo de procesos propio, timeout de 2 s y tope de
+16 KiB de salida (el exceso se corta y añade `… (recortado)`). Al agotarse el
+timeout se mata el grupo con `SIGKILL`; no queda ningún descendiente vivo.
+
+Salidas: `{text}` con un encabezado y la salida del binario —
+`Sistema:\n…`, `Disco:\n…`, `Tiempo encendido:\n…` o `Memoria:\n…`—. Una salida
+vacía devuelve `la consulta no devolvió datos`; un fallo de arranque o de
+ejecución se envuelve como `no se pudo consultar el sistema: …` (por ejemplo
+`la consulta no respondió a tiempo`). En el relay, antes de delegar, los textos
+estables son `acción inválida (os, disk, uptime o memory)` y
+`argumentos inválidos (solo action)`. El journal trata `hefesto.system` como
+efecto sin contenido y un reinicio con la invocación en vuelo la deja `unknown`,
+sin reejecutarla. El log registra solo la acción en los argumentos y el
+resultado por longitud.
 
 El dispositivo dentro de la app sí expone estado y control por IPC, siempre sobre
 el bucle nativo (el webview nunca ve certificados, claves ni la URL interna):

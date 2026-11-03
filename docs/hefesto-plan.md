@@ -115,11 +115,11 @@ siguiente acción. El contenido leído es dato no confiable, nunca autorización
 Auditoría: identificadores, estados, duración y códigos; no texto de documentos,
 secretos ni argumentos crudos indiscriminados.
 
-## 5. Protocolo v7 (eco, lectura, escritura, apps, teclado, multimedia y ventanas)
+## 5. Protocolo v8 (eco, lectura, escritura, apps, teclado, multimedia, ventanas y sistema)
 
-Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 7` en
+Separado del historial/eventos de Atlas. JSON camelCase y `protocolVersion: 8` en
 solicitudes POST y respuestas. IDs opacos ASCII `[A-Za-z0-9_-]`, 1–80 caracteres.
-Errores `{protocolVersion: 7, error: "codigo_estable"}`, nunca rutas/certificados.
+Errores `{protocolVersion: 8, error: "codigo_estable"}`, nunca rutas/certificados.
 Cuerpo máximo 128 KiB (para transportar lecturas y escrituras de hasta 16 KiB con
 escape JSON); strings del eco limitados a 256 bytes UTF-8, contenido de escritura a
 16 384 bytes UTF-8 sin NUL, `output.text` a 64 KiB, los strings de apps
@@ -155,6 +155,7 @@ solicitudes**. El servidor deriva identidad y permisos de la conexión TLS.
 | `hefesto.keyboard` | `hefesto_keyboard` (`requiresConfirmation: True`) | `{action, text?, combo?}` | `{text}` resumen |
 | `hefesto.media` | `hefesto_media` (`requiresConfirmation: True`) | `{action, count?}` | `{text}` resumen |
 | `hefesto.windows` | `hefesto_windows` (`requiresConfirmation: True`) | `{action, app?, title?, index?, x?, y?, width?, height?}` | `{text}` resumen o `{windows:[{app, title, x, y, width, height, focused, minimized}]}` (`list_windows`) |
+| `hefesto.system` | `hefesto_system` (`requiresConfirmation: False`) | `{action: os\|disk\|uptime\|memory}` | `{text}` con la salida acotada |
 | `hefesto.file_info` | — (interna) | `{path}` | `{exists, size\|null, sha256\|null}` o `{text}` si rechaza |
 
 `expectedHash` lo inyecta el relay desde el plan (`file_info`): `null` crea en
@@ -255,6 +256,13 @@ abre tarjeta (lectura) y cada efecto válido abre exactamente una; sin burbuja.
 Los títulos de ventana son datos del usuario y no se registran en el log del
 relay.
 
+`system` solo admite `action` `os`, `disk`, `uptime` o `memory`; no hay texto ni
+rutas del modelo. Cada acción ejecuta un binario fijo (`/usr/bin/sw_vers`,
+`/bin/df -kH /`, `/usr/bin/uptime`, `/usr/bin/vm_stat`) sin shell, con el entorno
+limpio, timeout de 2 s, grupo de procesos propio y salida de ≤16 KiB. El relay
+expone `hefesto_system` con `requiresConfirmation: False`: es información del
+sistema trivial por adaptador, sin tarjeta y sin burbuja.
+
 ### Estado, duplicados y fallos
 
 - Latido con lease de 15 s; reloj monótono para disponibilidad. Al registrar una
@@ -330,8 +338,14 @@ relay.
    acciones de volumen, brillo y reproducción por teclas de sistema; tarjeta
    siempre, sin lectura de estado, sin subprocess y sin permisos nuevos. El
    detalle y la matriz en vivo viven en §8 y en `docs/implemented.md`.
-6. **Terminal:** consultas por adaptadores, presupuestos y supervisión de procesos;
-   terminal general solo tras acordar y verificar aislamiento/límites.
+6. **Terminal de consulta (implementado 2026-11-03, protocolo v8):**
+   `hefesto_system` con cuatro adaptadores cerrados (`os`, `disk`, `uptime`,
+   `memory`) sobre binarios y argumentos fijos, sin shell, entorno limpio,
+   timeout de 2 s, grupo de procesos propio con `SIGKILL` al vencer y salida
+   acotada a 16 KiB. Sin tarjeta ni burbuja; el journal valida `{action}` y
+   deja `unknown` una consulta en vuelo tras reinicio. El **terminal general**
+   sigue pendiente de aislamiento y límites acordados; nunca es trivial por el
+   nombre del binario.
 7. **Accesibilidad, control del Mac y capturas (puerta 7; cortes 1–3 —apps, teclado
    y ventanas— implementados 2026-11-01 con protocolos v4, v5 y v7; matrices en vivo
    registradas en §8; pendientes las capturas):**
@@ -937,3 +951,35 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   instalado en `/Applications/Atlas.app` (el DMG vuelve a fallar tras firmar).
   Auditoría al terminar: `Atlas.app`, TextEdit, Safari y las dos ventanas de
   Finder de prueba cerrados; sin procesos de prueba ni huérfanos.
+- 2026-11-03, terminal de consulta (puerta 6, corte 1), implementado, desplegado y
+  probado en vivo:
+  1. **Protocolo v8**: `protocolVersion` sube de 7 a 8 en `wire.rs`, el journal y
+     los submits del relay, con fixtures; ambos extremos rechazan 7.
+  2. **Dispositivo**: `crates/atlas-mac/src/system.rs` con el enum cerrado
+     `SystemAction` (`os`, `disk`, `uptime`, `memory`), el trait `SystemBridge`,
+     el encabezado de cada consulta y `handle_system`; el ejecutor y el runtime
+     inyectan el puente y devuelven un texto estable si falta.
+  3. **Puente real**: `src-tauri/src/hefesto_system.rs` ejecuta binarios fijos
+     (`/usr/bin/sw_vers`, `/bin/df -kH /`, `/usr/bin/uptime`, `/usr/bin/vm_stat`)
+     sin shell, con `env_clear` + `LANG/LC_ALL=C`, stdin nulo, stderr descartado,
+     directorio `/`, grupo de procesos propio, timeout de 2 s y `SIGKILL` al
+     grupo si vence; el lector corta a 16 KiB y mata el grupo si hay más. No usa
+     permisos TCC nuevos ni API privada.
+  4. **Journal v8**: `hefesto.system` con `{action}` cerrado, `bad_action`/
+     `bad_argument` antes de crear fila y `unknown` sin reentrega si el
+     dispositivo reinicia con una consulta en vuelo.
+  5. **Relay**: `hefesto_system` con `requiresConfirmation: False`, validación de
+     la acción y de claves extra antes de delegar, retorno síncrono del texto,
+     sin tarjeta y sin burbuja; el log registra la acción y el resultado solo por
+     longitud.
+  6. **Chat**: `HEFESTO_PHASES` añade `hefesto_system` → órbita violeta
+     «Hefesto · Sistema».
+  7. **En vivo**: «¿Qué versión de macOS tengo?» devolvió «macOS 27.0.1», que
+     coincide con `sw_vers` (27.0.1, build 26A434); «¿Cuánto espacio libre queda
+     en el disco?» devolvió 42 GB, que coincide con `df -kH /`; ninguna abrió
+     tarjeta ni emitió burbuja, y no quedaron procesos de consulta vivos.
+  Commit `c440380`. Pruebas: `cargo test --workspace` 181 (2 ignoradas), clippy
+  `--workspace --all-targets -- -D warnings` y `cargo fmt --check` limpios,
+  Python 495, frontend 59, `npm run build` y `npm run lint` limpios. Relay v8
+  desplegado y `/v1/health` OK; bundle Apple Development con firma profunda válida
+  instalado en `/Applications/Atlas.app` (el DMG vuelve a fallar tras firmar).
