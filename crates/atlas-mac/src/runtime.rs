@@ -210,6 +210,8 @@ pub struct Runtime<T: Transport> {
     keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
     window_bridge: Option<std::sync::Arc<dyn crate::windows::WindowBridge>>,
     system_bridge: Option<std::sync::Arc<dyn crate::system::SystemBridge>>,
+    terminal_bridge: Option<std::sync::Arc<dyn crate::terminal::TerminalBridge>>,
+    capture_bridge: Option<std::sync::Arc<dyn crate::capture::CaptureBridge>>,
     session: Option<Session>,
     phase: Phase,
     detail: Option<&'static str>,
@@ -233,6 +235,8 @@ impl<T: Transport> Runtime<T> {
             keyboard_bridge: None,
             window_bridge: None,
             system_bridge: None,
+            terminal_bridge: None,
+            capture_bridge: None,
             session: None,
             phase: Phase::Connecting,
             detail: None,
@@ -282,6 +286,22 @@ impl<T: Transport> Runtime<T> {
         bridge: std::sync::Arc<dyn crate::system::SystemBridge>,
     ) -> Self {
         self.system_bridge = Some(bridge);
+        self
+    }
+
+    pub fn with_terminal_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::terminal::TerminalBridge>,
+    ) -> Self {
+        self.terminal_bridge = Some(bridge);
+        self
+    }
+
+    pub fn with_capture_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::capture::CaptureBridge>,
+    ) -> Self {
+        self.capture_bridge = Some(bridge);
         self
     }
 
@@ -400,6 +420,12 @@ impl<T: Transport> Runtime<T> {
         }
         if let Some(bridge) = &self.system_bridge {
             executor = executor.with_system_bridge(bridge.clone());
+        }
+        if let Some(bridge) = &self.terminal_bridge {
+            executor = executor.with_terminal_bridge(bridge.clone());
+        }
+        if let Some(bridge) = &self.capture_bridge {
+            executor = executor.with_capture_bridge(bridge.clone());
         }
         self.session = Some(Session { instance, executor });
         self.registered = false;

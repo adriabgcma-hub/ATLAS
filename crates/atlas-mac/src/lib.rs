@@ -1,23 +1,27 @@
 #![forbid(unsafe_code)]
 
 pub mod apps;
+pub mod capture;
 pub mod client;
 pub mod executor;
 pub mod keyboard;
 pub mod media;
 pub mod runtime;
 pub mod system;
+pub mod terminal;
 pub mod tools;
 pub mod windows;
 pub mod wire;
 
 pub use apps::{handle_apps, AppBridge, AppRef, CloseOutcome};
+pub use capture::{handle_capture, CaptureBridge, CaptureFailure};
 pub use client::HefestoClient;
 pub use executor::{Clock, Executor, RegistrationAttempt, ResumeAttempt};
 pub use keyboard::{handle_keyboard, KeyboardBridge};
 pub use media::handle_media;
 pub use runtime::{Phase, Runtime, Snapshot, Transport};
 pub use system::{handle_system, SystemBridge, SystemFailure};
+pub use terminal::{handle_terminal, TerminalBridge, TerminalFailure};
 pub use tools::Roots;
 pub use windows::handle_windows;
 pub use wire::*;

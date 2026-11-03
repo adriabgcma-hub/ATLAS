@@ -44,4 +44,10 @@ describe('cursor de Markdown', () => {
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
   })
+
+  it('marca las tablas para abrirlas en ventana sin botón fuera de Tauri', () => {
+    const html = render('| A | B |\n| - | - |\n| Uno | Dos |', false)
+    expect(html).toContain('class="md-table-bar"')
+    expect(html).not.toContain('<button')
+  })
 })

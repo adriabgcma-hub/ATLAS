@@ -53,7 +53,7 @@ pub struct ProtocolVersion;
 impl TryFrom<u64> for ProtocolVersion {
     type Error = Error;
     fn try_from(value: u64) -> Result<Self> {
-        if value == 8 {
+        if value == 9 {
             Ok(Self)
         } else {
             Err(Error::InvalidVersion)
@@ -63,7 +63,7 @@ impl TryFrom<u64> for ProtocolVersion {
 
 impl From<ProtocolVersion> for u64 {
     fn from(_: ProtocolVersion) -> Self {
-        8
+        9
     }
 }
 
@@ -440,6 +440,25 @@ pub struct SystemPayload {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalPayload {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureTarget {
+    Screen,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CapturePayload {
+    pub target: CaptureTarget,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
     Echo(EchoPayload),
@@ -451,6 +470,8 @@ pub enum ToolArguments {
     Media(MediaPayload),
     Windows(WindowsPayload),
     System(SystemPayload),
+    Terminal(TerminalPayload),
+    Capture(CapturePayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -548,6 +569,10 @@ pub enum ToolId {
     Windows,
     #[serde(rename = "hefesto.system")]
     System,
+    #[serde(rename = "hefesto.terminal")]
+    Terminal,
+    #[serde(rename = "hefesto.capture")]
+    Capture,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -788,9 +813,9 @@ mod tests {
     use super::ProtocolVersion;
 
     #[test]
-    fn protocol_version_is_eight() {
-        assert_eq!(u64::from(ProtocolVersion), 8);
-        assert!(ProtocolVersion::try_from(8u64).is_ok());
-        assert!(ProtocolVersion::try_from(7u64).is_err());
+    fn protocol_version_is_nine() {
+        assert_eq!(u64::from(ProtocolVersion), 9);
+        assert!(ProtocolVersion::try_from(9u64).is_ok());
+        assert!(ProtocolVersion::try_from(8u64).is_err());
     }
 }

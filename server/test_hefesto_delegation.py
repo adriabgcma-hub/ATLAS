@@ -27,18 +27,18 @@ class FakeJournal:
         if operation == "outcome":
             entry = self.outcomes.get(body["invocationId"])
             if entry is None:
-                return (404, {"protocolVersion": 8, "error": "invocation_not_found"})
-            return (200, {"protocolVersion": 8,
+                return (404, {"protocolVersion": 9, "error": "invocation_not_found"})
+            return (200, {"protocolVersion": 9,
                           "invocationId": body["invocationId"], **entry})
-        return (404, {"protocolVersion": 8, "error": "not_found"})
+        return (404, {"protocolVersion": 9, "error": "not_found"})
 
     def accept(self, invocation_id="inv-1"):
-        self.submit_results.append((200, {"protocolVersion": 8,
+        self.submit_results.append((200, {"protocolVersion": 9,
                                           "invocationId": invocation_id,
                                           "state": "pending"}))
 
     def reject(self, code):
-        self.submit_results.append((409, {"protocolVersion": 8, "error": code}))
+        self.submit_results.append((409, {"protocolVersion": 9, "error": code}))
 
 
 class CancellingJournal(FakeJournal):
@@ -64,19 +64,19 @@ class ControlJournal:
     def dispatch(self, peer, method, path, raw=b""):
         operation = path.rsplit("/", 1)[-1]
         if operation == "status":
-            return (200, {"protocolVersion": 8, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 9, "deviceId": peer.device_id,
                           "generation": self.generation,
                           "suspended": self.suspended})
         if operation == "control":
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             if body["expectedGeneration"] != self.generation:
-                return (409, {"protocolVersion": 8, "error": "stale_generation"})
+                return (409, {"protocolVersion": 9, "error": "stale_generation"})
             self.generation += 1
             self.suspended = True
-            return (200, {"protocolVersion": 8, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 9, "deviceId": peer.device_id,
                           "generation": self.generation, "suspended": True})
-        return (404, {"protocolVersion": 8, "error": "not_found"})
+        return (404, {"protocolVersion": 9, "error": "not_found"})
 
 
 class RacedControlJournal(ControlJournal):
@@ -92,7 +92,7 @@ class RacedControlJournal(ControlJournal):
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             self.generation += 1
-            return (409, {"protocolVersion": 8, "error": "stale_generation"})
+            return (409, {"protocolVersion": 9, "error": "stale_generation"})
         return super().dispatch(peer, method, path, raw)
 
 
@@ -1439,4 +1439,117 @@ class SystemFlowTests(unittest.TestCase):
     def test_el_log_de_resultado_solo_lleva_longitud(self):
         result = "Disco:\n" + "x" * 500
         self.assertEqual(atlas_relay.tool_log_result("hefesto_system", result),
+                         f"<{len(result)} chars>")
+
+
+class TerminalFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-terminal-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def test_catalogo_expone_terminal_con_tarjeta_y_riesgo(self):
+        tool = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_terminal")
+        self.assertTrue(tool["requiresConfirmation"])
+        self.assertTrue(tool["planConfirmation"])
+        self.assertEqual(tool["risk"], "destructive")
+        self.assertEqual(tool["schema"]["properties"]["args"]["maxItems"], 32)
+
+    def test_terminal_delega_con_el_comando_exacto(self):
+        self.journal.accept("inv-term")
+        self.journal.outcomes["inv-term"] = {
+            "state": "succeeded", "output": {"text": "Salida (código 0):\nhola"}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_terminal",
+                {"program": "/bin/ls", "args": ["-la", "mi carpeta"]}, JOB)
+        self.assertEqual(result, "Salida (código 0):\nhola")
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.terminal")
+        self.assertEqual(self.journal.submits[0]["arguments"],
+                         {"program": "/bin/ls", "args": ["-la", "mi carpeta"]})
+        summary, risk = ask.call_args.kwargs["summary"]
+        self.assertIn("/bin/ls -la «mi carpeta»", summary)
+        self.assertEqual(risk, "destructive")
+
+    def test_terminal_invalido_no_abre_tarjeta_ni_delega(self):
+        cases = (
+            {"program": "ls", "args": []},
+            {"program": "/etc/passwd", "args": []},
+            {"program": "/bin/sh", "args": ["-c", "id"]},
+            {"program": "/bin/../bin/ls", "args": []},
+            {"program": "/bin/ls", "args": ["x" * 1025]},
+            {"program": "/bin/ls", "args": [], "cwd": "/"},
+        )
+        for args in cases:
+            with self.subTest(args=args):
+                with mock.patch.object(self.brain, "ask_confirmation") as ask:
+                    result = self.brain.execute_tool("hefesto_terminal", args, JOB)
+                self.assertIn(result, ("argumentos inválidos (program y args)",
+                                       "programa no permitido"))
+                ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_denegar_no_delega(self):
+        with mock.patch.object(self.brain, "ask_confirmation", return_value="deny"):
+            result = self.brain.execute_tool(
+                "hefesto_terminal", {"program": "/bin/ls", "args": []}, JOB)
+        self.assertEqual(result, "denegada por el usuario")
+        self.assertEqual(self.journal.submits, [])
+
+    def test_el_log_de_resultado_solo_lleva_longitud(self):
+        result = "Salida (código 0):\n" + "x" * 500
+        self.assertEqual(atlas_relay.tool_log_result("hefesto_terminal", result),
+                         f"<{len(result)} chars>")
+
+
+class CaptureFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-capture-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def test_catalogo_expone_captura_con_tarjeta(self):
+        tool = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_capture")
+        self.assertTrue(tool["requiresConfirmation"])
+        self.assertTrue(tool["planConfirmation"])
+        self.assertEqual(tool["schema"]["properties"]["target"]["enum"], ["screen"])
+
+    def test_captura_delega_y_devuelve_texto(self):
+        self.journal.accept("inv-cap")
+        self.journal.outcomes["inv-cap"] = {
+            "state": "succeeded", "output": {"text": "Captura guardada: captura.png"}}
+        with mock.patch.object(self.brain, "ask_confirmation",
+                               return_value="allow_once") as ask:
+            result = self.brain.execute_tool(
+                "hefesto_capture", {"target": "screen"}, JOB)
+        self.assertEqual(result, "Captura guardada: captura.png")
+        self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.capture")
+        self.assertEqual(self.journal.submits[0]["arguments"], {"target": "screen"})
+        summary, risk = ask.call_args.kwargs["summary"]
+        self.assertIn("imagen queda en el Mac", summary)
+        self.assertEqual(risk, "external")
+
+    def test_captura_invalida_no_abre_tarjeta_ni_delega(self):
+        cases = (({"target": "window"}, "acción inválida (screen)"),
+                 ({}, "acción inválida (screen)"),
+                 ({"target": "screen", "app": "Safari"},
+                  "argumentos inválidos (solo target)"))
+        for args, expected in cases:
+            with self.subTest(args=args):
+                with mock.patch.object(self.brain, "ask_confirmation") as ask:
+                    result = self.brain.execute_tool("hefesto_capture", args, JOB)
+                self.assertEqual(result, expected)
+                ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_el_log_de_resultado_solo_lleva_longitud(self):
+        result = "Captura guardada: captura.png\n" + "x" * 500
+        self.assertEqual(atlas_relay.tool_log_result("hefesto_capture", result),
                          f"<{len(result)} chars>")

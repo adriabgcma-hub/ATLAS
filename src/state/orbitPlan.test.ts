@@ -75,6 +75,21 @@ describe('planPhaseOrbit', () => {
     })
   })
 
+  it('órbita violeta para terminal y captura', () => {
+    expect(planPhaseOrbit('executing', 'hefesto_terminal')).toEqual({
+      key: 'executing:hefesto_terminal',
+      title: 'Hefesto · Terminal',
+      detail: '',
+      color: HEFESTO_ORBIT_COLOR,
+    })
+    expect(planPhaseOrbit('executing', 'hefesto_capture')).toEqual({
+      key: 'executing:hefesto_capture',
+      title: 'Hefesto · Captura',
+      detail: '',
+      color: HEFESTO_ORBIT_COLOR,
+    })
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({

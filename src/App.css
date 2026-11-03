@@ -632,6 +632,41 @@ select { font: inherit; }
   scrollbar-color: rgba(63, 164, 255, 0.35) transparent;
 }
 
+.md-table-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(190, 225, 255, 0.55);
+}
+
+.md-table-bar button {
+  appearance: none;
+  border: 1px solid rgba(118, 196, 255, 0.35);
+  border-radius: 7px;
+  background: rgba(63, 164, 255, 0.12);
+  color: #dff4ff;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.md-table-bar button:hover {
+  background: rgba(63, 164, 255, 0.24);
+}
+
+.md-table-error {
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #ff9b9b;
+}
+
 /* Ancho según contenido: en el panel estrecho la tabla scrollea en vez de
    comprimir las columnas hasta partir las cabeceras letra a letra. */
 .chat-md table {

@@ -9,6 +9,10 @@ export default defineConfig({
     // del bundle inicial y no puede dividirse sin romper su runtime.
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      input: {
+        main: 'index.html',
+        table: 'table.html',
+      },
       output: {
         manualChunks(id) {
           if (id.includes('/node_modules/three/') || id.includes('/node_modules/@react-three/fiber/')) {

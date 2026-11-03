@@ -1313,3 +1313,102 @@ fn system_sin_puente_devuelve_texto_no_disponible() {
         Some("Hefesto no puede consultar el sistema")
     );
 }
+
+struct FakeTerminal;
+
+impl atlas_mac::terminal::TerminalBridge for FakeTerminal {
+    fn run(
+        &self,
+        program: &str,
+        args: &[String],
+    ) -> std::result::Result<
+        atlas_mac::terminal::TerminalOutcome,
+        atlas_mac::terminal::TerminalFailure,
+    > {
+        Ok(atlas_mac::terminal::TerminalOutcome {
+            code: 0,
+            stdout: format!("{program} {}", args.join(" ")),
+            stderr: String::new(),
+        })
+    }
+}
+
+fn terminal_invocation(program: &str, args: &[&str]) -> Invocation {
+    let mut inv = invocation();
+    inv.invocation_id = id("t");
+    inv.tool_id = ToolId::Terminal;
+    inv.arguments = ToolArguments::Terminal(TerminalPayload {
+        program: program.to_owned(),
+        args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+    });
+    inv
+}
+
+#[test]
+fn terminal_se_enruta_por_el_puente_inyectado() {
+    let mut executor = apps_executor(None).with_terminal_bridge(Arc::new(FakeTerminal));
+    let out = executor
+        .execute(&terminal_invocation("/bin/ls", &["-la"]), at(3))
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Salida (código 0):\n/bin/ls -la")
+    );
+}
+
+#[test]
+fn terminal_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor
+        .execute(&terminal_invocation("/bin/ls", &[]), at(3))
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Hefesto no puede ejecutar comandos")
+    );
+}
+
+struct FakeCapture;
+
+impl atlas_mac::capture::CaptureBridge for FakeCapture {
+    fn capture(
+        &self,
+        _target: CaptureTarget,
+    ) -> std::result::Result<atlas_mac::capture::CaptureOutcome, atlas_mac::capture::CaptureFailure>
+    {
+        Ok(atlas_mac::capture::CaptureOutcome {
+            file_name: "captura.png".to_owned(),
+            text: "texto".to_owned(),
+        })
+    }
+}
+
+fn capture_invocation() -> Invocation {
+    let mut inv = invocation();
+    inv.invocation_id = id("c");
+    inv.tool_id = ToolId::Capture;
+    inv.arguments = ToolArguments::Capture(CapturePayload {
+        target: CaptureTarget::Screen,
+    });
+    inv
+}
+
+#[test]
+fn capture_se_enruta_por_el_puente_inyectado() {
+    let mut executor = apps_executor(None).with_capture_bridge(Arc::new(FakeCapture));
+    let out = executor.execute(&capture_invocation(), at(3)).unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Captura guardada: captura.png\nTexto reconocido:\ntexto")
+    );
+}
+
+#[test]
+fn capture_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor.execute(&capture_invocation(), at(3)).unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Hefesto no puede capturar la pantalla")
+    );
+}

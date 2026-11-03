@@ -392,16 +392,70 @@ HEFESTO_SYSTEM_TOOL = {
     },
 }
 
+HEFESTO_TERMINAL_TOOL = {
+    "id": "hefesto_terminal",
+    "risk": "destructive",
+    "requiresConfirmation": True,
+    # La tarjeta la abre _terminal después de validar, con el comando exacto.
+    "planConfirmation": True,
+    "description": ("Ejecuta un comando del Mac con Hefesto mediante argv directo (sin "
+                    "shell). `program` es una ruta absoluta a un ejecutable de /usr/bin, "
+                    "/bin, /usr/sbin, /sbin, /usr/local/bin u /opt/homebrew/bin, y `args` "
+                    "una lista de hasta 32 argumentos. Cada ejecución pide confirmación "
+                    "mostrando el comando exacto; la salida vuelve al modelo."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "program": {"type": "string",
+                        "description": "ruta absoluta del ejecutable"},
+            "args": {"type": "array", "items": {"type": "string"},
+                     "maxItems": 32,
+                     "description": "argumentos exactos, sin shell"},
+        },
+        "required": ["program", "args"],
+    },
+}
+
+HEFESTO_CAPTURE_TOOL = {
+    "id": "hefesto_capture",
+    "risk": "external",
+    "requiresConfirmation": True,
+    "planConfirmation": True,
+    "description": ("Captura la pantalla del Mac con Hefesto y reconoce su texto en local "
+                    "(Apple Vision). La imagen se guarda en ~/Documents/Atlas/capturas y no "
+                    "sale del Mac; solo el texto reconocido vuelve al modelo. Cada captura "
+                    "pide confirmación."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "enum": ["screen"],
+                       "description": "pantalla completa"},
+        },
+        "required": ["target"],
+    },
+}
+
 HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
                  HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL,
                  HEFESTO_KEYBOARD_TOOL, HEFESTO_MEDIA_TOOL, HEFESTO_WINDOWS_TOOL,
-                 HEFESTO_SYSTEM_TOOL]
+                 HEFESTO_SYSTEM_TOOL, HEFESTO_TERMINAL_TOOL, HEFESTO_CAPTURE_TOOL]
 
 # Traducción de las acciones del modelo a las del wire v7 de ventanas (valores
 # distintos de hefesto.apps para que el enum untagged del dispositivo no confunda).
 _WINDOWS_WIRE = {"list": "list_windows", "move": "move_window",
                  "resize": "resize_window", "focus": "focus_window"}
 _SYSTEM_ACTIONS = ("os", "disk", "uptime", "memory")
+_TERMINAL_ROOTS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin",
+                   "/usr/local/bin", "/opt/homebrew/bin")
+_TERMINAL_DENIED = frozenset((
+    "sh", "bash", "zsh", "csh", "tcsh", "fish", "dash", "ksh",
+    "sudo", "su", "doas", "launchctl", "systemsetup", "shutdown", "reboot",
+    "halt", "kill", "killall", "pkill", "env", "xargs",
+))
+_MAX_TERMINAL_ARGS = 32
+_MAX_TERMINAL_ARG_BYTES = 1024
+_MAX_TERMINAL_BYTES = 4096
+_CAPTURE_TARGETS = ("screen",)
 
 
 # Gramática cerrada del atajo (misma que el dispositivo): 1–3 modificadores
@@ -469,10 +523,48 @@ def dlog(brain: "Brain", category: str, message: str, **extra) -> None:
 
 
 def tool_log_result(name: str, result: str) -> str:
-    """Resultado apto para el log: teclado y ventanas solo registran longitud."""
+    """Resultado apto para el log: teclado, ventanas, sistema, terminal y captura
+    solo registran longitud."""
     return (f"<{len(result)} chars>"
-            if name in ("hefesto_keyboard", "hefesto_windows", "hefesto_system")
+            if name in ("hefesto_keyboard", "hefesto_windows", "hefesto_system",
+                        "hefesto_terminal", "hefesto_capture")
             else result[:200])
+
+
+def _terminal_arguments(args: dict):
+    """Valida y normaliza `{program, args}` antes de abrir la tarjeta."""
+    if set(args) != {"program", "args"}:
+        return None, "argumentos inválidos (program y args)"
+    program, extra = args["program"], args["args"]
+    if type(program) is not str or type(extra) is not list:
+        return None, "argumentos inválidos (program y args)"
+    try:
+        encoded = program.encode("utf-8")
+        sizes = [len(value.encode("utf-8")) for value in extra if type(value) is str]
+    except UnicodeError:
+        return None, "argumentos inválidos (program y args)"
+    if (not program.startswith("/") or "\x00" in program
+            or len(encoded) > 1024 or len(extra) > _MAX_TERMINAL_ARGS
+            or any(part in (".", "..") for part in program.split("/"))):
+        return None, "argumentos inválidos (program y args)"
+    if not any(program == root or program.startswith(root + "/")
+               for root in _TERMINAL_ROOTS):
+        return None, "programa no permitido"
+    if program.rsplit("/", 1)[-1] in _TERMINAL_DENIED:
+        return None, "programa no permitido"
+    if (len(sizes) != len(extra) or any(size > _MAX_TERMINAL_ARG_BYTES or "\x00" in value
+                                       for value, size in zip(extra, sizes))
+            or len(encoded) + sum(sizes) > _MAX_TERMINAL_BYTES):
+        return None, "argumentos inválidos (program y args)"
+    return {"program": program, "args": list(extra)}, None
+
+
+def _terminal_line(program: str, args: list) -> str:
+    def quote(value: str) -> str:
+        if not value or any(c.isspace() or c in "'\"\\$`" for c in value):
+            return f"«{value}»"
+        return value
+    return " ".join([quote(program), *(quote(value) for value in args)])
 
 
 def fail_config(message: str) -> NoReturn:
@@ -1085,6 +1177,10 @@ class Brain:
             return self._windows(job, args)
         if tool_id == "hefesto_system":
             return self._system(job, args)
+        if tool_id == "hefesto_terminal":
+            return self._terminal(job, args)
+        if tool_id == "hefesto_capture":
+            return self._capture(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -1117,7 +1213,7 @@ class Brain:
         if len(text.encode("utf-8")) > 256:
             return "delegación rechazada: texto demasiado largo (máx. 256 bytes)"
         submission = {
-            "protocolVersion": 8,
+            "protocolVersion": 9,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -1157,7 +1253,7 @@ class Brain:
             if job["request_id"] in self.cancelled:
                 return None, "cancelada a mitad de turno"
         submission = {
-            "protocolVersion": 8,
+            "protocolVersion": 9,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -1184,7 +1280,7 @@ class Brain:
             status, outcome = journal.dispatch(
                 hefesto.Peer("controller", device_id), "POST",
                 "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 8,
+                json.dumps({"protocolVersion": 9,
                             "invocationId": invocation_id}).encode("utf-8"))
             if status == 200 and outcome.get("state") in (
                     "succeeded", "expired", "cancelled", "unknown"):
@@ -1500,6 +1596,48 @@ class Brain:
             return output
         return str(output.get("text") or "")
 
+    def _terminal(self, job: dict, args: dict) -> str:
+        """Terminal general por argv directo, con tarjeta por invocación."""
+        arguments, error = _terminal_arguments(args)
+        if error is not None:
+            return error
+        # El tiempo del usuario no consume el plazo de la operación.
+        job["deadline"] += CONFIRM_TIMEOUT_S + 60
+        summary = self._confirm_summary("hefesto_terminal", arguments)
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_terminal", arguments,
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        invocation_id, error = self._hefesto_submit("hefesto.terminal", job, arguments)
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 20.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
+    def _capture(self, job: dict, args: dict) -> str:
+        """Captura de pantalla con OCR local, con tarjeta por invocación."""
+        target = args.get("target")
+        if type(target) is not str or target not in _CAPTURE_TARGETS:
+            return "acción inválida (screen)"
+        if set(args) != {"target"}:
+            return "argumentos inválidos (solo target)"
+        job["deadline"] += CONFIRM_TIMEOUT_S + 60
+        summary = self._confirm_summary("hefesto_capture", {"target": target})
+        if self.ask_confirmation(job["request_id"], job["session_id"],
+                                 "hefesto_capture", {"target": target},
+                                 chat_id=job.get("chat_id"), summary=summary) != "allow_once":
+            return "denegada por el usuario"
+        invocation_id, error = self._hefesto_submit(
+            "hefesto.capture", job, {"target": target})
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 20.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
     def _format_windows_list(self, windows: list) -> str:
         if not windows:
             return "sin ventanas"
@@ -1630,7 +1768,7 @@ class Brain:
                 return {"ok": False, "error": body.get("error", "status_failed")}
             status, body = journal.dispatch(
                 peer, "POST", "/v1/hefesto/control",
-                json.dumps({"protocolVersion": 8, "action": "abort",
+                json.dumps({"protocolVersion": 9, "action": "abort",
                             "expectedGeneration": body["generation"]}).encode("utf-8"))
             if status == 200:
                 return {"ok": True, "suspended": True}
@@ -1655,7 +1793,7 @@ class Brain:
         for entry in entries:
             status, response = journal.dispatch(
                 peer, "POST", "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 8,
+                json.dumps({"protocolVersion": 9,
                             "invocationId": entry["invocation_id"]}).encode("utf-8"))
             if status != 200:
                 dlog(self, "HEFESTO",
@@ -1792,6 +1930,13 @@ class Brain:
             if action == "focus":
                 return (f"Traer al frente la ventana de {app}", "write")
             return (f"Listar ventanas de {app}", "write")
+        if tool_id == "hefesto_terminal":
+            line = _terminal_line(str(args.get("program", "?")),
+                                  args.get("args") or [])
+            return (f"Ejecutar {line} — la salida volverá al modelo", "destructive")
+        if tool_id == "hefesto_capture":
+            return ("Capturar la pantalla y reconocer texto (la imagen queda en el Mac; "
+                    "el texto volverá al modelo)", "external")
         return (f"Ejecutar {tool_id}", "external")
 
     def ask_confirmation(self, request_id: str, session_id: str,
@@ -2010,10 +2155,11 @@ class Brain:
     def _handle_tool_call(self, job: dict, call: dict) -> str:
         """Ejecuta una tool_call del modelo (con confirmación si toca)."""
         function = call.get("function", {}) if isinstance(call, dict) else {}
-        # El contenido de una escritura, del teclado o los títulos de ventana
-        # nunca se registra.
+        # El contenido de una escritura, del teclado, el comando del terminal
+        # o los títulos de ventana nunca se registra.
         logged = ("" if function.get("name") in
-                  ("hefesto_write_file", "hefesto_keyboard", "hefesto_windows")
+                  ("hefesto_write_file", "hefesto_keyboard", "hefesto_windows",
+                   "hefesto_terminal")
                   else str(function.get("arguments") or "")[:300])
         dlog(self, "TOOL", f"call tool={function.get('name')} args={logged} request={job.get('request_id')}")
         try:

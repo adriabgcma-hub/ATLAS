@@ -25,6 +25,8 @@ const HEFESTO_PHASES: Record<string, string> = {
   hefesto_media: 'Hefesto · Multimedia',
   hefesto_windows: 'Hefesto · Ventanas',
   hefesto_system: 'Hefesto · Sistema',
+  hefesto_terminal: 'Hefesto · Terminal',
+  hefesto_capture: 'Hefesto · Captura',
 }
 
 /**

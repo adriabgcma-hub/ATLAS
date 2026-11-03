@@ -30,6 +30,17 @@ mod hefesto_windows;
 #[cfg(target_os = "macos")]
 mod hefesto_system;
 
+/// Terminal general con argv y supervisión, solo en macOS.
+#[cfg(target_os = "macos")]
+mod hefesto_terminal;
+
+/// Captura de pantalla con OCR local, solo en macOS.
+#[cfg(target_os = "macos")]
+mod hefesto_capture;
+
+/// Ventana de tablas y exportación CSV.
+mod table;
+
 /// URL del cerebro en la red local. No es un secreto. Por nombre (.local):
 /// la IP del servidor puede cambiar, el nombre no.
 fn default_relay_url() -> String {
@@ -376,7 +387,11 @@ impl Hefesto {
                             app.clone(),
                         )))
                         .with_window_bridge(Arc::new(hefesto_windows::AxWindows::new(app.clone())))
-                        .with_system_bridge(Arc::new(hefesto_system::MacSystem));
+                        .with_system_bridge(Arc::new(hefesto_system::MacSystem))
+                        .with_terminal_bridge(Arc::new(hefesto_terminal::MacTerminal::new()))
+                        .with_capture_bridge(Arc::new(hefesto_capture::MacCapture::new(
+                            app.clone(),
+                        )));
                 }
                 hefesto_loop(runtime, Instant::now(), snapshot, commands, app, marker)
             });
@@ -641,6 +656,7 @@ pub fn run() {
             relay_cursor: Arc::new(Mutex::new(0)),
         })
         .manage(Hefesto::new())
+        .manage(table::TableState::new())
         .setup(|app| {
             app.state::<Hefesto>().start(app.handle().clone());
             Ok(())
@@ -654,6 +670,9 @@ pub fn run() {
             hefesto_status,
             hefesto_resume,
             hefesto_abort,
+            table::open_table_window,
+            table::table_payload,
+            table::export_table_csv,
         ])
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -683,8 +702,21 @@ pub fn run() {
         )
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                // La ventana principal queda oculta; las de tabla se cierran
+                // de verdad y su payload se libera en `Destroyed`.
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            if let WindowEvent::Destroyed = event {
+                let label = window.label();
+                if label.starts_with("table-") {
+                    window
+                        .app_handle()
+                        .state::<table::TableState>()
+                        .remove(label);
+                }
             }
         })
         .run(tauri::generate_context!())

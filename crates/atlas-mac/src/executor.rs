@@ -97,6 +97,8 @@ pub struct Executor {
     keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
     window_bridge: Option<std::sync::Arc<dyn crate::windows::WindowBridge>>,
     system_bridge: Option<std::sync::Arc<dyn crate::system::SystemBridge>>,
+    terminal_bridge: Option<std::sync::Arc<dyn crate::terminal::TerminalBridge>>,
+    capture_bridge: Option<std::sync::Arc<dyn crate::capture::CaptureBridge>>,
 }
 
 impl Executor {
@@ -123,6 +125,8 @@ impl Executor {
             keyboard_bridge: None,
             window_bridge: None,
             system_bridge: None,
+            terminal_bridge: None,
+            capture_bridge: None,
         }
     }
 
@@ -161,6 +165,26 @@ impl Executor {
         bridge: std::sync::Arc<dyn crate::system::SystemBridge>,
     ) -> Self {
         self.system_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS terminal bridge. Without it the tool reports
+    /// unavailability as text.
+    pub fn with_terminal_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::terminal::TerminalBridge>,
+    ) -> Self {
+        self.terminal_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS capture bridge. Without it the tool reports
+    /// unavailability as text.
+    pub fn with_capture_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::capture::CaptureBridge>,
+    ) -> Self {
+        self.capture_bridge = Some(bridge);
         self
     }
 
@@ -419,6 +443,14 @@ impl Executor {
             (ToolId::System, ToolArguments::System(payload)) => match &self.system_bridge {
                 Some(bridge) => crate::system::handle_system(bridge.as_ref(), payload)?,
                 None => OutputPayload::text("Hefesto no puede consultar el sistema")?,
+            },
+            (ToolId::Terminal, ToolArguments::Terminal(payload)) => match &self.terminal_bridge {
+                Some(bridge) => crate::terminal::handle_terminal(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede ejecutar comandos")?,
+            },
+            (ToolId::Capture, ToolArguments::Capture(payload)) => match &self.capture_bridge {
+                Some(bridge) => crate::capture::handle_capture(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede capturar la pantalla")?,
             },
             _ => return Err(Error::InvalidArguments),
         };
