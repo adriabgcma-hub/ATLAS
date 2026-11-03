@@ -65,6 +65,16 @@ describe('planPhaseOrbit', () => {
     })
   })
 
+  it('órbita violeta para consultas del sistema', () => {
+    const plan = planPhaseOrbit('executing', 'hefesto_system')
+    expect(plan).toEqual({
+      key: 'executing:hefesto_system',
+      title: 'Hefesto · Sistema',
+      detail: '',
+      color: HEFESTO_ORBIT_COLOR,
+    })
+  })
+
   it('otras herramientas usan el nombre del catálogo en azul', () => {
     const plan = planPhaseOrbit('executing', 'calendar_create_event')
     expect(plan).toEqual({

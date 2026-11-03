@@ -27,18 +27,18 @@ class FakeJournal:
         if operation == "outcome":
             entry = self.outcomes.get(body["invocationId"])
             if entry is None:
-                return (404, {"protocolVersion": 7, "error": "invocation_not_found"})
-            return (200, {"protocolVersion": 7,
+                return (404, {"protocolVersion": 8, "error": "invocation_not_found"})
+            return (200, {"protocolVersion": 8,
                           "invocationId": body["invocationId"], **entry})
-        return (404, {"protocolVersion": 7, "error": "not_found"})
+        return (404, {"protocolVersion": 8, "error": "not_found"})
 
     def accept(self, invocation_id="inv-1"):
-        self.submit_results.append((200, {"protocolVersion": 7,
+        self.submit_results.append((200, {"protocolVersion": 8,
                                           "invocationId": invocation_id,
                                           "state": "pending"}))
 
     def reject(self, code):
-        self.submit_results.append((409, {"protocolVersion": 7, "error": code}))
+        self.submit_results.append((409, {"protocolVersion": 8, "error": code}))
 
 
 class CancellingJournal(FakeJournal):
@@ -64,19 +64,19 @@ class ControlJournal:
     def dispatch(self, peer, method, path, raw=b""):
         operation = path.rsplit("/", 1)[-1]
         if operation == "status":
-            return (200, {"protocolVersion": 7, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 8, "deviceId": peer.device_id,
                           "generation": self.generation,
                           "suspended": self.suspended})
         if operation == "control":
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             if body["expectedGeneration"] != self.generation:
-                return (409, {"protocolVersion": 7, "error": "stale_generation"})
+                return (409, {"protocolVersion": 8, "error": "stale_generation"})
             self.generation += 1
             self.suspended = True
-            return (200, {"protocolVersion": 7, "deviceId": peer.device_id,
+            return (200, {"protocolVersion": 8, "deviceId": peer.device_id,
                           "generation": self.generation, "suspended": True})
-        return (404, {"protocolVersion": 7, "error": "not_found"})
+        return (404, {"protocolVersion": 8, "error": "not_found"})
 
 
 class RacedControlJournal(ControlJournal):
@@ -92,7 +92,7 @@ class RacedControlJournal(ControlJournal):
             body = json.loads(raw)
             self.controls.append((body["action"], body["expectedGeneration"]))
             self.generation += 1
-            return (409, {"protocolVersion": 7, "error": "stale_generation"})
+            return (409, {"protocolVersion": 8, "error": "stale_generation"})
         return super().dispatch(peer, method, path, raw)
 
 
@@ -1364,3 +1364,79 @@ class WindowsFlowTests(unittest.TestCase):
             self.assertEqual(result, "action inválida (list, move, resize o focus)")
             ask.assert_not_called()
         self.assertEqual(self.journal.submits, [])
+
+
+class SystemFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="atlas-system-")
+        self.addCleanup(self.temp.cleanup)
+        self.brain = make_brain(self.temp.name)
+        self.journal = FakeJournal()
+        self.brain._hefesto_journal = self.journal
+        self.brain._hefesto_device = "mac-one"
+
+    def test_catalogo_expone_consulta_sin_tarjeta(self):
+        tool = next(t for t in self.brain.tool_defs() if t["id"] == "hefesto_system")
+        self.assertFalse(tool["requiresConfirmation"])
+        self.assertNotIn("planConfirmation", tool)
+        self.assertEqual(tool["schema"]["properties"]["action"]["enum"],
+                         ["os", "disk", "uptime", "memory"])
+
+    def test_consulta_delega_sin_tarjeta_y_devuelve_texto(self):
+        for index, action in enumerate(("os", "disk", "uptime", "memory")):
+            with self.subTest(action=action):
+                self.journal.accept(f"inv-sys-{index}")
+                self.journal.outcomes[f"inv-sys-{index}"] = {
+                    "state": "succeeded", "output": {"text": f"resultado {action}"}}
+                with mock.patch.object(self.brain, "ask_confirmation") as ask:
+                    result = self.brain.execute_tool(
+                        "hefesto_system", {"action": action}, JOB)
+                self.assertEqual(result, f"resultado {action}")
+                ask.assert_not_called()
+                self.assertEqual(self.journal.submits[index]["toolId"], "hefesto.system")
+                self.assertEqual(self.journal.submits[index]["arguments"],
+                                 {"action": action})
+
+    def test_accion_invalida_no_delega(self):
+        for args in ({"action": "shell"}, {"action": ["os"]}, {}, {"action": 1}):
+            with self.subTest(args=args):
+                with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                        mock.patch("atlas_relay.dlog"):
+                    result = self.brain.execute_tool("hefesto_system", args, JOB)
+                self.assertEqual(
+                    result, "acción inválida (os, disk, uptime o memory)")
+                ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_argumentos_extra_no_delegan(self):
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch("atlas_relay.dlog"):
+            result = self.brain.execute_tool(
+                "hefesto_system", {"action": "os", "path": "/etc/hosts"}, JOB)
+        self.assertEqual(result, "argumentos inválidos (solo action)")
+        ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
+    def test_sin_burbuja_hefesto(self):
+        self.journal.accept("inv-sys")
+        self.journal.outcomes["inv-sys"] = {
+            "state": "succeeded", "output": {"text": "Memoria:\nPages free: 1000"}}
+        with mock.patch.object(self.brain, "_hefesto_note") as note:
+            self.brain.execute_tool("hefesto_system", {"action": "memory"}, JOB)
+        note.assert_not_called()
+
+    def test_handle_tool_call_no_abre_tarjeta(self):
+        self.journal.accept("inv-sys")
+        self.journal.outcomes["inv-sys"] = {
+            "state": "succeeded", "output": {"text": "Disco:\n/ 100G 50G 50G"}}
+        call = {"id": "c1", "function": {"name": "hefesto_system",
+                                         "arguments": json.dumps({"action": "disk"})}}
+        with mock.patch.object(self.brain, "ask_confirmation") as ask, \
+                mock.patch("atlas_relay.dlog"):
+            self.brain._handle_tool_call(JOB, call)
+        ask.assert_not_called()
+
+    def test_el_log_de_resultado_solo_lleva_longitud(self):
+        result = "Disco:\n" + "x" * 500
+        self.assertEqual(atlas_relay.tool_log_result("hefesto_system", result),
+                         f"<{len(result)} chars>")

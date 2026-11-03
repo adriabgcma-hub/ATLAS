@@ -1260,3 +1260,56 @@ fn windows_sin_puente_devuelve_texto_no_disponible() {
         Some("Hefesto no puede gestionar ventanas")
     );
 }
+
+struct FakeSystem;
+
+impl atlas_mac::system::SystemBridge for FakeSystem {
+    fn run(
+        &self,
+        action: SystemAction,
+    ) -> std::result::Result<String, atlas_mac::system::SystemFailure> {
+        Ok(format!("salida {action:?}"))
+    }
+}
+
+fn system_invocation(payload: SystemPayload) -> Invocation {
+    let mut inv = invocation();
+    inv.invocation_id = id("s");
+    inv.tool_id = ToolId::System;
+    inv.arguments = ToolArguments::System(payload);
+    inv
+}
+
+#[test]
+fn system_se_enruta_por_el_puente_inyectado() {
+    let mut executor = apps_executor(None).with_system_bridge(Arc::new(FakeSystem));
+    let out = executor
+        .execute(
+            &system_invocation(SystemPayload {
+                action: SystemAction::Uptime,
+            }),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Tiempo encendido:\nsalida Uptime")
+    );
+}
+
+#[test]
+fn system_sin_puente_devuelve_texto_no_disponible() {
+    let mut executor = apps_executor(None);
+    let out = executor
+        .execute(
+            &system_invocation(SystemPayload {
+                action: SystemAction::Disk,
+            }),
+            at(3),
+        )
+        .unwrap();
+    assert_eq!(
+        out.output.text_value(),
+        Some("Hefesto no puede consultar el sistema")
+    );
+}

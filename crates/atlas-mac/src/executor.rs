@@ -96,6 +96,7 @@ pub struct Executor {
     app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
     keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
     window_bridge: Option<std::sync::Arc<dyn crate::windows::WindowBridge>>,
+    system_bridge: Option<std::sync::Arc<dyn crate::system::SystemBridge>>,
 }
 
 impl Executor {
@@ -121,6 +122,7 @@ impl Executor {
             app_bridge: None,
             keyboard_bridge: None,
             window_bridge: None,
+            system_bridge: None,
         }
     }
 
@@ -149,6 +151,16 @@ impl Executor {
         bridge: std::sync::Arc<dyn crate::windows::WindowBridge>,
     ) -> Self {
         self.window_bridge = Some(bridge);
+        self
+    }
+
+    /// Injects the macOS system bridge so `hefesto.system` can run the closed
+    /// read-only queries. Without it the tool reports unavailability as text.
+    pub fn with_system_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::system::SystemBridge>,
+    ) -> Self {
+        self.system_bridge = Some(bridge);
         self
     }
 
@@ -403,6 +415,10 @@ impl Executor {
             (ToolId::Windows, ToolArguments::Windows(payload)) => match &self.window_bridge {
                 Some(bridge) => crate::windows::handle_windows(bridge.as_ref(), payload)?,
                 None => OutputPayload::text("Hefesto no puede gestionar ventanas")?,
+            },
+            (ToolId::System, ToolArguments::System(payload)) => match &self.system_bridge {
+                Some(bridge) => crate::system::handle_system(bridge.as_ref(), payload)?,
+                None => OutputPayload::text("Hefesto no puede consultar el sistema")?,
             },
             _ => return Err(Error::InvalidArguments),
         };

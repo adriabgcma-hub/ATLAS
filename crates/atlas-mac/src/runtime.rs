@@ -209,6 +209,7 @@ pub struct Runtime<T: Transport> {
     app_bridge: Option<std::sync::Arc<dyn crate::apps::AppBridge>>,
     keyboard_bridge: Option<std::sync::Arc<dyn crate::keyboard::KeyboardBridge>>,
     window_bridge: Option<std::sync::Arc<dyn crate::windows::WindowBridge>>,
+    system_bridge: Option<std::sync::Arc<dyn crate::system::SystemBridge>>,
     session: Option<Session>,
     phase: Phase,
     detail: Option<&'static str>,
@@ -231,6 +232,7 @@ impl<T: Transport> Runtime<T> {
             app_bridge: None,
             keyboard_bridge: None,
             window_bridge: None,
+            system_bridge: None,
             session: None,
             phase: Phase::Connecting,
             detail: None,
@@ -272,6 +274,14 @@ impl<T: Transport> Runtime<T> {
         bridge: std::sync::Arc<dyn crate::windows::WindowBridge>,
     ) -> Self {
         self.window_bridge = Some(bridge);
+        self
+    }
+
+    pub fn with_system_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn crate::system::SystemBridge>,
+    ) -> Self {
+        self.system_bridge = Some(bridge);
         self
     }
 
@@ -387,6 +397,9 @@ impl<T: Transport> Runtime<T> {
         }
         if let Some(bridge) = &self.window_bridge {
             executor = executor.with_window_bridge(bridge.clone());
+        }
+        if let Some(bridge) = &self.system_bridge {
+            executor = executor.with_system_bridge(bridge.clone());
         }
         self.session = Some(Session { instance, executor });
         self.registered = false;

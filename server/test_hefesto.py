@@ -32,7 +32,7 @@ CONTROLLER = hefesto.Peer("controller", "mac-one")
 
 
 def encoded(**fields):
-    return json.dumps({"protocolVersion": 7, **fields}, ensure_ascii=True).encode()
+    return json.dumps({"protocolVersion": 8, **fields}, ensure_ascii=True).encode()
 
 
 def submission(submission_id="submission-1", text="hello", **changes):
@@ -70,13 +70,13 @@ class JournalTests(unittest.TestCase):
     def ok(self, operation, peer=DEVICE, **fields):
         status, value = self.call(operation, peer, **fields)
         self.assertEqual(status, 200, value)
-        self.assertEqual(value["protocolVersion"], 7)
+        self.assertEqual(value["protocolVersion"], 8)
         return value
 
     def error(self, code, operation, peer=DEVICE, **fields):
         status, value = self.call(operation, peer, **fields)
         self.assertGreaterEqual(status, 400)
-        self.assertEqual(value, {"protocolVersion": 7, "error": code})
+        self.assertEqual(value, {"protocolVersion": 8, "error": code})
 
     def ready(self, peer=DEVICE, instance="instance-1"):
         state = self.ok("register", peer, instanceId=instance)
@@ -99,7 +99,7 @@ class JournalTests(unittest.TestCase):
         self.journal = self.new_journal()
 
     def test_full_echo_and_exact_response_contract(self):
-        self.assertEqual(self.ok("status"), {"protocolVersion": 7, "deviceId": "mac-one", "instanceId": None,
+        self.assertEqual(self.ok("status"), {"protocolVersion": 8, "deviceId": "mac-one", "instanceId": None,
                                            "generation": 0, "suspended": True, "online": False,
                                            "activeInvocationId": None})
         state = self.ready()
@@ -112,7 +112,7 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(ack["state"], "pending")
         self.assertEqual(self.ok("status")["activeInvocationId"], ack["invocationId"])
         invocation = self.next()
-        self.assertEqual(invocation, {"protocolVersion": 7, "invocationId": ack["invocationId"],
+        self.assertEqual(invocation, {"protocolVersion": 8, "invocationId": ack["invocationId"],
                                      "requestId": "request-1", "sessionId": "session-1", "taskId": "task-1",
                                      "deviceId": "mac-one", "instanceId": "instance-1", "generation": 2,
                                      "toolId": "hefesto.echo", "arguments": {"text": "héllo 世界"},
@@ -160,7 +160,7 @@ class JournalTests(unittest.TestCase):
     def test_submission_json_order_and_escaping_are_semantic(self):
         self.ready()
         first = self.send(text="é")
-        fields = {"protocolVersion": 7, **submission(text="é")}
+        fields = {"protocolVersion": 8, **submission(text="é")}
         raw = json.dumps(dict(reversed(list(fields.items()))), ensure_ascii=False, indent=2).encode()
         self.assertEqual(self.journal.dispatch(CONTROLLER, "POST", PREFIX + "submit", raw), (200, first))
 
@@ -244,7 +244,7 @@ class JournalTests(unittest.TestCase):
         state = self.ok("control", CONTROLLER, action="abort", expectedGeneration=2)
         self.assertTrue(state["suspended"])
         self.assertEqual(self.journal.dispatch(None, "GET", PREFIX + "status"),
-                         (403, {"protocolVersion": 7, "error": "unauthorized_peer"}))
+                         (403, {"protocolVersion": 8, "error": "unauthorized_peer"}))
 
     def test_device_identity_isolated_including_idempotency(self):
         other_device = hefesto.Peer("device", "mac-two")
@@ -537,14 +537,14 @@ class JournalTests(unittest.TestCase):
             self.error("invalid_fields", "submit", CONTROLLER, **submission(arguments=arguments))
 
     def test_raw_json_duplicates_invalid_encoding_and_body_limit(self):
-        cases = (b'{"protocolVersion":7,"protocolVersion":7,"instanceId":"i"}',
-                 b'{"protocolVersion":7,"instanceId":"i","instanceId":"i"}',
+        cases = (b'{"protocolVersion":8,"protocolVersion":8,"instanceId":"i"}',
+                 b'{"protocolVersion":8,"instanceId":"i","instanceId":"i"}',
                  b'{"protocolVersion":NaN,"instanceId":"i"}',
                  b'{"protocolVersion":Infinity,"instanceId":"i"}', b"\xff", b"", b"{}{}")
         for raw in cases:
             with self.subTest(raw=raw[:60]):
                 self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", raw),
-                                 (400, {"protocolVersion": 7, "error": "invalid_json"}))
+                                 (400, {"protocolVersion": 8, "error": "invalid_json"}))
         self.assertEqual(self.journal.dispatch(DEVICE, "POST", PREFIX + "register", b"[" * 2000 + b"]" * 2000)[0], 400)
         raw = encoded(**submission()).replace(b'"text": "hello"', b'"text":"hello","text":"hello"')
         self.assertEqual(self.journal.dispatch(CONTROLLER, "POST", PREFIX + "submit", raw)[1]["error"], "invalid_json")
@@ -567,7 +567,7 @@ class JournalTests(unittest.TestCase):
 
     def test_failures_are_sanitized_and_close_is_idempotent(self):
         with mock.patch.object(self.journal, "_monotonic", side_effect=RuntimeError("private /credentials/key.pem")):
-            self.assertEqual(self.call("status"), (503, {"protocolVersion": 7, "error": "journal_unavailable"}))
+            self.assertEqual(self.call("status"), (503, {"protocolVersion": 8, "error": "journal_unavailable"}))
         self.assertFalse(self.ok("status")["online"])
         self.journal.close()
         self.journal.close()
@@ -584,7 +584,7 @@ class JournalTests(unittest.TestCase):
         self.ready()
         ack = self.send(text="héllo 世界")
         outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
-        self.assertEqual(outcome, {"protocolVersion": 7, "invocationId": ack["invocationId"],
+        self.assertEqual(outcome, {"protocolVersion": 8, "invocationId": ack["invocationId"],
                                    "state": "pending", "output": None})
         invocation = self.next()
         self.ok("result", peer=DEVICE, **self.result_fields(invocation))
@@ -1251,6 +1251,58 @@ class WindowsJournalTests(JournalTests):
         self.assertIsNone(outcome["output"])
 
 
+SYSTEM = {"submissionId": "submission-sys", "requestId": "request-1",
+          "sessionId": "session-1", "taskId": "task-sys",
+          "toolId": "hefesto.system", "arguments": {"action": "os"}}
+
+
+class SystemJournalTests(JournalTests):
+    @staticmethod
+    def system(arguments, **changes):
+        return {**SYSTEM, **changes, "arguments": arguments}
+
+    def test_system_submit_next_result(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **SYSTEM)
+        invocation = self.next()
+        self.assertEqual(invocation["invocationId"], ack["invocationId"])
+        self.assertEqual(invocation["toolId"], "hefesto.system")
+        self.assertEqual(invocation["arguments"], {"action": "os"})
+        result = self.ok("result", **self.result_fields(
+            invocation, output={"text": "Sistema:\nProductVersion: 15.0"}))
+        self.assertEqual(result["state"], "succeeded")
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["output"], {"text": "Sistema:\nProductVersion: 15.0"})
+
+    def test_system_accion_invalida_se_rechaza(self):
+        self.ready()
+        for action in ("shell", "df", "", None, True, 1, [], {}):
+            with self.subTest(action=action):
+                self.error("bad_action", "submit", peer=CONTROLLER,
+                           **self.system({"action": action}))
+        self.error("bad_action", "submit", peer=CONTROLLER,
+                   **self.system({}))
+
+    def test_system_claves_extra_se_rechazan(self):
+        self.ready()
+        for arguments in ({"action": "os", "path": "/etc/hosts"},
+                          {"action": "disk", "args": ["-a"]},
+                          {"action": "uptime", "command": "id"}):
+            with self.subTest(arguments=arguments):
+                self.error("bad_argument", "submit", peer=CONTROLLER,
+                           **self.system(arguments))
+
+    def test_system_reinicio_pendiente_queda_unknown_y_no_reenvia(self):
+        self.ready()
+        ack = self.ok("submit", peer=CONTROLLER, **SYSTEM)
+        self.restart()
+        self.ready(instance="instance-2")
+        self.assertIsNone(self.next())
+        outcome = self.ok("outcome", peer=CONTROLLER, invocationId=ack["invocationId"])
+        self.assertEqual(outcome["state"], "unknown")
+        self.assertIsNone(outcome["output"])
+
+
 class RegistryTests(unittest.TestCase):
     def test_peer_validation(self):
         for role, device in (("admin", "mac"), (None, "mac"), ([], "mac"), ("device", ""),
@@ -1532,7 +1584,7 @@ class TLSTests(unittest.TestCase):
                 response = http.client.HTTPResponse(connection)
                 response.begin()
                 self.assertEqual(response.status, 408)
-                self.assertEqual(json.loads(response.read()), {"protocolVersion": 7, "error": "request_timeout"})
+                self.assertEqual(json.loads(response.read()), {"protocolVersion": 8, "error": "request_timeout"})
 
     def test_smuggling_framing_and_duplicate_headers_are_rejected(self):
         cases = (b"Content-Length: 2\r\nContent-Length: 2\r\n", b"Content-Length: 2\r\ncontent-length: 3\r\n",
@@ -1545,7 +1597,7 @@ class TLSTests(unittest.TestCase):
                 status, error = self.raw(b"POST /v1/hefesto/register HTTP/1.1\r\nHost: localhost\r\n"
                                          b"Content-Type: application/json\r\n" + headers + b"\r\n{}")
                 self.assertEqual(status, 400)
-                self.assertEqual(error, {"protocolVersion": 7, "error": "invalid_http_framing"})
+                self.assertEqual(error, {"protocolVersion": 8, "error": "invalid_http_framing"})
 
     def test_body_limit_content_type_length_paths_and_json_over_tls(self):
         base = b"POST /v1/hefesto/register HTTP/1.1\r\nHost: localhost\r\n"
@@ -1555,7 +1607,7 @@ class TLSTests(unittest.TestCase):
                                         (b"Content-Length: 2\r\nContent-Type: text/plain\r\n", b"{}", 415),
                                         (b"Content-Length: 2\r\nContent-Type: application/json; charset=latin1\r\n", b"{}", 415)):
             self.assertEqual(self.raw(base + headers + b"\r\n" + body)[0], expected)
-        for body in (b'{"protocolVersion":7,"instanceId":"i","instanceId":"other"}', b"\xff"):
+        for body in (b'{"protocolVersion":8,"instanceId":"i","instanceId":"other"}', b"\xff"):
             status, error = self.raw(base + b"Content-Type: application/json\r\nContent-Length: "
                                      + str(len(body)).encode() + b"\r\n\r\n" + body)
             self.assertEqual(status, 400)

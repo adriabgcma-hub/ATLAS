@@ -53,7 +53,7 @@ pub struct ProtocolVersion;
 impl TryFrom<u64> for ProtocolVersion {
     type Error = Error;
     fn try_from(value: u64) -> Result<Self> {
-        if value == 7 {
+        if value == 8 {
             Ok(Self)
         } else {
             Err(Error::InvalidVersion)
@@ -63,7 +63,7 @@ impl TryFrom<u64> for ProtocolVersion {
 
 impl From<ProtocolVersion> for u64 {
     fn from(_: ProtocolVersion) -> Self {
-        7
+        8
     }
 }
 
@@ -424,6 +424,21 @@ pub struct WindowsOutput {
     pub windows: Vec<WindowRecord>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemAction {
+    Os,
+    Disk,
+    Uptime,
+    Memory,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SystemPayload {
+    pub action: SystemAction,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolArguments {
@@ -435,6 +450,7 @@ pub enum ToolArguments {
     Keyboard(KeyboardPayload),
     Media(MediaPayload),
     Windows(WindowsPayload),
+    System(SystemPayload),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -530,6 +546,8 @@ pub enum ToolId {
     Media,
     #[serde(rename = "hefesto.windows")]
     Windows,
+    #[serde(rename = "hefesto.system")]
+    System,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -770,9 +788,9 @@ mod tests {
     use super::ProtocolVersion;
 
     #[test]
-    fn protocol_version_is_seven() {
-        assert_eq!(u64::from(ProtocolVersion), 7);
-        assert!(ProtocolVersion::try_from(7u64).is_ok());
-        assert!(ProtocolVersion::try_from(6u64).is_err());
+    fn protocol_version_is_eight() {
+        assert_eq!(u64::from(ProtocolVersion), 8);
+        assert!(ProtocolVersion::try_from(8u64).is_ok());
+        assert!(ProtocolVersion::try_from(7u64).is_err());
     }
 }

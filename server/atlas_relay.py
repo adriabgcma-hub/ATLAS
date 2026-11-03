@@ -374,14 +374,34 @@ HEFESTO_WINDOWS_TOOL = {
     },
 }
 
+HEFESTO_SYSTEM_TOOL = {
+    "id": "hefesto_system",
+    "risk": "external",
+    # Información del sistema: trivial por adaptador, sin tarjeta ni burbuja.
+    "requiresConfirmation": False,
+    "description": ("Consulta información de solo lectura del Mac con Hefesto: versión de "
+                    "macOS, espacio en disco, tiempo encendido o memoria. Usa adaptadores "
+                    "cerrados; no ejecuta comandos del usuario."),
+    "schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["os", "disk", "uptime", "memory"],
+                       "description": "consulta de solo lectura"},
+        },
+        "required": ["action"],
+    },
+}
+
 HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
                  HEFESTO_WRITE_TOOL, HEFESTO_RENAME_TOOL, HEFESTO_APPS_TOOL,
-                 HEFESTO_KEYBOARD_TOOL, HEFESTO_MEDIA_TOOL, HEFESTO_WINDOWS_TOOL]
+                 HEFESTO_KEYBOARD_TOOL, HEFESTO_MEDIA_TOOL, HEFESTO_WINDOWS_TOOL,
+                 HEFESTO_SYSTEM_TOOL]
 
 # Traducción de las acciones del modelo a las del wire v7 de ventanas (valores
 # distintos de hefesto.apps para que el enum untagged del dispositivo no confunda).
 _WINDOWS_WIRE = {"list": "list_windows", "move": "move_window",
                  "resize": "resize_window", "focus": "focus_window"}
+_SYSTEM_ACTIONS = ("os", "disk", "uptime", "memory")
 
 
 # Gramática cerrada del atajo (misma que el dispositivo): 1–3 modificadores
@@ -451,7 +471,8 @@ def dlog(brain: "Brain", category: str, message: str, **extra) -> None:
 def tool_log_result(name: str, result: str) -> str:
     """Resultado apto para el log: teclado y ventanas solo registran longitud."""
     return (f"<{len(result)} chars>"
-            if name in ("hefesto_keyboard", "hefesto_windows") else result[:200])
+            if name in ("hefesto_keyboard", "hefesto_windows", "hefesto_system")
+            else result[:200])
 
 
 def fail_config(message: str) -> NoReturn:
@@ -1057,6 +1078,8 @@ class Brain:
             return self._media(job, args)
         if tool_id == "hefesto_windows":
             return self._windows(job, args)
+        if tool_id == "hefesto_system":
+            return self._system(job, args)
         if tool_id == "calendar_read":
             try:
                 days = max(1, min(int(args.get("days", 7)), 31))
@@ -1089,7 +1112,7 @@ class Brain:
         if len(text.encode("utf-8")) > 256:
             return "delegación rechazada: texto demasiado largo (máx. 256 bytes)"
         submission = {
-            "protocolVersion": 7,
+            "protocolVersion": 8,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -1129,7 +1152,7 @@ class Brain:
             if job["request_id"] in self.cancelled:
                 return None, "cancelada a mitad de turno"
         submission = {
-            "protocolVersion": 7,
+            "protocolVersion": 8,
             "submissionId": new_id("sub"),
             "requestId": job["request_id"],
             "sessionId": job["session_id"],
@@ -1156,7 +1179,7 @@ class Brain:
             status, outcome = journal.dispatch(
                 hefesto.Peer("controller", device_id), "POST",
                 "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 7,
+                json.dumps({"protocolVersion": 8,
                             "invocationId": invocation_id}).encode("utf-8"))
             if status == 200 and outcome.get("state") in (
                     "succeeded", "expired", "cancelled", "unknown"):
@@ -1456,6 +1479,22 @@ class Brain:
             return output
         return str(output.get("text") or "")
 
+    def _system(self, job: dict, args: dict) -> str:
+        """Consulta del sistema: solo lectura, sin tarjeta ni burbuja."""
+        action = args.get("action")
+        if type(action) is not str or action not in _SYSTEM_ACTIONS:
+            return "acción inválida (os, disk, uptime o memory)"
+        if set(args) != {"action"}:
+            return "argumentos inválidos (solo action)"
+        invocation_id, error = self._hefesto_submit(
+            "hefesto.system", job, {"action": action})
+        if error is not None:
+            return error
+        output = self._hefesto_wait(invocation_id, job, 10.0)
+        if isinstance(output, str):
+            return output
+        return str(output.get("text") or "")
+
     def _format_windows_list(self, windows: list) -> str:
         if not windows:
             return "sin ventanas"
@@ -1586,7 +1625,7 @@ class Brain:
                 return {"ok": False, "error": body.get("error", "status_failed")}
             status, body = journal.dispatch(
                 peer, "POST", "/v1/hefesto/control",
-                json.dumps({"protocolVersion": 7, "action": "abort",
+                json.dumps({"protocolVersion": 8, "action": "abort",
                             "expectedGeneration": body["generation"]}).encode("utf-8"))
             if status == 200:
                 return {"ok": True, "suspended": True}
@@ -1611,7 +1650,7 @@ class Brain:
         for entry in entries:
             status, response = journal.dispatch(
                 peer, "POST", "/v1/hefesto/outcome",
-                json.dumps({"protocolVersion": 7,
+                json.dumps({"protocolVersion": 8,
                             "invocationId": entry["invocation_id"]}).encode("utf-8"))
             if status != 200:
                 dlog(self, "HEFESTO",
