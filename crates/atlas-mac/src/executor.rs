@@ -429,6 +429,11 @@ impl Executor {
             invocation_id: invocation.invocation_id.clone(),
             output,
         };
+        // Purga las invocaciones ya expiradas: sin esto el mapa crece con
+        // el uptime de la instancia y cada entrada guarda su salida.
+        let now_ms = now.unix_ms.get();
+        self.completed
+            .retain(|_, entry| entry.invocation.expires_at_unix_ms.get() > now_ms);
         self.completed.insert(
             invocation.invocation_id.clone(),
             CompletedInvocation {

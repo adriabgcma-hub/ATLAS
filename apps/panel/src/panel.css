@@ -102,10 +102,9 @@ body::before {
 .relay-pill.ok    { border-color: rgba(0, 217, 255, 0.4); }
 .relay-pill.warn  { border-color: rgba(255, 201, 83, 0.45); }
 .relay-pill.down  { border-color: rgba(255, 107, 107, 0.45); }
-.relay-pill.ok   .relay-led { background: #00d9ff; box-shadow: 0 0 12px rgba(0, 217, 255, 0.7); }
+.relay-pill.ok   .relay-led { background: #00d9ff; box-shadow: 0 0 12px rgba(0, 217, 255, 0.7); animation: breathe 2.6s ease-in-out infinite; }
 .relay-pill.warn .relay-led { background: var(--amber); box-shadow: 0 0 12px rgba(255, 201, 83, 0.6); }
 .relay-pill.down .relay-led { background: var(--red); box-shadow: 0 0 12px rgba(255, 107, 107, 0.65); }
-.relay-pill.ok   .relay-led { animation: breathe 2.6s ease-in-out infinite; }
 @keyframes breathe {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.45; }
@@ -313,7 +312,6 @@ body::before {
   background: rgba(14, 30, 44, 0.5);
 }
 .state-chip.on  { border-color: rgba(0, 217, 255, 0.45); color: #00d9ff; }
-.state-chip.off { border-color: rgba(255, 107, 107, 0.35); color: #ffd9d9; }
 .state-chip.warn{ border-color: rgba(255, 201, 83, 0.4);  color: #f2e7c9; }
 
 .chip {

@@ -163,7 +163,6 @@ const DENY_WORDS = new Set([
 ])
 
 export default function App() {
-  const levelRef = useRef(0)
   const scenePortRef = useRef<ScenePort | null>(null)
   // Timers de la cadencia de letras (se limpian al desmontar).
   const letterTimersRef = useRef<number[]>([])
@@ -375,7 +374,7 @@ export default function App() {
     const { sessionState, pendingRequestIds, messages, confirmations } = conversation
     if (sessionState === 'thinking' && pendingRequestIds.length > 0) {
       // El texto y el origen solo se conocen por el mensaje del usuario.
-      const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+      const lastUser = messages.findLast((m) => m.role === 'user')
       if (lastUser) {
         phaseOrbitsRef.current?.request(lastUser.requestId, lastUser.content, lastUser.source)
       }
@@ -408,7 +407,7 @@ export default function App() {
         confirmOrbitIdRef.current.set(confirmation.requestId, orbitId)
       }
     }
-  })
+  }, [conversation])
 
   // Suscripción a eventos del núcleo + hidratación + drenado del relay.
   useEffect(() => {
@@ -554,6 +553,7 @@ export default function App() {
         if (port && orbitId !== undefined) {
           port.retireOrbit(orbitId)
           confirmOrbitIdRef.current.delete(requestId)
+          orbitedConfirmsRef.current.delete(requestId)
         }
       }
       if (!inTauri()) {
@@ -655,8 +655,8 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <Orbits asleep={false} portRef={orbitPortRef} />
-      <AtlasScene orbState={orbState} levelRef={levelRef} portRef={scenePortRef} />
+      <Orbits portRef={orbitPortRef} />
+      <AtlasScene orbState={orbState} portRef={scenePortRef} />
       <div className="app-label" aria-label="Atlas">ATLAS</div>
       {hefesto && (
         <HefestoBadge

@@ -947,9 +947,14 @@ class Brain:
             self._push_message(session["id"], request_id, "assistant",
                                content, "local")
             self._push_state(session["id"], request_id, "completed")
-            if source == "telegram" and chat_id is not None:
-                self._send_telegram(chat_id, content)
-            return {"requestId": request_id, "sessionId": session["id"]}
+            result = {"requestId": request_id, "sessionId": session["id"]}
+            telegram_reply = (chat_id, content) if (
+                source == "telegram" and chat_id is not None) else None
+        # Fuera del lock: sendMessage puede tardar hasta 20 s y congelaría
+        # sesión, eventos y panel mientras tanto.
+        if telegram_reply is not None:
+            self._send_telegram(*telegram_reply)
+        return result
 
     def receive(self, content: str, source: str, chat_id: int | None = None) -> dict:
         """Registra una petición y la encola al worker. Devuelve ids."""
@@ -1843,6 +1848,7 @@ class Brain:
     def confirm(self, request_id: str, decision: str) -> bool:
         """Registra la decisión del usuario. False si caducó o no existe."""
         dlog(self, "CONFIRM", f"request={request_id} decision={decision}")
+        telegram_reply: tuple[int, str] | None = None
         with self.lock:
             entry = self.confirmations.get(request_id)
             if entry is None or time.time() > entry["expires"]:
@@ -1861,12 +1867,14 @@ class Brain:
                 "timestamp": utc_now(),
                 "decision": decision,
             })
-            # Avisar por Telegram si hay chat asociado.
+            # Avisar por Telegram si hay chat asociado (fuera del lock).
             if chat_id is not None:
                 icon = "✅" if decision == "allow_once" else "❌"
                 verb = "aceptada" if decision == "allow_once" else "denegada"
-                self._send_telegram(chat_id, f"{icon} Acción {verb}.")
-            return True
+                telegram_reply = (chat_id, f"{icon} Acción {verb}.")
+        if telegram_reply is not None:
+            self._send_telegram(*telegram_reply)
+        return True
 
     def _account_usage(self, raw: dict) -> dict:
         """Acumula el consumo de un turno y devuelve el delta normalizado."""
@@ -1992,7 +2000,12 @@ class Brain:
                 self._push_state(session["id"], request_id, "failed", error)
             if job["source"] == "telegram" and job.get("chat_id") is not None:
                 reply = text if error is None else "Lo siento, ahora mismo no puedo responder."
-                self._send_telegram(job["chat_id"], reply[:MAX_CONTENT_LEN])
+                telegram_reply = (job["chat_id"], reply[:MAX_CONTENT_LEN])
+            else:
+                telegram_reply = None
+        # Fuera del lock: el envío puede tardar hasta 20 s.
+        if telegram_reply is not None:
+            self._send_telegram(*telegram_reply)
 
     def _handle_tool_call(self, job: dict, call: dict) -> str:
         """Ejecuta una tool_call del modelo (con confirmación si toca)."""
@@ -2305,7 +2318,7 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                     inflight = len(brain.inflight)
                 bot = dict(brain.bot_info) if brain.bot_info else {}
                 self._json(200, {"ok": True, "telegram": status["telegram"],
-                                 "llm": status["llm"], "calendar": status["calendar"],
+                                 "llm": status["llm"], "calendar": brain.calendar_status(),
                                  "events": queued, "queue": brain.jobs.qsize(),
                                  "inflight": inflight, "bot": bot})
                 return
@@ -2372,7 +2385,7 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                 except OSError:
                     lines = []
                 tail_lines = lines[-tail:]
-                self._json(200, {"lines": [ln.rstrip("\\n") for ln in tail_lines],
+                self._json(200, {"lines": [ln.rstrip("\n") for ln in tail_lines],
                                  "total": len(lines)})
                 return
             if parsed.path == "/v1/stats":
@@ -2623,7 +2636,6 @@ def main() -> int:
     status = {
         "telegram": "enabled" if cfg["token"] else "disabled",
         "llm": "groq" if cfg["groq_keys"] else "stub",
-        "calendar": brain.calendar_status(),
     }
     if cfg["token"] and not cfg["allowed"]:
         fail_config("Con bot activo, TELEGRAM_ALLOWED_USER_IDS no puede estar vacío.")

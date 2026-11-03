@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChatMessage } from '../../types/contracts'
 import { MarkdownMessage } from './MarkdownMessage'
 
-const STREAM_CADENCE_MS = 16
+const STREAM_CADENCE_MS = 33
 const STREAM_MS_PER_CHAR = 18
 const STREAM_MIN_MS = 400
 const STREAM_MAX_MS = 6000

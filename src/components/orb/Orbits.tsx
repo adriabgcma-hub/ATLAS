@@ -199,21 +199,15 @@ function getDiscSprite(fill: string): HTMLCanvasElement {
   return sprite
 }
 
-export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?: RefObject<OrbitPort | null> }) {
+export function Orbits({ portRef }: { portRef?: RefObject<OrbitPort | null> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const animationRef = useRef<number>(0)
-  // Espejo del prop para el bucle rAF (sin re-crear el efecto al alternar).
-  const asleepRef = useRef(asleep)
   // Mini-burbuja de proximidad: el contenido viaja por estado (cambia poco);
   // la posición se escribe directa en el DOM cada frame (cero re-renders).
   const [hover, setHover] = useState<OrbitHover | null>(null)
   const hoverIdRef = useRef<number | null>(null)
   const mouseRef = useRef({ x: -9999, y: -9999, inside: false })
-
-  useEffect(() => {
-    asleepRef.current = asleep
-  }, [asleep])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -332,8 +326,6 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       portRef.current = { spawnOrbit, retireOrbit, retireAll, burstAll }
 
     let lastFrame = -1
-    // Factor de sueño (0 despierto → 1 dormido): transición suave ~2 s.
-    let sleepF = 0
     // Histéresis de la mini-burbuja: `hoverRawId` es la órbita bajo el
     // puntero ESTE frame (aún sin decidir si se muestra) y `hoverShownId` la
     // que está visible. Evita que un roce de ratón abra y cierre la etiqueta.
@@ -348,11 +340,6 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       // acumula catch-up). El primer frame no integra.
       const dt = lastFrame >= 0 ? Math.min((now - lastFrame) / 1000, MAX_DT) : 0
       lastFrame = now
-
-      // Sueño: las órbitas frenan a 1/4 de velocidad y se atenúan.
-      const sleepTarget = asleepRef.current ? 1 : 0
-      sleepF += (sleepTarget - sleepF) * Math.min(1, dt * 1.2)
-      const sleepDim = 1 - 0.5 * sleepF
 
       // En reposo (sin órbitas ni explosiones) no hay nada que pintar.
       if (orbits.length === 0 && bursts.length === 0) {
@@ -378,7 +365,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
       for (let i = orbits.length - 1; i >= 0; i--) {
         const p = orbits[i]
         // Integración de fase: la velocidad solo afecta al movimiento futuro.
-        p.angle += p.baseSpeed * (1 - 0.75 * sleepF) * dt
+        p.angle += p.baseSpeed * dt
 
         // Aparición desde el orbe (radio 0 → radio final con ease-out) +
         // vida: 0 en el frame de expiración (invisible; la explosión releva).
@@ -445,7 +432,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
             p.seenR = drawSize
             if (drawSize < 1) continue
             ctx.globalCompositeOperation = 'source-over'
-            ctx.globalAlpha = lifeF * sleepDim
+            ctx.globalAlpha = lifeF
             ctx.drawImage(ballSprite, x2d - drawSize / 2, y2d - drawSize / 2, drawSize, drawSize)
             ctx.globalCompositeOperation = 'lighter'
           } else {
@@ -453,7 +440,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
             const r = rBase * fade
             const drawSize = r * 1.7
             if (drawSize < 1) continue
-            ctx.globalAlpha = fade * fade * 0.85 * lifeF * sleepDim
+            ctx.globalAlpha = fade * fade * 0.85 * lifeF
             ctx.drawImage(trailSprite, x2d - drawSize / 2, y2d - drawSize / 2, drawSize, drawSize)
           }
         }
@@ -547,7 +534,7 @@ export function Orbits({ asleep = false, portRef }: { asleep?: boolean; portRef?
         const ageS = (now - b.bornAt) / 1000
         const fade = 1 - t
         const drawSize = Math.max(1, b.size * fade)
-        ctx.globalAlpha = fade * 0.9 * sleepDim
+        ctx.globalAlpha = fade * 0.9
         ctx.drawImage(
           b.sprite,
           b.x + b.vx * ageS - drawSize / 2,

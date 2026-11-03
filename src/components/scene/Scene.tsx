@@ -43,8 +43,6 @@ uniform float uTime;
 uniform float uHorizonBoost;
 uniform float uWaveR;
 uniform float uWaveA;
-uniform float uBootFade;
-uniform float uDim;
 uniform vec3 uToneColor;
 varying vec2 vUv;
 
@@ -135,10 +133,7 @@ void main() {
   color += tintColor * ring * fade * 0.3;
   alpha += ring * fade * 0.2;
 
-  // Boot: el grid entero nace del negro.
-  // Modo dormido: el suelo se apaga a medias (uDim 0→1).
-  float sleepFade = 1.0 - uDim * 0.55;
-  gl_FragColor = vec4(color * uBootFade * sleepFade, alpha * uBootFade * sleepFade);
+  gl_FragColor = vec4(color, alpha);
 }
 `
 
@@ -173,32 +168,6 @@ const ATLAS_TITANIUM_RGB: [number, number, number] = [0.949, 0.969, 1.0]
 const ATLAS_LETTER_RGB: [number, number, number] = [0.12, 0.55, 1.0]
 const ATLAS_DUST_TONE = new THREE.Color(...ATLAS_TITANIUM_RGB)
 const ATLAS_LETTER_TONE = new THREE.Color(...ATLAS_LETTER_RGB)
-
-// ── Secuencia de arranque (boot, 2026-08-24) ─────────────────
-// Un solo reloj (BootClock) avanza en el primer useFrame del canvas;
-// cada capa lee su ventana temporal. Si no hay boot, t arranca en 999
-// y todas las ventanas dan factor 1 (coste cero en estado estable).
-const BOOT_TOTAL_S = 2.4
-const BOOT_START_S = -0.35 // pequeño periodo a negro antes de despertar
-
-/** Reloj compartido del arranque; t en segundos desde el inicio. */
-interface BootClock {
-  t: number
-}
-
-/** Progreso suavizado (smoothstep) de una ventana temporal del boot. */
-function bootWindow(t: number, start: number, end: number): number {
-  const x = Math.min(1, Math.max(0, (t - start) / (end - start)))
-  return x * x * (3 - 2 * x)
-}
-
-/** Overshoot elástico para la «implosión» del núcleo (llega con rebote). */
-function easeOutBack(x: number): number {
-  const c1 = 1.70158
-  const c3 = c1 + 1
-  const p = x - 1
-  return 1 + c3 * p * p * p + c1 * p * p
-}
 
 /** Opciones por letra: multiplicadores de tamaño y de vida del vuelo. */
 export interface LetterSpawnOpts {
@@ -284,13 +253,9 @@ function domPointToWorld(px: number, py: number, width: number, height: number):
 function CyberGrid({
   orbState,
   orbPulseRef,
-  bootClockRef,
-  sleepRef,
 }: {
   orbState: OrbState
   orbPulseRef: RefObject<number>
-  bootClockRef: RefObject<BootClock | null>
-  sleepRef?: RefObject<{ v: number }>
 }) {
   const materialRef = useRef<THREE.ShaderMaterial>(null)
   const simTimeRef = useRef(0)
@@ -305,9 +270,6 @@ function CyberGrid({
     uHorizonBoost: { value: 0 },
     uWaveR: { value: 1 },
     uWaveA: { value: 0 },
-    // El primer useFrame lo pone al valor correcto (nace a negro con boot).
-    uBootFade: { value: 0 },
-    uDim: { value: 0 },
     uToneColor: { value: new THREE.Color(...ATLAS_TITANIUM_RGB) },
   }), [])
 
@@ -322,15 +284,8 @@ function CyberGrid({
     const u = materialRef.current.uniforms
     u.uTime.value = simTimeRef.current
 
-    // Boot: el grid emerge del negro durante la primera fase.
-    const bootT = bootClockRef.current?.t ?? 999
-    u.uBootFade.value = bootWindow(bootT, BOOT_START_S, 1.15)
-
-    // Sueño: apagado suave del suelo.
-    u.uDim.value = sleepRef?.current?.v ?? 0
-
-    // El horizonte "respira" cuando Atlas habla/responde (Pilar 5 ligero).
-    const boostTarget = orbState === 'responding' || orbState === 'speaking' ? 1 : 0
+    // El horizonte "respira" cuando Atlas responde (Pilar 5 ligero).
+    const boostTarget = orbState === 'responding' ? 1 : 0
     u.uHorizonBoost.value += (boostTarget - u.uHorizonBoost.value) * 0.04
 
     // Onda expansiva: salto de pulso → relanzar anillo desde el centro.
@@ -413,18 +368,9 @@ function getDustTexture(): THREE.CanvasTexture {
 interface DustLayer {
   points: THREE.Points
   speed: number
-  baseOpacity: number
 }
 
-function StarDust({
-  orbState,
-  bootClockRef,
-  sleepRef,
-}: {
-  orbState: OrbState
-  bootClockRef: RefObject<BootClock | null>
-  sleepRef?: RefObject<{ v: number }>
-}) {
+function StarDust({ orbState }: { orbState: OrbState }) {
   const { scene } = useThree()
   const layersRef = useRef<DustLayer[] | null>(null)
   // El polvo acelera mientras Atlas piensa/responde/habla (Pilar 5 ligero).
@@ -457,7 +403,7 @@ function StarDust({
       const points = new THREE.Points(geometry, material)
       points.position.z = layer.z
       scene.add(points)
-      layers.push({ points, speed: layer.speed, baseOpacity: layer.opacity })
+      layers.push({ points, speed: layer.speed })
     }
 
     layersRef.current = layers
@@ -479,21 +425,17 @@ function StarDust({
     const boostTarget = orbState === 'idle' ? 1 : 1.6
     boostRef.current += (boostTarget - boostRef.current) * 0.02
 
-    // Sueño: el polvo casi se detiene y se atenúa.
-    const sleepV = sleepRef?.current?.v ?? 0
-
     // Bucle indexado: el for...of sobre el array del ref dispara
     // react-hooks/immutability en cuanto hay una asignación directa.
     for (let li = 0; li < layers.length; li += 1) {
       const layer = layers[li]
-      const material = layer.points.material as THREE.PointsMaterial
 
       // Deriva vertical + wrap con re-sorteo de x para que no se note el ciclo.
       // Vía API del BufferAttribute (getX/setY): la escritura por índice
       // directo en arrays alcanzados por refs la prohíbe react-compiler.
       const attr = layer.points.geometry.getAttribute('position') as THREE.BufferAttribute
       const count = attr.count
-      const step = layer.speed * boostRef.current * dt * (1 - 0.85 * sleepV)
+      const step = layer.speed * boostRef.current * dt
       for (let i = 0; i < count; i += 1) {
         let y = attr.getY(i) - step
         if (y < -DUST_BOUNDS_Y) {
@@ -503,11 +445,6 @@ function StarDust({
         attr.setY(i, y)
       }
       attr.needsUpdate = true
-
-      // Opacidad = arranque × sueño (escritura continua: son 3 capas).
-      const bootT = bootClockRef.current?.t ?? 999
-      material.opacity =
-        layer.baseOpacity * bootWindow(bootT, 0.25, 1.6) * (1 - 0.55 * sleepV)
     }
   })
 
@@ -526,13 +463,7 @@ const REDUCED_MOTION =
   typeof window !== 'undefined' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-function CameraRig({
-  bootClockRef,
-  sleepRef,
-}: {
-  bootClockRef: RefObject<BootClock | null>
-  sleepRef?: RefObject<{ v: number }>
-}) {
+function CameraRig() {
   // Mutar el objeto `camera` del hook directo lo prohíbe react-compiler
   // (valor de scope de render); se accede vía ref, patrón poolRef.
   const camera = useThree((state) => state.camera)
@@ -549,28 +480,16 @@ function CameraRig({
     return () => window.removeEventListener('pointermove', onMove)
   }, [camera])
 
-  useFrame(({ clock }) => {
+  useFrame(() => {
     const cam = cameraRef.current
     if (!cam) return
 
-    // Boot: la cámara despierta MÁS CERCA y algo baja, y retrocede hasta
-    // su posición final mientras el grid emerge.
-    const bootT = bootClockRef.current?.t ?? 999
-    const wake = bootWindow(bootT, BOOT_START_S, 1.35)
-    const baseZ = 3.15 + (CAMERA_Z - 3.15) * wake
-    const baseY = -0.18 * (1 - wake)
+    const tx = targetRef.current.x * PARALLAX_MAX_X * (REDUCED_MOTION ? 0 : 1)
+    const ty = -targetRef.current.y * PARALLAX_MAX_Y * (REDUCED_MOTION ? 0 : 1)
 
-  const tx = targetRef.current.x * PARALLAX_MAX_X * (REDUCED_MOTION ? 0 : 1)
-  const ty = -targetRef.current.y * PARALLAX_MAX_Y * (REDUCED_MOTION ? 0 : 1)
-
-    // Sueño: deriva onírica — la cámara flota en un Lissajous lentísimo.
-    const sleepV = sleepRef?.current?.v ?? 0
-    const driftX = Math.sin(clock.elapsedTime * 0.07) * 0.07 * sleepV
-    const driftY = Math.cos(clock.elapsedTime * 0.05) * 0.05 * sleepV
-
-    cam.position.x += (tx + driftX - cam.position.x) * 0.03
-    cam.position.y += (ty + driftY + baseY - cam.position.y) * 0.03
-    cam.position.z += (baseZ - cam.position.z) * 0.06
+    cam.position.x += (tx - cam.position.x) * 0.03
+    cam.position.y += (ty - cam.position.y) * 0.03
+    cam.position.z += (CAMERA_Z - cam.position.z) * 0.06
     cam.lookAt(0, 0, 0)
   })
 
@@ -628,15 +547,7 @@ interface ShootingStar {
   dirY: number
 }
 
-function ShootingStars({
-  orbState,
-  bootClockRef,
-  sleepRef,
-}: {
-  orbState: OrbState
-  bootClockRef: RefObject<BootClock | null>
-  sleepRef?: RefObject<{ v: number }>
-}) {
+function ShootingStars({ orbState }: { orbState: OrbState }) {
   const { scene } = useThree()
   const poolRef = useRef<ShootingStar[] | null>(null)
   // La primera llega pronto pero sin ser instantánea.
@@ -698,13 +609,10 @@ function ShootingStars({
       star.material.opacity = Math.sin(star.t * Math.PI) * 0.8
     }
 
-    // Solo se programan nuevas en idle Y con el boot terminado. Con
-    // prefers-reduced-motion no se programan NUNCA; dormido tampoco.
+    // Solo se programan nuevas en idle. Con prefers-reduced-motion no se
+    // programan NUNCA.
     if (REDUCED_MOTION) return
-    if ((sleepRef?.current?.v ?? 0) > 0.3) return
     if (orbState !== 'idle') return
-    const bootT = bootClockRef.current?.t ?? 999
-    if (bootT < BOOT_TOTAL_S) return
     nextInRef.current -= dt
     if (nextInRef.current > 0) return
     nextInRef.current =
@@ -740,43 +648,29 @@ function ShootingStars({
 interface OrbParams {
   intensity: number
   error: number
-  speakingPulse: number
 }
 
-function orbParamsForState(state: OrbState, t: number): OrbParams {
+function orbParamsForState(state: OrbState): OrbParams {
   switch (state) {
     case 'thinking':
-      return { intensity: 0.75, error: 0, speakingPulse: 0 }
+      return { intensity: 0.75, error: 0 }
     case 'responding':
-      return { intensity: 1.0, error: 0, speakingPulse: 0 }
-    case 'speaking':
-      return {
-        intensity: 0.95,
-        error: 0,
-        speakingPulse: 0.5 + 0.5 * Math.sin(t * 4.0),
-      }
+      return { intensity: 1.0, error: 0 }
     case 'error':
-      return { intensity: 0.35, error: 1.0, speakingPulse: 0 }
+      return { intensity: 0.35, error: 1.0 }
     case 'idle':
     default:
-      return { intensity: 0.55, error: 0, speakingPulse: 0 }
+      return { intensity: 0.55, error: 0 }
   }
 }
 
 function EnergyCore({
   state,
   orbPulseRef,
-  bootClockRef,
-  sleepRef,
-  levelRef,
 }: {
   state: OrbState
   orbPulseRef: RefObject<number>
-  bootClockRef: RefObject<BootClock | null>
-  sleepRef?: RefObject<{ v: number }>
-  levelRef?: RefObject<number>
 }) {
-  const groupRef = useRef<THREE.Group>(null)
   const wireRef = useRef<THREE.Mesh>(null)
   const wireMatRef = useRef<THREE.MeshBasicMaterial>(null)
   const shellRef = useRef<THREE.Mesh>(null)
@@ -789,12 +683,6 @@ function EnergyCore({
 
   const cyan = useMemo(() => new THREE.Color(0.30, 0.80, 1.00), [])
   const red = useMemo(() => new THREE.Color(1.00, 0.16, 0.12), [])
-  // Seguidores rápido/lento de la envolvente: el movimiento sale de su
-  // diferencia (ripple) para no quedarse clavado en máximo durante vocales.
-  // El pre-suavizado quita el escalonado del muestreo (sensación de lag).
-  const preRef = useRef(0)
-  const fastRef = useRef(0)
-  const slowRef = useRef(0)
   // Intensidad del estado suavizada: arranca en idle (0.55) para que el
   // primer frame no dé un escalón de tamaño.
   const intensityRef = useRef(0.55)
@@ -806,11 +694,7 @@ function EnergyCore({
     const dt = Math.min(elapsed, MAX_DT)
     simTimeRef.current += dt
     const t = simTimeRef.current
-    const params = orbParamsForState(state, t)
-    // Sueño: el núcleo baja de intensidad y respira LENTO Y HONDO —
-    // como un durmiente (ciclo ~7 s, mucho más lento que la vigilia).
-    const sleepV = sleepRef?.current?.v ?? 0
-    const breathSleep = Math.sin(t * 0.9) * 0.5 + 0.5
+    const params = orbParamsForState(state)
 
     // Único escritor del pulso: LetterStream lo sube al absorber una letra;
     // aquí decae exponencialmente (~0.5 s de vida).
@@ -818,18 +702,6 @@ function EnergyCore({
     const pulse = orbPulseRef.current
     errRef.current += (params.error - errRef.current) * 0.15
 
-    // El gesto visual usa el ripple de la escena.
-    // entre un seguidor rápido (sílabas) y uno lento (volumen) — en vocal
-    // sostenida vuelve a reposo en vez de quedarse arriba. Solo tamaño,
-    // sin deformación.
-    const rawLevel = levelRef?.current ?? 0
-    const pre = preRef.current
-    preRef.current = pre + (rawLevel - pre) * (rawLevel > pre ? 0.85 : 0.7)
-    const input = preRef.current
-    const fast = fastRef.current
-    fastRef.current = fast + (input - fast) * (input > fast ? 0.8 : 0.6)
-    const slow = slowRef.current
-    slowRef.current = slow + (input - slow) * (input > slow ? 0.25 : 0.15)
     // Intensidad suavizada: el estado salta (idle → responding) pero el
     // tamaño persigue su valor con un follower, así que la transición se ve
     // como un crescendo en vez de un escalón. Se suaviza la TRANSICIÓN, no
@@ -837,59 +709,41 @@ function EnergyCore({
     // viven los estados activos y los volvería indistinguibles.
     const prevIntensity = intensityRef.current
     intensityRef.current = prevIntensity + (params.intensity - prevIntensity) * Math.min(1, dt * 6)
-    const ripple = Math.max(-0.06, Math.min(0.06, (fastRef.current - slowRef.current) * 0.8))
-    const vol = Math.min(1, slowRef.current * 1.3)
-    const grow = 1 + (intensityRef.current - 0.55) * 0.12 + vol * 0.025 + pulse * 0.05
+    const grow = 1 + (intensityRef.current - 0.55) * 0.12 + pulse * 0.05
     if (wireRef.current) {
       wireRef.current.rotation.y += (0.7 + pulse * 1.5) * dt
       wireRef.current.rotation.x = 0.35 + Math.sin(t * 0.2) * 0.06
-      wireRef.current.scale.setScalar(grow * (1 + ripple * 0.5))
+      wireRef.current.scale.setScalar(grow)
     }
     if (shellRef.current) {
       shellRef.current.rotation.y -= (0.35 + pulse * 0.8) * dt
       shellRef.current.rotation.x = -0.3 + Math.cos(t * 0.16) * 0.06
-      shellRef.current.scale.setScalar(grow * (1 + ripple * 0.4))
+      shellRef.current.scale.setScalar(grow)
     }
-    // Plasma ligado a la voz: brillo casi plano en reposo, vivo al hablar.
-    const plasma = 0.94 + (0.05 + vol * 0.10) * (0.6 * Math.sin(t * 9.1) + 0.4 * Math.sin(t * 23.7 + 1.3))
+    const plasma = 0.94 + 0.05 * (0.6 * Math.sin(t * 9.1) + 0.4 * Math.sin(t * 23.7 + 1.3))
     const heat = (0.9 + params.intensity * 0.5 + pulse * 0.9) * plasma
     if (wireMatRef.current) {
       wireMatRef.current.color.copy(cyan).lerp(red, errRef.current).multiplyScalar(heat)
-      const target = (0.42 + params.intensity * 0.4 + pulse * 0.5) * (1 - 0.45 * sleepV)
+      const target = 0.42 + params.intensity * 0.4 + pulse * 0.5
       wireMatRef.current.opacity += (Math.min(1, target) - wireMatRef.current.opacity) * 0.12
     }
     if (shellMatRef.current) {
       shellMatRef.current.color.copy(cyan).lerp(red, errRef.current).multiplyScalar(heat * 0.8)
-      const target = (0.22 + params.intensity * 0.25 + pulse * 0.35) * (1 - 0.45 * sleepV)
+      const target = 0.22 + params.intensity * 0.25 + pulse * 0.35
       shellMatRef.current.opacity += (Math.min(1, target) - shellMatRef.current.opacity) * 0.12
     }
     if (coreMatRef.current) {
       coreMatRef.current.color.copy(cyan).lerp(red, errRef.current)
-      const target = (0.75 + params.speakingPulse * 0.25 + pulse * 0.5) * (1 - 0.4 * sleepV)
+      const target = 0.75 + pulse * 0.5
       coreMatRef.current.opacity += (Math.min(1, target) - coreMatRef.current.opacity) * 0.2
     }
     if (coreRef.current) {
-      const s = grow * (1 + ripple * 0.35 + pulse * 0.12)
-      coreRef.current.scale.setScalar(s)
-    }
-
-    // Boot — implosión inversa del núcleo: nace colapsado (casi punto) y
-    // «explota» hacia su tamaño con overshoot elástico. Escala el GRUPO
-    // (núcleo + anillos) para que nazcan juntos.
-    if (groupRef.current) {
-      const bootT = bootClockRef.current?.t ?? 999
-      const born = bootWindow(bootT, 0.55, 1.75)
-      // En sueño el pecho sube y baja visiblemente con la respiración.
-      const scale =
-        (0.02 + 0.98 * easeOutBack(born)) *
-        (1 - 0.08 * sleepV) *
-        (1 + breathSleep * 0.06 * sleepV)
-      groupRef.current.scale.setScalar(scale)
+      coreRef.current.scale.setScalar(grow * (1 + pulse * 0.12))
     }
   })
 
   return (
-    <group ref={groupRef}>
+    <group>
       {/* Poliedro de alambre: el centro es geometría nítida, no un blob. */}
       <mesh ref={wireRef}>
         <icosahedronGeometry args={[0.55, 2]} />
@@ -944,6 +798,9 @@ function LetterStream({
   const viewRef = useRef({ camera, size })
   const toneColorRef = useRef(ATLAS_LETTER_TONE.clone())
   const poolRef = useRef<LetterPool | null>(null)
+  // Rect de la barra de input cacheado por ráfaga: muestrear el layout por
+  // cada letra fuerza un reflow mientras React actualiza el input.
+  const barRectRef = useRef<{ rect: DOMRect | null; at: number }>({ rect: null, at: 0 })
 
   // El pool se construye en efecto y se añade al scene imperativamente:
   // nada de instancias GL creadas durante el render (regla del compilador).
@@ -1002,7 +859,14 @@ function LetterStream({
     }
 
     // Origen: barra de input en coords DOM → mundo z=0, con jitter.
-    const rect = document.querySelector(INPUT_BAR_SELECTOR)?.getBoundingClientRect()
+    const cachedRect = barRectRef.current
+    const nowMs = performance.now()
+    if (nowMs - cachedRect.at > 250) {
+      cachedRect.rect =
+        document.querySelector(INPUT_BAR_SELECTOR)?.getBoundingClientRect() ?? null
+      cachedRect.at = nowMs
+    }
+    const rect = cachedRect.rect
     const view = viewRef.current
     let px: number
     let py: number
@@ -1079,77 +943,16 @@ function LetterStream({
   return null
 }
 
-// Driver del boot: DEBE montarse primero dentro del <Canvas> para que su
-// useFrame avance el reloj antes de que las capas lo lean este frame.
-// Además dispara los hitos: pulso del núcleo al terminar la implosión.
-const BOOT_CORE_BURST_T = 1.55
-
-/** Modo dormido (#6): único escritor del factor de sueño compartido.
- *  Transición suave de ~2 s hacia el objetivo (0 despierto, 1 dormido). */
-function SleepDriver({
-  asleep,
-  sleepRef,
-}: {
-  asleep: boolean
-  sleepRef: RefObject<{ v: number }>
-}) {
-  useFrame((_, delta) => {
-    const sleep = sleepRef.current
-    if (!sleep) return
-    const target = asleep ? 1 : 0
-    if (sleep.v === target) return
-    const dt = Math.min(delta, MAX_DT)
-    sleep.v += (target - sleep.v) * Math.min(1, dt * 1.4)
-  })
-  return null
-}
-
-function BootDriver({
-  bootClockRef,
-  orbPulseRef,
-}: {
-  bootClockRef: RefObject<BootClock | null>
-  orbPulseRef: RefObject<number>
-}) {
-  const firedRef = useRef({ burst: false })
-
-  useFrame((_, delta) => {
-    const clock = bootClockRef.current
-    if (!clock || clock.t >= BOOT_TOTAL_S) return
-    clock.t = Math.min(BOOT_TOTAL_S, clock.t + Math.min(delta, MAX_DT))
-
-    const fired = firedRef.current
-    if (!fired.burst && clock.t >= BOOT_CORE_BURST_T) {
-      fired.burst = true
-      orbPulseRef.current = Math.min(1, orbPulseRef.current + 0.9)
-    }
-  })
-
-  return null
-}
-
 export function AtlasScene({
   orbState = 'idle',
   visible = true,
   portRef,
-  boot = false,
-  asleep = false,
-  levelRef,
 }: {
   orbState?: OrbState
   visible?: boolean
   portRef?: RefObject<ScenePort | null>
-  boot?: boolean
-  asleep?: boolean
-  /** Nivel de voz 0..1 (lo bombea App sin re-renders): mueve el orbe. */
-  levelRef?: RefObject<number>
 }) {
   const orbPulseRef = useRef(0)
-  // Reloj de arranque compartido por todas las capas del canvas.
-  const bootClockRef = useRef<BootClock | null>(boot ? { t: BOOT_START_S } : { t: 999 })
-  // Factor de sueño compartido (0 despierto → 1 dormido), avanzado por
-  // SleepDriver y leído por TODAS las capas para modular su comportamiento.
-  const sleepRef = useRef({ v: 0 })
   return (
     <div
       style={{
@@ -1167,13 +970,11 @@ export function AtlasScene({
         dpr={[1, 2]}
         frameloop={visible ? 'always' : 'never'}
       >
-        <SleepDriver asleep={asleep} sleepRef={sleepRef} />
-        <BootDriver bootClockRef={bootClockRef} orbPulseRef={orbPulseRef} />
-        <CyberGrid orbState={orbState} orbPulseRef={orbPulseRef} bootClockRef={bootClockRef} sleepRef={sleepRef} />
-        <CameraRig bootClockRef={bootClockRef} sleepRef={sleepRef} />
-        <StarDust orbState={orbState} bootClockRef={bootClockRef} sleepRef={sleepRef} />
-        <ShootingStars orbState={orbState} bootClockRef={bootClockRef} sleepRef={sleepRef} />
-        <EnergyCore state={orbState} orbPulseRef={orbPulseRef} bootClockRef={bootClockRef} sleepRef={sleepRef} levelRef={levelRef} />
+        <CyberGrid orbState={orbState} orbPulseRef={orbPulseRef} />
+        <CameraRig />
+        <StarDust orbState={orbState} />
+        <ShootingStars orbState={orbState} />
+        <EnergyCore state={orbState} orbPulseRef={orbPulseRef} />
         {portRef && (
           <LetterStream
             portRef={portRef}

@@ -185,14 +185,14 @@ export function sessionStateToOrbInput(
     case 'thinking':
     case 'awaiting_confirmation':
     case 'executing':
-      return { isStreaming: true, hasContent, isMuted: false, isSpeaking: false, lastError: false }
+      return { isStreaming: true, hasContent, lastError: false }
     case 'responding':
-      return { isStreaming: true, hasContent: true, isMuted: false, isSpeaking: false, lastError: false }
+      return { isStreaming: true, hasContent: true, lastError: false }
     case 'failed':
-      return { isStreaming: false, hasContent, isMuted: false, isSpeaking: false, lastError: true }
+      return { isStreaming: false, hasContent, lastError: true }
     case 'idle':
     case 'cancelled':
     case 'completed':
-      return { isStreaming: false, hasContent, isMuted: false, isSpeaking: false, lastError: false }
+      return { isStreaming: false, hasContent, lastError: false }
   }
 }
