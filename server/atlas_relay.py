@@ -125,6 +125,9 @@ COMMAND_ALIASES = {
     "/log": "log", "/registro": "log",
 }
 LOG_INTERACTIONS = 5
+# Tope del log de ejecución: al llegar a 300 líneas se descartan las más viejas.
+MAX_LOG_LINES = 300
+_LOG_LOCK = threading.Lock()
 
 # Catálogo de herramientas (ver docs/tools.md). El riesgo decide si la
 # ejecución es automática (read) o con confirmación en UI (write).
@@ -406,6 +409,28 @@ def log(message: str) -> None:
     print(f"[relay {time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
 
 
+def _trim_log(path: str) -> None:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    if len(lines) <= MAX_LOG_LINES:
+        return
+    tmp = f"{path}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.writelines(lines[-MAX_LOG_LINES:])
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def dlog(brain: "Brain", category: str, message: str, **extra) -> None:
     """Log detallado a archivo + stderr, con timestamp y categoría."""
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -413,9 +438,11 @@ def dlog(brain: "Brain", category: str, message: str, **extra) -> None:
     if extra:
         line += " " + " ".join(f"{k}={v}" for k, v in extra.items())
     try:
-        with open(brain.log_path, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-            fh.flush()
+        with _LOG_LOCK:
+            with open(brain.log_path, "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+                fh.flush()
+            _trim_log(brain.log_path)
     except OSError:
         pass
     print(f"[relay {time.strftime('%H:%M:%S')}] {category}: {message}", file=sys.stderr, flush=True)

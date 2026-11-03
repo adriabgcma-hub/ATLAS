@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-11-01
 **Estado:** aprobado por el usuario (alcance, destino, protecciones y permiso TCC)
-**Antecedente:** [control de apps (corte 1)](2026-10-31-hefesto-apps-design.md)
+**Antecedente:** control de apps (corte 1, resumido en `docs/implemented.md`)
 
 ## 1. Contexto y objetivo
 

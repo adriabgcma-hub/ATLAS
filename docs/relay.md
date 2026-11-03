@@ -57,8 +57,9 @@ corresponde es commitear en el Mac y desplegar.
   hace push, y el deploy hace pull como `atlas` vía el sudoers mínimo.
 - **Estado en disco**: `temp/atlas-relay/` (git-ignored): `sessions.json`
   (sesiones+mensajes+seq, escritura atómica), `telegram-offset.json` (offset
-  del long-poll), `relay.log` (log detallado por categorías). Se puede borrar
-  sin drama (pierdes historial), pero no lo borres «para probar».
+  del long-poll), `relay.log` (log detallado por categorías, acotado a las
+  últimas **300 líneas**: al entrar una nueva se descarta la más vieja). Se
+  puede borrar sin drama (pierdes historial), pero no lo borres «para probar».
 - **Arranque**: `load_dotenv()` lee `/opt/atlas/repo/.env` (dueño `atlas`,
   modo 600; NUNCA en Git). Reinicio: los estados de sesión no terminales
   vuelven a `idle`; eventos vivos se pierden (el seq sobrevive en disco para
@@ -100,7 +101,7 @@ responding, completed, failed, cancelled`. Terminales: `idle/completed/failed/ca
 | `GET /v1/health` | ok, telegram, llm, calendar, events, queue, inflight, bot |
 | `GET /v1/session` | sesión activa + mensajes + cursor |
 | `GET /v1/events?since=N` | feed de eventos (poll 4 s en el front) |
-| `GET /v1/logs?tail=N` | log del relay |
+| `GET /v1/logs?tail=N` | log del relay (máximo 300 líneas) |
 | `GET /v1/stats` | tokens consumidos (por modelo) |
 | `POST /v1/send /v1/cancel /v1/confirm` | ciclo de conversación |
 | `GET /v1/calendar/*` | solo lectura (iCloud CalDAV) |

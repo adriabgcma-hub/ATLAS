@@ -3,7 +3,7 @@
 **Fecha:** 2026-11-01
 **Estado:** diseño decidido por el agente bajo mandato del usuario («arranca multimedia
 y luego ventanas y todo lo que quede pendiente sin parar hasta acabar»)
-**Antecedentes:** [control de apps](2026-10-31-hefesto-apps-design.md), [teclado](2026-11-01-hefesto-teclado-design.md)
+**Antecedentes:** [teclado](2026-11-01-hefesto-teclado-design.md)
 
 ## 1. Contexto y objetivo
 
