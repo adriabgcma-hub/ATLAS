@@ -1048,7 +1048,7 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
      de permiso denegado porque el Mac aún no tiene concedido el TCC de Grabación
      de pantalla; la ruta OCR real queda pendiente de conceder ese permiso y
      reiniciar Atlas. La ventana de tablas está cubierta por pruebas de unidad y
-     build; su comprobación visual en la app queda pendiente.
+     build, y verificada visualmente en la app por el usuario (2026-11-04).
   Commit `3cfe4da`. Pruebas: `cargo test --workspace` 207 (2 ignoradas), clippy
   `--workspace --all-targets -- -D warnings` y `cargo fmt --check` limpios,
   Python 586, frontend 61, `npm run build` y `npm run lint` limpios. Relay v9

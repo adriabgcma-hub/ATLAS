@@ -134,8 +134,8 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       ofrece `Exportar CSV` a `~/Documents/Atlas/tablas/` (BOM UTF-8, CRLF,
       comillas RFC 4180, nombre saneado y escritura atómica). Límites: título
       ≤120, 1–64 columnas, ≤2000 filas, celda ≤2000 caracteres, payload ≤512 KiB.
-      Cubierto por pruebas Rust de validación/CSV y de frontend del botón; la
-      comprobación visual de la ventana en la app queda pendiente.
+      Cubierto por pruebas Rust de validación/CSV y de frontend del botón, y
+      verificado visualmente en la app por el usuario (2026-11-04).
 
 ## Hefesto — especialista del Mac (2026-10-27)
 
@@ -262,8 +262,14 @@ de prueba autorizados por el usuario (2026-10-28).
       la ruta. Probado en vivo hasta el rechazo estable por TCC pendiente; la ruta
       OCR real queda pendiente de conceder el permiso y reiniciar Atlas.
       Commit `3cfe4da`.
-- [ ] Pendiente: comprobación visual de la ventana de tablas en la app y captura
-      real con OCR tras conceder el TCC de Grabación de pantalla.
+- [x] Resolución de apps por nombre localizado (2026-11-04): el catálogo lee
+      `InfoPlist.loctable` e `InfoPlist.strings` de los idiomas del usuario y
+      guarda alias; la comparación ignora espacios, acentos y puntuación. Probado
+      en vivo: «abre buscar» y «abre find my» abren «Buscar» (`FindMy`). El
+      arranque normal del bundle también registra; el «offline» anterior era una
+      instancia vieja de `target/release` reteniendo la lease.
+- [ ] Pendiente: captura real con OCR tras conceder el TCC de Grabación de
+      pantalla.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo se inicia dentro de la
 app Tauri al abrirla, leyendo sus credenciales del entorno o de
@@ -272,9 +278,8 @@ y escritura dentro de las raíces autorizadas, el control de las apps instaladas
 el teclado sintético con consentimiento, el control multimedia por teclas de
 sistema con tarjeta, la gestión de ventanas por Accessibility, las consultas de
 sistema por adaptadores, el terminal general por argv directo con tarjeta y la
-captura de pantalla con OCR local. La ventana de tablas ya existe en la app; su
-comprobación visual y la captura real con TCC concedido quedan como verificación
-final.
+captura de pantalla con OCR local. La ventana de tablas está verificada en la app;
+la captura real con TCC concedido queda como verificación final.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

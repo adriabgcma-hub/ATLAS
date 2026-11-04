@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Resolución de apps por nombre localizado
+
+- **Commit:** `8dd5cec`
+- **Fecha:** `2026-11-04`
+- **Descripción:** Hefesto no encontraba apps cuyo nombre en el Mac está localizado: «abre buscar» o «abre find my» fallaban porque el catálogo de instaladas solo leía el `CFBundleDisplayName` base (`FindMy`) y comparaba de forma exacta. Ahora `read_app` además lee `Contents/Resources/InfoPlist.loctable` y `<idioma>.lproj/InfoPlist.strings` para los idiomas preferidos del usuario (leídos de `.GlobalPreferences.plist`, sin `defaults` ni AppKit), usa el nombre localizado como principal y guarda el base y el inglés como alias; la comparación (`norm`) ignora mayúsculas, acentos, espacios y puntuación, así «Find My», «findmy», «Buscar» y «Música»/«musica» resuelven la misma app. `find_installed`/`find_running` comparan contra nombre y alias, y el filtro de `list` también. Probado en vivo con el bundle reconstruido: «abre buscar» y «abre find my» devuelven `Abierta «Buscar»` (FindMy abierto de verdad). Pruebas nuevas en `crates/atlas-mac/src/apps.rs` (alias sin espacios/acentos, filtro por alias) y `src-tauri/src/hefesto_apps.rs` (variantes de idioma, `FindMy` expone «Buscar» en español); `cargo test --workspace` 211 (2 ignoradas), clippy y fmt limpios. El relay no cambia (sin redespliegue); bundle firmado e instalado en `/Applications/Atlas.app`.
+- **Documentación relacionada:** `docs/contracts.md` (§ Apps), `docs/implementation-plan.md`.
+
 ### Terminal general y capturas con OCR local de Hefesto (puertas 6 y 7)
 
 - **Commit:** `3cfe4da`
@@ -17,7 +24,7 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 - **Commit:** `3cfe4da`
 - **Fecha:** `2026-11-03`
-- **Descripción:** cada tabla GFM de una respuesta muestra una barra `Tabla` con `Abrir en ventana` (solo dentro de Tauri; en el navegador no existe). El DOM renderizado se extrae en `TablePayload {title, headers, rows}` y se envía por IPC: `open_table_window` valida y guarda la tabla en memoria bajo una etiqueta `table-N`, y crea con `WebviewWindowBuilder` una ventana `table.html` titulada `Atlas · Tabla` (920×640, mínimo 480×320); `table_payload` la entrega a la ventana y `export_table_csv` la escribe. Límites: título ≤120 caracteres, 1–64 columnas, ≤2000 filas, celda ≤2000 caracteres, filas del mismo ancho y payload ≤512 KiB. El CSV lleva BOM UTF-8, saltos CRLF y comillas RFC 4180 (se duplican las internas), y se publica de forma atómica (temporal + `rename`) en `~/Documents/Atlas/tablas/<título-saneado>-<epoch>.csv`; el webview nunca elige la ruta. Al destruirse la ventana se elimina su tabla; la capability cubre `main` y `table-*`, y Vite sirve `index.html` y `table.html`. Cubierto por pruebas Rust de validación, CSV, saneado y límites, y por una prueba de frontend del botón; la comprobación visual de la ventana en la app queda pendiente.
+- **Descripción:** cada tabla GFM de una respuesta muestra una barra `Tabla` con `Abrir en ventana` (solo dentro de Tauri; en el navegador no existe). El DOM renderizado se extrae en `TablePayload {title, headers, rows}` y se envía por IPC: `open_table_window` valida y guarda la tabla en memoria bajo una etiqueta `table-N`, y crea con `WebviewWindowBuilder` una ventana `table.html` titulada `Atlas · Tabla` (920×640, mínimo 480×320); `table_payload` la entrega a la ventana y `export_table_csv` la escribe. Límites: título ≤120 caracteres, 1–64 columnas, ≤2000 filas, celda ≤2000 caracteres, filas del mismo ancho y payload ≤512 KiB. El CSV lleva BOM UTF-8, saltos CRLF y comillas RFC 4180 (se duplican las internas), y se publica de forma atómica (temporal + `rename`) en `~/Documents/Atlas/tablas/<título-saneado>-<epoch>.csv`; el webview nunca elige la ruta. Al destruirse la ventana se elimina su tabla; la capability cubre `main` y `table-*`, y Vite sirve `index.html` y `table.html`. Cubierto por pruebas Rust de validación, CSV, saneado y límites, y por una prueba de frontend del botón; ventana verificada visualmente en la app por el usuario (2026-11-04).
 - **Documentación relacionada:** `docs/contracts.md` (§ Ventana de tablas), `docs/implementation-plan.md`.
 
 ### Chat: cursor de streaming junto al texto

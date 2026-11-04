@@ -367,11 +367,16 @@ genera invocación.
 La resolución del dispositivo es híbrida: `NSWorkspace.runningApplications` es la
 fuente de verdad de lo que está vivo (y localiza la app antes de `terminate()`) y un
 mapa cacheado `nombre/bundleId → URL`, rellenado de forma perezosa con un escaneo
-único de `/Applications`, `/System/Applications` y `~/Applications` leyendo
-`Info.plist`, localiza las instaladas. Sin API privada, sin rutas arbitrarias del
-modelo y sin ejecutar binarios sueltos. AppKit exige hilo principal para abrir y
-cerrar: el ejecutor reenvía la acción y espera el resultado por un canal con
-timeout, sin bloquear su hilo.
+único de `/Applications`, `/System/Applications` y `~/Applications`, localiza las
+instaladas. Para cada paquete se lee `Info.plist` y sus nombres localizados
+(`InfoPlist.loctable` y `<idioma>.lproj/InfoPlist.strings`) según los idiomas
+preferidos del usuario, de modo que «Buscar» resuelve `FindMy`. El catálogo guarda
+el nombre localizado como principal y el resto —nombre base e inglés— como alias;
+la comparación ignora mayúsculas, acentos, espacios y puntuación, así que «Find
+My», «findmy» y «Buscar» encuentran la misma app. Sin API privada, sin rutas
+arbitrarias del modelo y sin ejecutar binarios sueltos. AppKit exige hilo principal
+para abrir y cerrar: el ejecutor reenvía la acción y espera el resultado por un
+canal con timeout, sin bloquear su hilo.
 
 Salidas: `open`/`close` devuelven `{text}` con el resumen —`Abierta «Spotify»`,
 `Cerrada «Mail»`— y `list` devuelve `AppsOutput`, cortado a ≤30 entradas con las en
