@@ -86,7 +86,12 @@ SYSTEM_FIXED = (
     "tal cual, sin reinterpretarlo ni inventar motivos. "
     "Si el canal actual es Telegram, sé más breve. "
     "Tienes herramientas de calendario: úsala cuando pregunten por eventos "
-    "en vez de inventar."
+    "en vez de inventar. "
+    "Para cualquier acción que cubra una de tus herramientas (calendario o "
+    "Hefesto), llama la herramienta directamente y deja que la confirmación la "
+    "gestione el sistema con su tarjeta: no pidas permiso tú con palabras. Solo "
+    "abstente de llamar —y dilo— si lo pedido es extremadamente peligroso e "
+    "irreversible y ninguna herramienta lo cubre."
 )
 
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
