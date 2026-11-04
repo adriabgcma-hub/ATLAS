@@ -590,7 +590,8 @@ ejecuta `/usr/sbin/screencapture -x -t png <ruta>` con entorno limpio, `stdin`
 nulo, directorio `/`, grupo propio y timeout de 10 s con `SIGKILL` al grupo; el
 PNG queda en `~/Documents/Atlas/capturas/captura-AAAAMMDD-HHMMSS.png` (UTC). El
 texto se reconoce en local con Apple Vision (`VNRecognizeTextRequest`, nivel
-`Accurate`, idiomas `es-ES` y `en-US`) con un timeout de 10 s; ningún dato sale
+`Accurate`, idiomas `es-ES` y `en-US`) con un timeout de 30 s (Vision tarda en
+calentar la primera vez); ningún dato sale
 del Mac salvo el texto reconocido. La salida es
 `Captura guardada: <nombre>\nTexto reconocido:\n<texto>` o
 `Captura guardada: <nombre>\nno se reconoció texto`; solo se devuelve el nombre

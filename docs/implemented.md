@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Captura: timeout de OCR ampliado
+
+- **Commit:** `864d7e5`
+- **Fecha:** `2026-11-04`
+- **Descripción:** la primera captura tras abrir Atlas fallaba con «no se pudo capturar la pantalla: el reconocimiento de texto no respondió a tiempo» porque Vision tarda en calentar la primera vez. El `OCR_TIMEOUT` pasa de 10 s a 30 s (`src-tauri/src/hefesto_capture.rs`); el timeout del `screencapture` sigue en 10 s. Verificado en vivo con el bundle reconstruido: la captura guarda el PNG en `~/Documents/Atlas/capturas/` y devuelve el texto reconocido de la pantalla. Forma parte de la tanda de pruebas exhaustivas de herramientas del 2026-11-04 (ver `docs/testing-plan.md`): las suites quedaron en Rust 211 (2 ignoradas), Python 586 y frontend 61, clippy/fmt/lint/build limpios.
+- **Documentación relacionada:** `docs/contracts.md` (§ Capturas), `docs/testing-plan.md`.
+
 ### Resolución de apps por nombre localizado
 
 - **Commit:** `8dd5cec`
