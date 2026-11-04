@@ -7,6 +7,8 @@ pub struct AppRef {
     pub name: String,
     pub bundle_id: String,
     pub url: String,
+    /// Nombres alternativos (localizados o sin espacios) para resolver la app.
+    pub aliases: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,8 +28,35 @@ pub trait AppBridge: Send + Sync {
     fn terminate(&self, target: &AppRef) -> Result<CloseOutcome, String>;
 }
 
+/// Clave de comparación laxa: minúsculas, sin sufijo `.app`, sin acentos y
+/// sin espacios ni puntuación. Así «Find My», «findmy» y «FindMy» coinciden,
+/// y «Música» coincide con «musica».
 fn norm(value: &str) -> String {
-    value.trim().trim_end_matches(".app").to_lowercase()
+    value
+        .trim()
+        .trim_end_matches(".app")
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter_map(|c| match c {
+            'á' | 'à' | 'ä' | 'â' | 'ã' => Some('a'),
+            'é' | 'è' | 'ë' | 'ê' => Some('e'),
+            'í' | 'ì' | 'ï' | 'î' => Some('i'),
+            'ó' | 'ò' | 'ö' | 'ô' | 'õ' => Some('o'),
+            'ú' | 'ù' | 'ü' | 'û' => Some('u'),
+            'ñ' => Some('n'),
+            'ç' => Some('c'),
+            c if c.is_alphanumeric() => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+fn matches_name(app: &AppRef, needle: &str) -> bool {
+    norm(&app.name) == needle || app.aliases.iter().any(|alias| norm(alias) == needle)
+}
+
+fn contains_name(app: &AppRef, needle: &str) -> bool {
+    norm(&app.name).contains(needle) || app.aliases.iter().any(|alias| norm(alias).contains(needle))
 }
 
 pub fn find_installed<'a>(
@@ -40,8 +69,8 @@ pub fn find_installed<'a>(
             return Some(hit);
         }
     }
-    let name = name.map(norm);
-    catalog.iter().find(|app| Some(norm(&app.name)) == name)
+    let name = name.map(norm)?;
+    catalog.iter().find(|app| matches_name(app, &name))
 }
 
 pub fn build_list(running: &[AppRef], installed: &[AppRef], query: Option<&str>) -> Vec<AppRecord> {
@@ -49,10 +78,7 @@ pub fn build_list(running: &[AppRef], installed: &[AppRef], query: Option<&str>)
     let mut seen: Vec<String> = Vec::new();
     let mut out: Vec<AppRecord> = Vec::new();
     for app in running {
-        if needle
-            .as_ref()
-            .is_some_and(|q| !norm(&app.name).contains(q))
-        {
+        if needle.as_ref().is_some_and(|q| !contains_name(app, q)) {
             continue;
         }
         seen.push(app.bundle_id.clone());
@@ -66,10 +92,7 @@ pub fn build_list(running: &[AppRef], installed: &[AppRef], query: Option<&str>)
         if seen.contains(&app.bundle_id) {
             continue;
         }
-        if needle
-            .as_ref()
-            .is_some_and(|q| !norm(&app.name).contains(q))
-        {
+        if needle.as_ref().is_some_and(|q| !contains_name(app, q)) {
             continue;
         }
         out.push(AppRecord {
@@ -171,6 +194,14 @@ mod tests {
             name: name.into(),
             bundle_id: id.into(),
             url: format!("file:///Applications/{name}.app"),
+            aliases: Vec::new(),
+        }
+    }
+
+    fn app_with_aliases(name: &str, id: &str, aliases: &[&str]) -> AppRef {
+        AppRef {
+            aliases: aliases.iter().map(|value| (*value).to_owned()).collect(),
+            ..app(name, id)
         }
     }
 
@@ -185,6 +216,35 @@ mod tests {
     fn resuelve_por_bundle_id_directo() {
         let catalog = vec![app("Mail", "com.apple.mail")];
         assert!(find_installed(&catalog, None, Some("com.apple.mail")).is_some());
+    }
+
+    #[test]
+    fn resuelve_alias_localizado_sin_espacios_ni_acentos() {
+        let catalog = vec![app_with_aliases(
+            "Buscar",
+            "com.apple.findmy",
+            &["FindMy", "Find My"],
+        )];
+        for name in ["buscar", "Find My", "findmy", "  BUSCAR.app "] {
+            let hit = find_installed(&catalog, Some(name), None)
+                .unwrap_or_else(|| panic!("no resolvió {name}"));
+            assert_eq!(hit.bundle_id, "com.apple.findmy");
+        }
+        let music = vec![app_with_aliases("Música", "com.apple.Music", &["Music"])];
+        assert!(find_installed(&music, Some("musica"), None).is_some());
+    }
+
+    #[test]
+    fn lista_filtra_por_alias() {
+        let installed = vec![app_with_aliases(
+            "Buscar",
+            "com.apple.findmy",
+            &["FindMy", "Find My"],
+        )];
+        let list = build_list(&[], &installed, Some("find my"));
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].bundle_id, "com.apple.findmy");
+        assert_eq!(list[0].name, "Buscar");
     }
 
     #[test]

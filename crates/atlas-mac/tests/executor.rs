@@ -875,6 +875,7 @@ impl atlas_mac::AppBridge for FakeBridge {
             name: "Spotify".into(),
             bundle_id: "com.spotify.client".into(),
             url: "file:///Applications/Spotify.app".into(),
+            aliases: Vec::new(),
         }]
     }
     fn installed(&self) -> Vec<atlas_mac::AppRef> {

@@ -39,15 +39,129 @@ fn app_dirs() -> Vec<PathBuf> {
     ]
 }
 
+/// Idiomas preferidos del usuario, leídos de sus preferencias globales sin
+/// invocar `defaults` ni depender de AppKit.
+fn preferred_languages() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return vec!["en".to_owned()];
+    };
+    let path = PathBuf::from(home).join("Library/Preferences/.GlobalPreferences.plist");
+    let languages = plist::Value::from_file(path)
+        .ok()
+        .and_then(|value| {
+            value
+                .as_dictionary()?
+                .get("AppleLanguages")?
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_string().map(str::to_owned))
+                        .take(3)
+                        .collect::<Vec<_>>()
+                })
+        })
+        .unwrap_or_default();
+    if languages.is_empty() {
+        vec!["en".to_owned()]
+    } else {
+        languages
+    }
+}
+
+/// Variantes de cada idioma: `es-AD` → `es-ad` y `es`; siempre añade `en`
+/// como alias para que «Find My» funcione aunque la interfaz esté en español.
+fn language_variants(languages: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for language in languages {
+        let lower = language.to_lowercase().replace('_', "-");
+        let base = lower.split('-').next().unwrap_or_default().to_owned();
+        for variant in [lower, base] {
+            if !variant.is_empty() && !out.contains(&variant) {
+                out.push(variant);
+            }
+        }
+    }
+    if !out.iter().any(|variant| variant == "en") {
+        out.push("en".to_owned());
+    }
+    out
+}
+
+fn localized_from_loctable(resources: &Path, variants: &[String]) -> Vec<String> {
+    let Ok(value) = plist::Value::from_file(resources.join("InfoPlist.loctable")) else {
+        return Vec::new();
+    };
+    let Some(table) = value.as_dictionary() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for variant in variants {
+        let Some(entry) = table
+            .iter()
+            .find(|(key, _)| key.to_lowercase() == *variant)
+            .map(|(_, value)| value)
+            .and_then(plist::Value::as_dictionary)
+        else {
+            continue;
+        };
+        for key in ["CFBundleDisplayName", "CFBundleName"] {
+            if let Some(name) = entry.get(key).and_then(plist::Value::as_string) {
+                let name = name.trim();
+                if !name.is_empty() && !out.iter().any(|seen| seen == name) {
+                    out.push(name.to_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn localized_from_lproj(resources: &Path, variants: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for variant in variants {
+        let path = resources.join(format!("{variant}.lproj/InfoPlist.strings"));
+        let Ok(value) = plist::Value::from_file(path) else {
+            continue;
+        };
+        let Some(table) = value.as_dictionary() else {
+            continue;
+        };
+        for key in ["CFBundleDisplayName", "CFBundleName"] {
+            if let Some(name) = table.get(key).and_then(plist::Value::as_string) {
+                let name = name.trim();
+                if !name.is_empty() && !out.iter().any(|seen| seen == name) {
+                    out.push(name.to_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Nombres localizados del paquete para los idiomas del usuario y el inglés.
+fn localized_names(path: &Path) -> Vec<String> {
+    let resources = path.join("Contents").join("Resources");
+    let variants = language_variants(&preferred_languages());
+    let mut names = localized_from_loctable(&resources, &variants);
+    for name in localized_from_lproj(&resources, &variants) {
+        if !names.iter().any(|seen| seen == &name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
 /// Lee un paquete `.app` y extrae identificador y nombre del `Info.plist`.
-/// Necesita `CFBundleIdentifier`; el nombre prioriza `CFBundleDisplayName`,
-/// luego `CFBundleName` y finalmente el tallo del fichero.
+/// Necesita `CFBundleIdentifier`; el nombre prioriza el localizado para el
+/// idioma del usuario y, si no hay, `CFBundleDisplayName`, `CFBundleName` o el
+/// tallo del fichero. El resto de nombres quedan como alias de búsqueda.
 fn read_app(path: &Path) -> Option<AppRef> {
     let plist = path.join("Contents").join("Info.plist");
     let value = plist::Value::from_file(&plist).ok()?;
     let map = value.as_dictionary()?;
     let bundle_id = map.get("CFBundleIdentifier")?.as_string()?.to_string();
-    let name = map
+    let base = map
         .get("CFBundleDisplayName")
         .and_then(|v| v.as_string())
         .or_else(|| map.get("CFBundleName").and_then(|v| v.as_string()))
@@ -57,10 +171,20 @@ fn read_app(path: &Path) -> Option<AppRef> {
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default()
         });
+    let mut names = localized_names(path);
+    let name = if let Some(first) = names.first() {
+        first.clone()
+    } else {
+        base.clone()
+    };
+    let mut aliases = names.drain(..).skip(1).collect::<Vec<_>>();
+    aliases.push(base);
+    aliases.retain(|alias| !alias.eq_ignore_ascii_case(&name));
     Some(AppRef {
         name,
         bundle_id,
         url: path.to_string_lossy().into_owned(),
+        aliases,
     })
 }
 
@@ -109,6 +233,7 @@ fn collect_running() -> Vec<AppRef> {
                 name,
                 bundle_id,
                 url,
+                aliases: Vec::new(),
             })
         })
         .collect()
@@ -270,6 +395,35 @@ impl AppBridge for WorkspaceApps {
             if Instant::now() >= deadline {
                 return Ok(CloseOutcome::StillPresent);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn los_idiomas_incluyen_la_variante_base_y_el_ingles() {
+        let variants = language_variants(&["es-AD".to_owned(), "en-US".to_owned()]);
+        assert_eq!(variants, vec!["es-ad", "es", "en-us", "en"]);
+    }
+
+    #[test]
+    fn findmy_expone_su_nombre_localizado() {
+        let Some(app) = read_app(Path::new("/System/Applications/FindMy.app")) else {
+            return;
+        };
+        if preferred_languages()
+            .iter()
+            .any(|language| language.to_lowercase().starts_with("es"))
+        {
+            assert!(
+                app.name == "Buscar" || app.aliases.iter().any(|alias| alias == "Buscar"),
+                "nombre={} alias={:?}",
+                app.name,
+                app.aliases
+            );
         }
     }
 }
