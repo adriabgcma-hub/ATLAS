@@ -23,7 +23,9 @@ use objc2_vision::{
 use tauri::AppHandle;
 
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
-const OCR_TIMEOUT: Duration = Duration::from_secs(10);
+/// Vision tarda en calentar la primera vez (carga de modelos): 30 s evita que
+/// la primera captura tras abrir la app falle con «no respondió a tiempo».
+const OCR_TIMEOUT: Duration = Duration::from_secs(30);
 const SIGKILL: i32 = 9;
 const PRIVATE_DENIED: &str =
     "falta el permiso de Grabación de pantalla; actívalo en Ajustes del Sistema › Privacidad y seguridad › Grabación de pantalla y reinicia Atlas";
