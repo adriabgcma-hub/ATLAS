@@ -268,6 +268,12 @@ de prueba autorizados por el usuario (2026-10-28).
       en vivo: «abre buscar» y «abre find my» abren «Buscar» (`FindMy`). El
       arranque normal del bundle también registra; el «offline» anterior era una
       instancia vieja de `target/release` reteniendo la lease.
+- [x] Fechas de agenda con zona y día semanal (2026-11-06): `calendar_read`
+      conserva TZID/`VALUE=DATE`, resuelve a `RELAY_TIMEZONE`, calcula la semana
+      siguiente (lunes→lunes) en el servidor y formatea con día de la semana
+      (`lunes 9 nov 10:30` / `jueves 12 nov (todo el día)`); añade
+      `period: "next_week"`. 10 pruebas offline (regresión 2026-11-06, semana
+      correcta 9–15); Python 596. Commit `71b8d18`, relay desplegado.
 - [ ] Pendiente: captura real con OCR tras conceder el TCC de Grabación de
       pantalla.
 

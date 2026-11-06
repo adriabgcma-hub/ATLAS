@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Fechas de agenda con zona, día semanal y next_week en servidor
+
+- **Commit:** `71b8d18`
+- **Fecha:** `2026-11-06`
+- **Descripción:** el incidente del 2026-11-06: al preguntar «qué tenía la semana que viene», el modelo confundía eventos y fechas porque `calendar_read` devolvía el instante ISO crudo (`20261109T103000`) sin zona ni día de la semana, y tenía que deducir la semana él mismo. Ahora `parse_vevent` conserva los parámetros RFC 5545 (`TZID`, `VALUE=DATE`) de `DTSTART`/`DTEND`; `resolve_datetime` interpreta hora local flotante, TZID y UTC (sufijo `Z`) y devuelve un `datetime` aware en `RELAY_TIMEZONE` (o un `date` para todo-el-día); `week_bounds` calcula en el servidor el lunes→lunes de la semana siguiente; `events_within` filtra por ese rango resolviendo cada inicio; y `format_event_label` produce `lunes 9 nov 10:30` o `jueves 12 nov (todo el día)`. `calendar_read` acepta `period: "next_week"` y toda la salida lleva día semanal + hora en la zona del contexto. Sin cambios en escrituras ni expansión de recurrencias. Pruebas offline nuevas en `server/test_calendar.py` (10, incluidas la regresión del 6→9–15 y la conversión UTC→local); suite Python 596. Relay desplegado y sano.
+- **Documentación relacionada:** `docs/tools.md` (§ calendar_read), `docs/implementation-plan.md`.
+
 ### Captura: timeout de OCR ampliado
 
 - **Commit:** `864d7e5`
