@@ -57,7 +57,7 @@ import urllib.request
 import zoneinfo
 from collections import deque
 from contextlib import ExitStack, contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NoReturn
 
@@ -97,6 +97,8 @@ SYSTEM_FIXED = (
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 _MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
           "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+_MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul",
+                 "ago", "sep", "oct", "nov", "dic"]
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 GROQ_API = "https://api.groq.com/openai/v1/chat/completions"
 TELEGRAM_API = "https://api.telegram.org"
@@ -147,6 +149,7 @@ TOOL_DEFS = [
             "properties": {
                 "days": {"type": "integer", "description": "días hacia adelante (1..31)"},
                 "calendar": {"type": "string", "description": "nombre del calendario (opcional)"},
+                "period": {"type": "string", "description": "'next_week' para la semana que viene (lunes a lunes)"},
             },
         },
     },
@@ -471,6 +474,47 @@ _KEYBOARD_COMBO_RE = re.compile(
 
 def norm_name(name: str) -> str:
     return name.strip().casefold()
+
+
+def week_bounds(now: datetime):
+    """Lunes 00:00 de la semana siguiente a `now` y el lunes de la siguiente."""
+    start = now + timedelta(days=7 - now.weekday())
+    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=7)
+
+
+def events_within(events: list[dict], start: datetime, end: datetime,
+                  timezone: str) -> list[dict]:
+    """Eventos cuyo inicio resuelto cae en [start, end) (aware datetimes)."""
+    out = []
+    for event in events:
+        value = event.get("start", "")
+        if not value:
+            continue
+        try:
+            moment, all_day = atlas_caldav.resolve_datetime(
+                value, event.get("start_params", ""), timezone)
+        except (ValueError, KeyError):
+            continue
+        if all_day:
+            point = datetime(moment.year, moment.month, moment.day,
+                             tzinfo=zoneinfo.ZoneInfo(timezone))
+        else:
+            point = moment
+        if start <= point < end:
+            out.append(event)
+    out.sort(key=lambda e: e.get("start") or "")
+    return out
+
+
+def format_event_label(event: dict, timezone: str) -> str:
+    """Etiqueta compacta con día de la semana, fecha y hora en `timezone`."""
+    moment, all_day = atlas_caldav.resolve_datetime(
+        event.get("start", ""), event.get("start_params", ""), timezone)
+    base = f"{_DIAS[moment.weekday()]} {moment.day} {_MESES_CORTOS[moment.month - 1]}"
+    if all_day:
+        return f"{base} (todo el día)"
+    return f"{base} {moment.strftime('%H:%M')}"
 
 
 def counted_steps(count) -> bool:
@@ -1187,12 +1231,17 @@ class Brain:
         if tool_id == "hefesto_capture":
             return self._capture(job, args)
         if tool_id == "calendar_read":
+            tz_name = self.cfg["timezone"]
+            period = str(args.get("period", "")).strip().lower()
             try:
-                days = max(1, min(int(args.get("days", 7)), 31))
-            except (ValueError, TypeError):
-                days = 7
-            try:
-                events = self.calendar_upcoming(days)
+                if period == "next_week":
+                    now = datetime.now(zoneinfo.ZoneInfo(tz_name))
+                    start, end = week_bounds(now)
+                    events = self.calendar_upcoming(31)
+                    events = events_within(events, start, end, tz_name)
+                else:
+                    days = max(1, min(int(args.get("days", 7)), 31))
+                    events = self.calendar_upcoming(days)
             except atlas_caldav.CalDAVError as exc:
                 return f"calendario no disponible ({exc})"
             wanted = args.get("calendar")
@@ -1201,8 +1250,14 @@ class Brain:
                           if norm_name(e.get("calendar", "")) == norm_name(str(wanted))]
             if not events:
                 return "sin eventos en ese rango"
-            lines = [f"{e['start'][:16]} {e['summary'][:80]} [{e['calendar']}] "
-                     f"(uid {e['uid']})" for e in events[:20]]
+            lines = []
+            for e in events[:20]:
+                try:
+                    label = format_event_label(e, tz_name)
+                except (ValueError, KeyError):
+                    label = e.get("start", "")[:16]
+                lines.append(f"{label} {e['summary'][:80]} [{e['calendar']}] "
+                             f"(uid {e['uid']})")
             return "Eventos:\n" + "\n".join(lines)
         if tool_id == "calendar_write":
             return self._execute_write(args)

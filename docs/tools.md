@@ -9,10 +9,17 @@ en 5 minutos).
 ## calendar_read · v1
 
 - **Riesgo:** `read` — ejecución automática, sin confirmación.
-- **Entrada:** `{days?: 1..31 (defecto 7), calendar?: nombre (opcional)}`.
-- **Salida:** texto compacto (una línea por evento con uid corto) o
-  `sin eventos en ese rango` / `calendario no disponible (…)`.
-- **Notas:** lee todos los calendarios iCloud visibles.
+- **Entrada:** `{days?: 1..31 (defecto 7), calendar?: nombre (opcional),
+  period?: 'next_week'}`. Con `period: 'next_week'` el rango es la semana que
+  viene (lunes a lunes) calculado en el servidor en `RELAY_TIMEZONE`; `days` se
+  ignora en ese caso.
+- **Salida:** una línea por evento con día de la semana, fecha, hora en
+  `RELAY_TIMEZONE` y uid corto (ej. `lunes 9 nov 10:30 …` o
+  `jueves 12 nov (todo el día) …`), o `sin eventos en ese rango` /
+  `calendario no disponible (…)`.
+- **Notas:** lee todos los calendarios iCloud visibles. Los eventos conservan
+  su zona (TZID) o marca de todo el día; el relé convierte a la zona del
+  contexto y el modelo no tiene que deducir el día de la semana.
 
 ## calendar_write · v1
 

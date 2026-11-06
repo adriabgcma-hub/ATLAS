@@ -13,6 +13,7 @@ import base64
 import datetime
 import time
 import urllib.error
+import zoneinfo
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 import xml.etree.ElementTree as ET
@@ -398,6 +399,7 @@ def split_vevents(ical: str) -> list[str]:
 
 def parse_vevent(block: str) -> dict | None:
     fields: dict[str, str] = {}
+    params: dict[str, str] = {}
     for line in block.split("\n"):
         if ":" not in line:
             continue
@@ -405,16 +407,44 @@ def parse_vevent(block: str) -> dict | None:
         key = name.split(";")[0]
         if key in ("UID", "SUMMARY", "DTSTART", "DTEND", "STATUS", "LOCATION"):
             fields[key.lower()] = value.strip()
+            params[key.lower()] = name[len(key):]
     if "uid" not in fields:
         return None
     return {
         "uid": fields.get("uid", ""),
         "summary": fields.get("summary", "(sin título)"),
         "start": fields.get("dtstart", ""),
+        "start_params": params.get("dtstart", ""),
         "end": fields.get("dtend", ""),
+        "end_params": params.get("dtend", ""),
         "status": fields.get("status", ""),
         "location": fields.get("location", ""),
     }
+
+
+def resolve_datetime(value: str, params: str, target_tz: str):
+    """Interpreta un valor DTSTART/DTEND con sus parámetros RFC 5545.
+
+    Devuelve (momento, todo_el_día): un `datetime` aware en `target_tz`, o un
+    `date` si el evento es de todo el día (VALUE=DATE). Acepta hora local
+    flotante, con TZID o en UTC (sufijo Z).
+    """
+    if "VALUE=DATE" in params:
+        return (datetime.date(int(value[0:4]), int(value[4:6]),
+                              int(value[6:8])), True)
+    is_utc = value.endswith("Z")
+    raw = value[:15]
+    if len(raw) == 13:
+        raw += "00"
+    moment = datetime.datetime.strptime(raw, "%Y%m%dT%H%M%S")
+    if "TZID=" in params:
+        tz = zoneinfo.ZoneInfo(params.split("TZID=", 1)[1].split(";", 1)[0])
+        moment = moment.replace(tzinfo=tz)
+    elif is_utc:
+        moment = moment.replace(tzinfo=datetime.timezone.utc)
+    else:
+        moment = moment.replace(tzinfo=zoneinfo.ZoneInfo(target_tz))
+    return moment.astimezone(zoneinfo.ZoneInfo(target_tz)), False
 
 
 def _escape(text: str) -> str:
