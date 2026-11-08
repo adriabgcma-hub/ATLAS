@@ -130,6 +130,7 @@ COMMAND_ALIASES = {
     "/clear": "clear", "/limpiar": "clear",
     "/help": "help", "/ayuda": "help",
     "/log": "log", "/registro": "log",
+    "/cancel": "cancel", "/cancela": "cancel",
 }
 LOG_INTERACTIONS = 5
 # Tope del log de ejecución: al llegar a 300 líneas se descartan las más viejas.
@@ -988,6 +989,7 @@ class Brain:
             "/clear  (/limpiar)  · reinicia la conversación.",
             "/help   (/ayuda)    · esta ayuda.",
             "/log    (/registro) · últimas 5 interacciones y consumo de tokens.",
+            "/cancel (/cancela)  · cancela la petición en curso.",
             "Los comandos responden al instante y no consumen tokens.",
             "",
             "Permisos",
@@ -1048,6 +1050,8 @@ class Brain:
         command_text = text.strip()
         command = COMMAND_ALIASES.get(command_text.split(maxsplit=1)[0].casefold())
         dlog(self, "LOCAL_REPLY", f"command={command_text} source={source}")
+        # cancel_all() toma el lock por su cuenta: se ejecuta antes de este.
+        cancelled = self.cancel_all() if command == "cancel" else None
         with self.lock:
             if command == "clear":
                 # Sesión nueva y vacía: contexto realmente limpio.
@@ -1058,6 +1062,9 @@ class Brain:
             request_id = new_id("req")
             if command == "clear":
                 content = "Historial reiniciado. ¿En qué le puedo ayudar?"
+            elif command == "cancel":
+                content = ("Cancelada la petición en curso."
+                           if cancelled else "No hay nada en curso.")
             elif command == "log":
                 content = self._log_text()
             else:  # /help y comandos desconocidos

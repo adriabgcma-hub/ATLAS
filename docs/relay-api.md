@@ -165,6 +165,7 @@ y la ayuda.
 | `/clear` | `/limpiar` | Reinicia la conversación (sesión nueva y vacía). |
 | `/help` | `/ayuda` | Lista de comandos y flujo de permisos. |
 | `/log` | `/registro` | Últimas 5 interacciones y consumo de tokens. |
+| `/cancel` | `/cancela` | Cancela la petición en curso («Cancelada la petición en curso.» o «No hay nada en curso.»). |
 
 `/log` ordena las interacciones de la más reciente a la más antigua. Por cada
 una muestra `requestId`, canal, hora local, mensaje del usuario, tokens

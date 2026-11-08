@@ -88,6 +88,9 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       desconocidos responden localmente y el chat respeta los saltos de línea.
       La entrega de eventos a la app se arregló en `93716eb` (canales Tauri
       con guiones e IPC asíncrono).
+- [x] Comando `/cancel` (`/cancela`) como comando local (2026-11-06): cancela
+      la petición en vuelo vía `cancel_all()` y responde al instante sin gastar
+      Groq; cubierto por 2 pruebas en `test_hefesto_integration.py`.
 - [ ] Re-verificar lectura/borrado del evento de prueba al despejar throttle.
 - [x] Commit publicado: `Fase 4: tools de calendario` (`a191559`).
 

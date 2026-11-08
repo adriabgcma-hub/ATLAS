@@ -263,6 +263,24 @@ class AtlasRegressionTests(unittest.TestCase):
         self.assertNotEqual(before["sessionId"], after["sessionId"])
         self.assertEqual(len(self.brain.get_snapshot()["messages"]), 1)
 
+    def test_cancel_command_cancels_inflight(self):
+        ids = self.brain.receive("test cancel command", "local")
+        self.assertIn(ids["requestId"], self.brain.inflight)
+        reply_ids = self.brain.receive("/cancel", "local")
+        snapshot = self.brain.get_snapshot()
+        reply = snapshot["messages"][-1]
+        self.assertEqual(reply["requestId"], reply_ids["requestId"])
+        self.assertIn("Cancelada", reply["content"])
+        self.assertIn(ids["requestId"], self.brain.cancelled)
+        self.assertEqual(snapshot["state"], "completed")
+        self.assertEqual(self.brain.token_usage["calls"], 0)
+
+    def test_cancel_command_with_nothing_inflight(self):
+        reply_ids = self.brain.receive("/cancel", "local")
+        reply = self.brain.get_snapshot()["messages"][-1]
+        self.assertEqual(reply["requestId"], reply_ids["requestId"])
+        self.assertIn("nada en curso", reply["content"])
+
     def test_cancel_denies_pending_confirmation(self):
         ids = self.brain.receive("test cancellation", "local")
         event = threading.Event()
