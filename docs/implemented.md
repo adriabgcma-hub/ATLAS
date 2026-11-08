@@ -6,6 +6,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Comando `/cancel` como comando local
+
+- **Commit:** `ee71d55`
+- **Fecha:** `2026-11-06`
+- **Descripción:** `/cancel` (`/cancela`) pasa de «comando no reconocido» a comando local real: llama a `cancel_all()` (marca canceladas la petición activa y las encoladas y deniega confirmaciones en espera) y responde al instante sin gastar Groq — «Cancelada la petición en curso.» o «No hay nada en curso.». Como `cancel_all()` toma el lock por su cuenta, se ejecuta antes del bloque bloqueado de `_local_reply`. La ayuda (`/help`), `docs/relay-api.md` y el plan de implementación lo documentan. 2 pruebas nuevas en `test_hefesto_integration.py` (cancelación con petición en vuelo y sin nada en curso); suite Python 598. Verificado en vivo: una pregunta larga cancelada a los pocos milisegundos quedó sin respuesta y el comando devolvió la confirmación. Relay desplegado y sano.
+- **Documentación relacionada:** `docs/relay-api.md` (§ Comandos de chat), `docs/implementation-plan.md`.
+
 ### Fechas de agenda con zona, día semanal y next_week en servidor
 
 - **Commit:** `71b8d18`
