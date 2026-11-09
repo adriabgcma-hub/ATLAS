@@ -170,7 +170,7 @@ class JournalTests(JournalFixture, unittest.TestCase):
         first = self.ok("register", instanceId="instance-1")
         self.clock.advance(14)
         self.assertEqual(self.ok("register", instanceId="instance-1"), first)
-        self.clock.advance(1)
+        self.clock.advance(hefesto.SWEEP_MIN_INTERVAL_S)
         self.error("instance_invalidated", "register", instanceId="instance-1")
         state = self.ok("status")
         self.assertEqual(state["generation"], 2)
@@ -192,7 +192,7 @@ class JournalTests(JournalFixture, unittest.TestCase):
         self.assertEqual(state["generation"], 2)
         self.clock.advance(14)
         self.assertTrue(self.ok("status")["online"])
-        self.clock.advance(1)
+        self.clock.advance(hefesto.SWEEP_MIN_INTERVAL_S)
         self.assertFalse(self.ok("status")["online"])
         self.assertEqual(self.ok("status")["generation"], 3)
 
@@ -382,6 +382,7 @@ class JournalTests(JournalFixture, unittest.TestCase):
         self.send()
         invocation = self.next()
         self.clock.wall += 15
+        self.clock.mono += hefesto.SWEEP_MIN_INTERVAL_S
         self.error("invocation_not_dispatched", "result", **self.result_fields(invocation))
         self.assertEqual(self.send()["state"], "unknown")
         self.assertTrue(self.ok("status")["online"])
@@ -389,17 +390,29 @@ class JournalTests(JournalFixture, unittest.TestCase):
         self.assertEqual(self.send()["state"], "unknown")
         self.assertIsNone(self.next())
 
+    def test_el_barrido_se_retrasa_hasta_la_siguiente_ventana(self):
+        self.ready()                                        # t=100: primer barrido
+        self.send()                                         # t=100: pendiente, vence en t+15
+        self.clock.advance(hefesto.INVOCATION_SECONDS - 2)  # t=113: barrido #2 (13>=5)
+        self.ok("heartbeat", instanceId="instance-1")       # renueva la lease hasta t=128
+        self.clock.advance(2)                               # t=115: el plazo ya venció
+        self.assertIsNotNone(self.next())                   # puerta cerrada (2<5): sigue pendiente
+        self.clock.advance(5)                               # t=120: ventana abierta
+        self.ok("status")                                   # barrido #3: dispatched vencida
+        self.assertIsNone(self.next())                      # -> unknown, no se entrega
+
     def test_pending_wall_expiry_and_dispatched_monotonic_expiry(self):
         self.ready()
         self.send()
         self.clock.wall += 15
+        self.clock.mono += hefesto.SWEEP_MIN_INTERVAL_S
         self.assertEqual(self.send()["state"], "expired")
         self.send("second")
         invocation = self.next()
-        self.clock.advance(10)
+        self.clock.advance(5)
         self.ok("heartbeat", instanceId="instance-1")
         self.clock.wall -= 5000
-        self.clock.mono += 5
+        self.clock.mono += 10
         self.error("invocation_not_dispatched", "result", **self.result_fields(invocation))
         self.assertEqual(self.send("second")["state"], "unknown")
 
@@ -1308,7 +1321,7 @@ class SystemJournalTests(JournalFixture, unittest.TestCase):
 TERMINAL = {"submissionId": "submission-terminal", "requestId": "request-1",
             "sessionId": "session-1", "taskId": "task-terminal",
             "toolId": "hefesto.terminal",
-            "arguments": {"program": "/bin/ls", "args": ["-la", "/tmp"]}}
+            "arguments": {"program": "/bin/echo", "args": ["hola"]}}
 CAPTURE = {"submissionId": "submission-capture", "requestId": "request-1",
            "sessionId": "session-1", "taskId": "task-capture",
            "toolId": "hefesto.capture", "arguments": {"target": "screen"}}
@@ -1340,17 +1353,47 @@ class TerminalJournalTests(JournalFixture, unittest.TestCase):
             {"program": "ls", "args": []},
             {"program": "/etc/passwd", "args": []},
             {"program": "/bin/sh", "args": ["-c", "id"]},
-            {"program": "/bin/../bin/ls", "args": []},
-            {"program": "/bin/ls", "args": ["x" * 1025]},
-            {"program": "/bin/ls", "args": ["x"] * 33},
-            {"program": "/bin/ls", "args": ["ok", 1]},
-            {"program": "/bin/ls", "args": [], "cwd": "/"},
-            {"program": "/bin/ls"},
+            {"program": "/bin/../bin/echo", "args": []},
+            {"program": "/bin/echo", "args": ["x" * 1025]},
+            {"program": "/bin/echo", "args": ["x"] * 33},
+            {"program": "/bin/echo", "args": ["ok", 1]},
+            {"program": "/bin/echo", "args": [], "cwd": "/"},
+            {"program": "/bin/echo"},
         )
         for arguments in cases:
             with self.subTest(arguments=arguments):
                 self.error("bad_argument", "submit", peer=CONTROLLER,
                            **{**TERMINAL, "arguments": arguments})
+
+    def test_terminal_rechaza_interpretes_lectores_y_red(self):
+        self.ready()
+        programs = ("/usr/bin/python3", "/usr/bin/python3.13", "/usr/bin/osascript",
+                    "/usr/bin/swift", "/usr/bin/node", "/usr/bin/ruby", "/usr/bin/perl",
+                    "/usr/bin/awk", "/usr/bin/sed", "/bin/cat", "/usr/bin/head",
+                    "/usr/bin/tail", "/usr/bin/grep", "/usr/bin/find", "/bin/ls",
+                    "/usr/bin/vi", "/usr/bin/vim", "/usr/bin/nano", "/usr/bin/ed",
+                    "/usr/bin/curl", "/usr/bin/ssh", "/usr/bin/open", "/usr/bin/defaults",
+                    "/usr/bin/crontab", "/usr/bin/security", "/opt/homebrew/bin/echo",
+                    "/usr/local/bin/echo")
+        for i, program in enumerate(programs):
+            with self.subTest(program=program):
+                self.error("bad_argument", "submit", peer=CONTROLLER,
+                           **{**TERMINAL, "submissionId": f"term-bad-{i}",
+                              "arguments": {"program": program, "args": []}})
+
+    def test_terminal_acepta_solo_binarios_de_consulta(self):
+        self.ready()
+        allowed = ("/bin/date", "/bin/echo", "/bin/hostname", "/bin/ps", "/bin/pwd",
+                   "/bin/sleep", "/bin/test", "/bin/df", "/usr/bin/true", "/usr/bin/false",
+                   "/usr/bin/uname", "/usr/bin/whoami", "/usr/bin/id", "/usr/bin/groups",
+                   "/usr/bin/uptime", "/usr/bin/sw_vers", "/usr/bin/vm_stat", "/usr/bin/cal",
+                   "/usr/bin/seq", "/usr/bin/bc", "/usr/bin/printf", "/usr/bin/yes")
+        for i, program in enumerate(allowed):
+            with self.subTest(program=program):
+                ack = self.ok("submit", peer=CONTROLLER,
+                              **{**TERMINAL, "submissionId": f"term-ok-{i}",
+                                 "arguments": {"program": program, "args": []}})
+                self.assertEqual(ack["state"], "pending")
 
     def test_terminal_reinicio_pendiente_queda_unknown_y_no_reenvia(self):
         self.ready()

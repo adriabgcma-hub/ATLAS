@@ -21,6 +21,7 @@ LEASE_SECONDS = 15
 INVOCATION_SECONDS = 15
 CONNECTION_TIMEOUT = 3.0
 REQUEST_DEADLINE = 5.0
+SWEEP_MIN_INTERVAL_S = 5.0
 _ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z", re.ASCII)
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _PREFIX = "/v1/hefesto/"
@@ -456,6 +457,7 @@ class Journal:
 
     def __init__(self, path, *, monotonic=time.monotonic, wall_time=time.time):
         self._lock = threading.RLock()
+        self._last_sweep = float("-inf")  # el primer dispatch siempre barre
         self._monotonic = monotonic
         self._wall_time = wall_time
         self._contents = {}
@@ -509,7 +511,9 @@ class Journal:
             try:
                 self._db.execute("BEGIN IMMEDIATE")
                 now, wall = self._monotonic(), self._wall_time()
-                self._sweep(now, wall)
+                if now - self._last_sweep >= SWEEP_MIN_INTERVAL_S:
+                    self._sweep(now, wall)
+                    self._last_sweep = now
                 try:
                     operation, data = _validate(method, path, body)
                     if ((operation in ("register", "heartbeat", "next", "result") and peer.role != "device")
