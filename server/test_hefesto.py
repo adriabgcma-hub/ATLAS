@@ -50,7 +50,7 @@ class Clock:
         self.wall += seconds
 
 
-class JournalTests(unittest.TestCase):
+class JournalFixture:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="hefesto-journal-test-")
         self.addCleanup(self.temp.cleanup)
@@ -98,6 +98,8 @@ class JournalTests(unittest.TestCase):
         self.journal.close()
         self.journal = self.new_journal()
 
+
+class JournalTests(JournalFixture, unittest.TestCase):
     def test_full_echo_and_exact_response_contract(self):
         self.assertEqual(self.ok("status"), {"protocolVersion": 9, "deviceId": "mac-one", "instanceId": None,
                                            "generation": 0, "suspended": True, "online": False,
@@ -606,7 +608,7 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(self.ok("status")["activeInvocationId"], ack["invocationId"])
 
 
-class ReadToolTests(JournalTests):
+class ReadToolTests(JournalFixture, unittest.TestCase):
     def test_submit_read_file_aceptado(self):
         self.ready()
         ack = self.ok("submit", CONTROLLER, **submission(
@@ -673,7 +675,7 @@ INFO = {"submissionId": "submission-i", "requestId": "request-1", "sessionId": "
         "arguments": {"path": "/Users/x/Documents/a.txt"}}
 
 
-class WriteJournalTests(JournalTests):
+class WriteJournalTests(JournalFixture, unittest.TestCase):
     def test_el_contenido_no_se_guarda_en_sqlite(self):
         self.ready()
         self.ok("submit", peer=CONTROLLER, **WRITE)
@@ -759,7 +761,7 @@ APPS_OPEN = {"submissionId": "submission-apps", "requestId": "request-1", "sessi
              "arguments": {"action": "open", "name": "Spotify"}}
 
 
-class AppControlJournalTests(JournalTests):
+class AppControlJournalTests(JournalFixture, unittest.TestCase):
     @staticmethod
     def apps(arguments, **changes):
         return {**APPS_OPEN, **changes, "arguments": arguments}
@@ -922,7 +924,7 @@ KEYBOARD_TYPE = {"submissionId": "submission-kbd", "requestId": "request-1",
                  "arguments": {"action": "type", "text": "secreto"}}
 
 
-class KeyboardJournalTests(JournalTests):
+class KeyboardJournalTests(JournalFixture, unittest.TestCase):
     def test_el_texto_no_se_guarda_en_sqlite(self):
         self.ready()
         self.ok("submit", peer=CONTROLLER, **KEYBOARD_TYPE)
@@ -990,7 +992,7 @@ MEDIA = {"submissionId": "submission-m", "requestId": "request-1", "sessionId": 
          "arguments": {"action": "volume_up", "count": 2}}
 
 
-class MediaJournalTests(JournalTests):
+class MediaJournalTests(JournalFixture, unittest.TestCase):
     @staticmethod
     def media(arguments, **changes):
         return {**MEDIA, **changes, "arguments": arguments}
@@ -1064,7 +1066,7 @@ WINDOW_RECORD = {"app": "TextEdit", "title": "Notas", "x": 100, "y": 200,
 WINDOWS_OUTPUT = {"windows": [WINDOW_RECORD]}
 
 
-class WindowsJournalTests(JournalTests):
+class WindowsJournalTests(JournalFixture, unittest.TestCase):
     @staticmethod
     def windows(arguments, **changes):
         return {**WINDOWS_MOVE, **changes, "arguments": arguments}
@@ -1256,7 +1258,7 @@ SYSTEM = {"submissionId": "submission-sys", "requestId": "request-1",
           "toolId": "hefesto.system", "arguments": {"action": "os"}}
 
 
-class SystemJournalTests(JournalTests):
+class SystemJournalTests(JournalFixture, unittest.TestCase):
     @staticmethod
     def system(arguments, **changes):
         return {**SYSTEM, **changes, "arguments": arguments}
@@ -1312,7 +1314,7 @@ CAPTURE = {"submissionId": "submission-capture", "requestId": "request-1",
            "toolId": "hefesto.capture", "arguments": {"target": "screen"}}
 
 
-class TerminalJournalTests(JournalTests):
+class TerminalJournalTests(JournalFixture, unittest.TestCase):
     def test_terminal_submit_next_result_y_argumentos_solo_en_memoria(self):
         self.ready()
         ack = self.ok("submit", peer=CONTROLLER, **TERMINAL)
@@ -1361,7 +1363,7 @@ class TerminalJournalTests(JournalTests):
         self.assertIsNone(outcome["output"])
 
 
-class CaptureJournalTests(JournalTests):
+class CaptureJournalTests(JournalFixture, unittest.TestCase):
     def test_capture_submit_next_result(self):
         self.ready()
         ack = self.ok("submit", peer=CONTROLLER, **CAPTURE)
