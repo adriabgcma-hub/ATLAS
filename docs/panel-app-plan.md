@@ -155,6 +155,10 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   sondeando por IPC; arranque con `ATLAS_RELAY_URL=http://127.0.0.1:9` →
   `relay sin conexión` sin que la app muera; `cargo test -p atlas-panel`,
   `cargo fmt --check` y `cargo check -p atlas-panel`.
+- **Cliente HTTP solo HTTP:** `reqwest` se compila sin TLS
+  (`default-features = false, features = ["json"]`). `ATLAS_RELAY_URL` debe ser
+  `http://…` (por defecto `http://atlas-hub.local:8765`); una URL `https://`
+  fallaría al hacer la petición.
 - **Reglas de uso/refresco:** documentadas en `AGENTS.md` § "App Hub Panel".
 
 ### F2 extra: autoarranque, instalación y bundle firmado
