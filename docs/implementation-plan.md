@@ -281,6 +281,17 @@ de prueba autorizados por el usuario (2026-10-28).
       concedido; la prueba en vivo de la tanda de testing generó PNG en
       `~/Documents/Atlas/capturas/` y reconoció texto real (menús y chat de
       Atlas). Detalle en el plan de testing.
+- [x] **Optimización tanda 2 (2026-11-08)** — seis cambios de rendimiento y
+      limpieza sin cambio visible. npm workspaces (`2cb3e17`): `apps/panel`
+      pasa de 67 a 2,8 MB y `apps/panel-app` de 15 MB a 4 KB (raíz igual,
+      191 MB). Journal de Hefesto (`2dfe735`): fixture sin herencia, 459→117
+      ejecuciones de `test_hefesto` (~8,5 s). CalDAV (`98e5f21`): single-flight
+      y caché TTL de 300 s del descubrimiento de calendarios. Sweep del journal
+      (`b6880e7`): como mucho cada 5 s por dispatch. Runtime (`98fad55`):
+      bloque Hefesto de `lib.rs` extraído a `hefesto_runtime.rs` (921→~570
+      líneas). Panel (`7f15147`): `reqwest` sin TLS (solo HTTP). Verificación:
+      Rust 214 + 2 ignoradas, Python 264, frontend 61, clippy y fmt limpios;
+      relay desplegado (`/v1/health` OK).
 - [ ] **Correcciones pendientes de la tanda de testing (2026-11-08)** —
       detalle y evidencia en
       [plan de testing](./superpowers/plans/2026-11-08-tools-exhaustive-testing.md) §8:

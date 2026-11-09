@@ -6,6 +6,32 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 
 ## Historial
 
+### Optimización tanda 2: workspaces, tests, CalDAV, sweep, runtime y panel
+
+- **Commits:** `2cb3e17`, `2dfe735`, `98e5f21`, `b6880e7`, `98fad55`, `7f15147`
+- **Fecha:** `2026-11-08`
+- **Descripción:** tanda de rendimiento y limpieza sin cambio visible.
+  **npm workspaces** (`2cb3e17`): raíz declara `apps/panel` y `apps/panel-app`;
+  sus `node_modules` bajan de 67 y 15 MB a 2,8 MB y 4 KB, la raíz se queda en
+  191 MB. **Tests del journal** (`2dfe735`): los helpers de `JournalTests` pasan
+  a una fixture sin tests y las 9 subclases dejan de heredar los 38 casos base;
+  `test_hefesto` baja de 459 a 117 ejecuciones (~8,5 s) y la suite Python de
+  598 a 264, sin perder cobertura. **CalDAV** (`98e5f21`): el descubrimiento de
+  calendarios es single-flight con caché TTL de 300 s (`CAL_CALENDARS_TTL`);
+  un error de CalDAV invalida caché y cliente. **Sweep** (`b6880e7`): el
+  barrido de vencimientos del journal corre como mucho cada
+  `SWEEP_MIN_INTERVAL_S = 5` segundos por dispatch, no en cada petición.
+  **Runtime** (`98fad55`): el bloque de Hefesto sale de `src-tauri/src/lib.rs`
+  a `hefesto_runtime.rs` (921→~570 líneas), con las mismas funciones
+  `pub(crate)` y tests movidos. **Panel** (`7f15147`): `reqwest` del panel se
+  compila sin `rustls-tls` —solo habla HTTP con el relay— y se documenta en
+  `docs/panel-app-plan.md`. Verificación: frontend build, lint y 61 tests;
+  Rust 214 tests + 2 ignoradas; Python 264; clippy y fmt limpios. Relay
+  desplegado y `/v1/health` OK.
+- **Documentación relacionada:** `docs/panel-app-plan.md`,
+  `docs/implementation-plan.md`,
+  `docs/superpowers/plans/2026-11-08-optimizacion-tanda-2.md`.
+
 ### Comando `/cancel` como comando local
 
 - **Commit:** `ee71d55`
