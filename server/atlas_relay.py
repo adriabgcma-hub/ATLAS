@@ -74,6 +74,7 @@ OP_TIMEOUT_S = 30
 MAX_HISTORY = 6
 STORE_HISTORY = 100
 DEFAULT_TIMEZONE = "Europe/Madrid"
+CAL_CALENDARS_TTL = 300.0
 
 # Sistema fijo (cacheable: no cambia entre llamadas) y contexto variable.
 SYSTEM_FIXED = (
@@ -748,6 +749,8 @@ class Brain:
         self._caldav: atlas_caldav.CalDAVClient | None = None
         self.confirmations: dict = {}
         self._cal_cache: dict = {}
+        self._cal_cal_cache: tuple[float, list[dict]] | None = None
+        self._cal_lock = threading.Lock()
         # Panel: identidad del bot (getMe) y peticiones en vuelo (cola+activo).
         self.bot_info: dict | None = None
         self.inflight: set[str] = set()
@@ -913,12 +916,27 @@ class Brain:
         return client
 
     def calendar_calendars(self) -> list[dict]:
-        try:
-            return self._caldav_client().discover()
-        except atlas_caldav.CalDAVError:
+        # TTL corto + ejecución en serie: dos peticiones a la vez no duplican
+        # los PROPFIND contra iCloud (Apple penaliza las ráfagas).
+        with self.lock:
+            cached = self._cal_cal_cache
+            if cached and time.monotonic() - cached[0] < CAL_CALENDARS_TTL:
+                return cached[1]
+        with self._cal_lock:
             with self.lock:
-                self._caldav = None  # redescubrir la próxima vez
-            raise
+                cached = self._cal_cal_cache
+                if cached and time.monotonic() - cached[0] < CAL_CALENDARS_TTL:
+                    return cached[1]
+            try:
+                calendars = self._caldav_client().discover()
+            except atlas_caldav.CalDAVError:
+                with self.lock:
+                    self._cal_cal_cache = None
+                    self._caldav = None  # redescubrir la próxima vez
+                raise
+            with self.lock:
+                self._cal_cal_cache = (time.monotonic(), calendars)
+            return calendars
 
     def calendar_upcoming(self, days: int) -> list[dict]:
         # Caché breve: una pregunta repetida no re-golpea iCloud.

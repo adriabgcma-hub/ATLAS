@@ -4,11 +4,13 @@ import json
 import socket
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import atlas_caldav
 import atlas_relay
 from test_hefesto import TLSFixture
 
@@ -326,6 +328,91 @@ class AtlasRegressionTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 thread.join()
+
+
+class CalendarCacheTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        with patch.dict("os.environ", {}, clear=True):
+            cfg = atlas_relay.read_env()
+        cfg["data_dir"] = temporary.name
+        self.brain = atlas_relay.Brain(cfg)
+
+    def test_calendar_calendars_reutiliza_el_descubrimiento_dentro_del_ttl(self):
+        calls = []
+
+        class FakeClient:
+            def discover(self):
+                calls.append(1)
+                return [{"id": "/cal/1", "name": "Prueba"}]
+
+        with patch.object(self.brain, "_caldav_client", return_value=FakeClient()):
+            first = self.brain.calendar_calendars()
+            second = self.brain.calendar_calendars()
+        self.assertEqual(first, [{"id": "/cal/1", "name": "Prueba"}])
+        self.assertEqual(second, first)
+        self.assertEqual(len(calls), 1)
+
+    def test_calendar_calendars_redescubre_tras_el_ttl(self):
+        calls = []
+        clock = {"t": 0.0}
+
+        class FakeClient:
+            def discover(self):
+                calls.append(1)
+                return [{"id": "/cal/1", "name": "Prueba"}]
+
+        with patch.object(self.brain, "_caldav_client", return_value=FakeClient()), \
+             patch.object(atlas_relay.time, "monotonic", side_effect=lambda: clock["t"]):
+            self.brain.calendar_calendars()
+            clock["t"] = atlas_relay.CAL_CALENDARS_TTL + 1
+            self.brain.calendar_calendars()
+        self.assertEqual(len(calls), 2)
+
+    def test_calendar_calendars_descarta_la_cache_tras_un_error(self):
+        calls = []
+        clock = {"t": 0.0}
+
+        class FakeClient:
+            def discover(self):
+                calls.append(1)
+                if len(calls) == 2:
+                    raise atlas_caldav.CalDAVError("http_500")
+                return [{"id": "/cal/1", "name": "Prueba"}]
+
+        with patch.object(self.brain, "_caldav_client", return_value=FakeClient()), \
+             patch.object(atlas_relay.time, "monotonic", side_effect=lambda: clock["t"]):
+            self.brain.calendar_calendars()
+            clock["t"] = atlas_relay.CAL_CALENDARS_TTL + 1
+            with self.assertRaises(atlas_caldav.CalDAVError):
+                self.brain.calendar_calendars()
+            self.brain.calendar_calendars()
+        self.assertEqual(len(calls), 3)
+
+    def test_calendar_calendars_un_solo_descubrimiento_concurrente(self):
+        calls = []
+
+        class FakeClient:
+            def discover(self):
+                calls.append(1)
+                time.sleep(0.05)
+                return [{"id": "/cal/1", "name": "Prueba"}]
+
+        results = [None, None, None]
+
+        def worker(index):
+            results[index] = self.brain.calendar_calendars()
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
+        with patch.object(self.brain, "_caldav_client", return_value=FakeClient()):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(all(r == [{"id": "/cal/1", "name": "Prueba"}]
+                            for r in results))
 
 
 if __name__ == "__main__":
