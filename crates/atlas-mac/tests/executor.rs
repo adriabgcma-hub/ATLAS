@@ -1349,11 +1349,11 @@ fn terminal_invocation(program: &str, args: &[&str]) -> Invocation {
 fn terminal_se_enruta_por_el_puente_inyectado() {
     let mut executor = apps_executor(None).with_terminal_bridge(Arc::new(FakeTerminal));
     let out = executor
-        .execute(&terminal_invocation("/bin/ls", &["-la"]), at(3))
+        .execute(&terminal_invocation("/bin/echo", &["hola"]), at(3))
         .unwrap();
     assert_eq!(
         out.output.text_value(),
-        Some("Salida (código 0):\n/bin/ls -la")
+        Some("Salida (código 0):\n/bin/echo hola")
     );
 }
 

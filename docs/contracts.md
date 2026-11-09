@@ -216,13 +216,22 @@ lista y mueve, redimensiona o trae al frente ventanas estándar. El relay expone
 solo lectura por adaptadores fijos. El relay expone `hefesto_system` con
 `requiresConfirmation: False`: sin tarjeta y sin burbuja.
 
-`hefesto.terminal` (`{program, args}`) ejecuta un binario del sistema con argv
-directo, sin shell: `program` es una ruta absoluta dentro de `/usr/bin`, `/bin`,
-`/usr/sbin`, `/sbin`, `/usr/local/bin` u `/opt/homebrew/bin` (≤1024 B) y `args`
-una lista de hasta 32 argumentos de ≤1024 B cada uno y ≤4096 B en total. El
-relay expone `hefesto_terminal` con `requiresConfirmation: True` y
-`planConfirmation: True`: cada ejecución válida abre **exactamente una** tarjeta
-con el comando exacto y riesgo `destructive`; sin burbuja.
+`hefesto.terminal` (`{program, args}`) ejecuta un binario de **consulta** del
+sistema con argv directo, sin shell: `program` es una ruta absoluta dentro de
+`/usr/bin`, `/bin`, `/usr/sbin` o `/sbin` (≤1024 B) **y su nombre debe estar en
+la lista blanca** de 22 binarios de solo lectura (`date`, `echo`, `hostname`,
+`ps`, `pwd`, `sleep`, `test`, `df`, `true`, `false`, `uname`, `whoami`, `id`,
+`groups`, `uptime`, `sw_vers`, `vm_stat`, `cal`, `seq`, `bc`, `printf`, `yes`);
+`args` es una lista de hasta 32 argumentos de ≤1024 B cada uno y ≤4096 B en
+total. Intérpretes (`python3`, `osascript`, `swift`, `node`, `ruby`, `perl`,
+`awk`, `sed`…), lectores/escritores de archivos (`cat`, `grep`, `find`, `ls`,
+`cp`, `mv`, `vi`…), red (`curl`, `ssh`…), persistencia/configuración
+(`open`, `defaults`, `crontab`, `security`…) y binarios fuera de las raíces de
+sistema se rechazan **antes** de la tarjeta (relay y dispositivo, defensa en
+profundidad). El relay expone `hefesto_terminal` con
+`requiresConfirmation: True` y `planConfirmation: True`: cada ejecución válida
+abre **exactamente una** tarjeta con el comando exacto y riesgo `destructive`;
+sin burbuja.
 
 `hefesto.capture` (`{target: screen}`) captura la pantalla, guarda el PNG en
 `~/Documents/Atlas/capturas/` y reconoce su texto en local con Apple Vision. El

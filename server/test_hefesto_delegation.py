@@ -1466,13 +1466,13 @@ class TerminalFlowTests(unittest.TestCase):
                                return_value="allow_once") as ask:
             result = self.brain.execute_tool(
                 "hefesto_terminal",
-                {"program": "/bin/ls", "args": ["-la", "mi carpeta"]}, JOB)
+                {"program": "/bin/echo", "args": ["hola", "mundo"]}, JOB)
         self.assertEqual(result, "Salida (código 0):\nhola")
         self.assertEqual(self.journal.submits[0]["toolId"], "hefesto.terminal")
         self.assertEqual(self.journal.submits[0]["arguments"],
-                         {"program": "/bin/ls", "args": ["-la", "mi carpeta"]})
+                         {"program": "/bin/echo", "args": ["hola", "mundo"]})
         summary, risk = ask.call_args.kwargs["summary"]
-        self.assertIn("/bin/ls -la «mi carpeta»", summary)
+        self.assertIn("/bin/echo hola mundo", summary)
         self.assertEqual(risk, "destructive")
 
     def test_terminal_invalido_no_abre_tarjeta_ni_delega(self):
@@ -1480,9 +1480,9 @@ class TerminalFlowTests(unittest.TestCase):
             {"program": "ls", "args": []},
             {"program": "/etc/passwd", "args": []},
             {"program": "/bin/sh", "args": ["-c", "id"]},
-            {"program": "/bin/../bin/ls", "args": []},
-            {"program": "/bin/ls", "args": ["x" * 1025]},
-            {"program": "/bin/ls", "args": [], "cwd": "/"},
+            {"program": "/bin/../bin/echo", "args": []},
+            {"program": "/bin/echo", "args": ["x" * 1025]},
+            {"program": "/bin/echo", "args": [], "cwd": "/"},
         )
         for args in cases:
             with self.subTest(args=args):
@@ -1493,10 +1493,26 @@ class TerminalFlowTests(unittest.TestCase):
                 ask.assert_not_called()
         self.assertEqual(self.journal.submits, [])
 
+    def test_terminal_rechaza_interpretes_y_lectores_sin_tarjeta(self):
+        for program in ("/usr/bin/python3", "/usr/bin/python3.13", "/usr/bin/osascript",
+                        "/usr/bin/swift", "/usr/bin/node", "/usr/bin/ruby", "/usr/bin/perl",
+                        "/usr/bin/awk", "/usr/bin/sed", "/bin/cat", "/usr/bin/grep",
+                        "/usr/bin/find", "/bin/ls", "/usr/bin/vi", "/usr/bin/nano",
+                        "/usr/bin/curl", "/usr/bin/ssh", "/usr/bin/open", "/usr/bin/defaults",
+                        "/usr/bin/crontab", "/usr/bin/security",
+                        "/opt/homebrew/bin/echo", "/usr/local/bin/echo"):
+            with self.subTest(program=program):
+                with mock.patch.object(self.brain, "ask_confirmation") as ask:
+                    result = self.brain.execute_tool(
+                        "hefesto_terminal", {"program": program, "args": []}, JOB)
+                self.assertEqual(result, "programa no permitido")
+                ask.assert_not_called()
+        self.assertEqual(self.journal.submits, [])
+
     def test_denegar_no_delega(self):
         with mock.patch.object(self.brain, "ask_confirmation", return_value="deny"):
             result = self.brain.execute_tool(
-                "hefesto_terminal", {"program": "/bin/ls", "args": []}, JOB)
+                "hefesto_terminal", {"program": "/bin/echo", "args": []}, JOB)
         self.assertEqual(result, "denegada por el usuario")
         self.assertEqual(self.journal.submits, [])
 

@@ -1336,7 +1336,7 @@ class TerminalJournalTests(JournalFixture, unittest.TestCase):
             (ack["invocationId"],)).fetchone()
         stored = json.loads(row["submission"])
         self.assertEqual(stored["arguments"]["commandBytes"],
-                         len(b"/bin/ls\x00-la\x00/tmp"))
+                         len(b"/bin/echo\x00hola"))
         self.assertEqual(len(stored["arguments"]["commandSha256"]), 64)
         self.assertNotIn("program", stored["arguments"])
         self.assertNotIn("args", stored["arguments"])
@@ -1394,6 +1394,9 @@ class TerminalJournalTests(JournalFixture, unittest.TestCase):
                               **{**TERMINAL, "submissionId": f"term-ok-{i}",
                                  "arguments": {"program": program, "args": []}})
                 self.assertEqual(ack["state"], "pending")
+                invocation = self.next()
+                self.ok("result", **self.result_fields(
+                    invocation, output={"text": "Salida (código 0):\nsin salida"}))
 
     def test_terminal_reinicio_pendiente_queda_unknown_y_no_reenvia(self):
         self.ready()

@@ -408,11 +408,14 @@ HEFESTO_TERMINAL_TOOL = {
     "requiresConfirmation": True,
     # La tarjeta la abre _terminal después de validar, con el comando exacto.
     "planConfirmation": True,
-    "description": ("Ejecuta un comando del Mac con Hefesto mediante argv directo (sin "
-                    "shell). `program` es una ruta absoluta a un ejecutable de /usr/bin, "
-                    "/bin, /usr/sbin, /sbin, /usr/local/bin u /opt/homebrew/bin, y `args` "
-                    "una lista de hasta 32 argumentos. Cada ejecución pide confirmación "
-                    "mostrando el comando exacto; la salida vuelve al modelo."),
+    "description": ("Ejecuta un comando de consulta del Mac con Hefesto mediante argv "
+                    "directo (sin shell). Solo admite una lista blanca de binarios de "
+                    "solo lectura del sistema (por ejemplo /bin/echo, /bin/date, "
+                    "/usr/bin/uname, /bin/df, /usr/bin/uptime, /usr/bin/sw_vers, "
+                    "/usr/bin/whoami, /bin/ps) con ≤32 argumentos; intérpretes, lectores "
+                    "de archivos, red y binarios fuera de las raíces de sistema están "
+                    "rechazados. Cada ejecución pide confirmación mostrando el comando "
+                    "exacto; la salida vuelve al modelo."),
     "schema": {
         "type": "object",
         "properties": {
@@ -455,12 +458,13 @@ HEFESTO_TOOLS = [HEFESTO_TOOL, HEFESTO_LIST_TOOL, HEFESTO_READ_TOOL,
 _WINDOWS_WIRE = {"list": "list_windows", "move": "move_window",
                  "resize": "resize_window", "focus": "focus_window"}
 _SYSTEM_ACTIONS = ("os", "disk", "uptime", "memory")
-_TERMINAL_ROOTS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin",
-                   "/usr/local/bin", "/opt/homebrew/bin")
-_TERMINAL_DENIED = frozenset((
-    "sh", "bash", "zsh", "csh", "tcsh", "fish", "dash", "ksh",
-    "sudo", "su", "doas", "launchctl", "systemsetup", "shutdown", "reboot",
-    "halt", "kill", "killall", "pkill", "env", "xargs",
+_TERMINAL_ROOTS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+# Terminal de consulta: solo binarios fijos de lectura del sistema, nunca
+# intérpretes, lectores de archivos, red, persistencia ni configuración.
+_TERMINAL_ALLOWED = frozenset((
+    "date", "echo", "hostname", "ps", "pwd", "sleep", "test", "df",
+    "true", "false", "uname", "whoami", "id", "groups", "uptime",
+    "sw_vers", "vm_stat", "cal", "seq", "bc", "printf", "yes",
 ))
 _MAX_TERMINAL_ARGS = 32
 _MAX_TERMINAL_ARG_BYTES = 1024
@@ -601,7 +605,7 @@ def _terminal_arguments(args: dict):
     if not any(program == root or program.startswith(root + "/")
                for root in _TERMINAL_ROOTS):
         return None, "programa no permitido"
-    if program.rsplit("/", 1)[-1] in _TERMINAL_DENIED:
+    if program.rsplit("/", 1)[-1] not in _TERMINAL_ALLOWED:
         return None, "programa no permitido"
     if (len(sizes) != len(extra) or any(size > _MAX_TERMINAL_ARG_BYTES or "\x00" in value
                                        for value, size in zip(extra, sizes))

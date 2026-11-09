@@ -30,12 +30,11 @@ _MEDIA_ACTIONS = ("volume_up", "volume_down", "mute", "brightness_up",
 _MEDIA_COUNT_ACTIONS = ("volume_up", "volume_down", "brightness_up", "brightness_down")
 _WINDOW_ACTIONS = ("list_windows", "move_window", "resize_window", "focus_window")
 _SYSTEM_ACTIONS = ("os", "disk", "uptime", "memory")
-_TERMINAL_ROOTS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin",
-                   "/usr/local/bin", "/opt/homebrew/bin")
-_TERMINAL_DENIED = frozenset((
-    "sh", "bash", "zsh", "csh", "tcsh", "fish", "dash", "ksh",
-    "sudo", "su", "doas", "launchctl", "systemsetup", "shutdown", "reboot",
-    "halt", "kill", "killall", "pkill", "env", "xargs",
+_TERMINAL_ROOTS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+_TERMINAL_ALLOWED = frozenset((
+    "date", "echo", "hostname", "ps", "pwd", "sleep", "test", "df",
+    "true", "false", "uname", "whoami", "id", "groups", "uptime",
+    "sw_vers", "vm_stat", "cal", "seq", "bc", "printf", "yes",
 ))
 _MAX_TERMINAL_ARGS = 32
 _MAX_TERMINAL_ARG_BYTES = 1024
@@ -153,7 +152,7 @@ def _validate_terminal(args):
                for root in _TERMINAL_ROOTS):
         raise _Rejected("bad_argument", 400)
     name = program.rsplit("/", 1)[-1]
-    if name in _TERMINAL_DENIED:
+    if name not in _TERMINAL_ALLOWED:
         raise _Rejected("bad_argument", 400)
     total = len(encoded)
     for value in extra:

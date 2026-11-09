@@ -10,37 +10,13 @@ pub const MAX_ARG_BYTES: usize = 1024;
 pub const MAX_ARGS: usize = 32;
 pub const MAX_COMMAND_BYTES: usize = 4096;
 
-const ALLOWED_ROOTS: [&str; 6] = [
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-    "/usr/local/bin",
-    "/opt/homebrew/bin",
-];
+const ALLOWED_ROOTS: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 
-const DENIED: [&str; 21] = [
-    "sh",
-    "bash",
-    "zsh",
-    "csh",
-    "tcsh",
-    "fish",
-    "dash",
-    "ksh",
-    "sudo",
-    "su",
-    "doas",
-    "launchctl",
-    "systemsetup",
-    "shutdown",
-    "reboot",
-    "halt",
-    "kill",
-    "killall",
-    "pkill",
-    "env",
-    "xargs",
+/// Terminal de consulta: solo binarios fijos de lectura del sistema, nunca
+/// intérpretes, lectores de archivos, red, persistencia ni configuración.
+const ALLOWED: [&str; 22] = [
+    "date", "echo", "hostname", "ps", "pwd", "sleep", "test", "df", "true", "false", "uname",
+    "whoami", "id", "groups", "uptime", "sw_vers", "vm_stat", "cal", "seq", "bc", "printf", "yes",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,12 +40,12 @@ pub trait TerminalBridge: Send + Sync {
     ) -> std::result::Result<TerminalOutcome, TerminalFailure>;
 }
 
-pub fn denied_name(name: &str) -> bool {
-    DENIED.contains(&name)
+pub fn allowed_name(name: &str) -> bool {
+    ALLOWED.contains(&name)
 }
 
-/// Ruta absoluta, sin `.`/`..`, dentro de una raíz permitida y con un nombre
-/// que no sea un intérprete de shell ni una vía de elevación.
+/// Ruta absoluta, sin `.`/`..`, dentro de una raíz de sistema y con un
+/// nombre de la lista blanca de consulta.
 pub fn validate_program(program: &str) -> std::result::Result<(), &'static str> {
     if program.is_empty()
         || program.len() > MAX_PROGRAM_BYTES
@@ -93,7 +69,7 @@ pub fn validate_program(program: &str) -> std::result::Result<(), &'static str> 
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or("programa no válido")?;
-    if denied_name(name) {
+    if !allowed_name(name) {
         return Err("programa no permitido");
     }
     Ok(())
@@ -220,15 +196,11 @@ mod tests {
             stdout: "hola\n".to_owned(),
             stderr: String::new(),
         }));
-        let output =
-            handle_terminal(&bridge, &payload("/bin/ls", &["-la", "/tmp"])).expect("salida");
+        let output = handle_terminal(&bridge, &payload("/bin/echo", &["hola"])).expect("salida");
         assert_eq!(text(output), "Salida (código 0):\nhola");
         assert_eq!(
             *bridge.seen.lock().expect("visto"),
-            vec![(
-                "/bin/ls".to_owned(),
-                vec!["-la".to_owned(), "/tmp".to_owned()]
-            )]
+            vec![("/bin/echo".to_owned(), vec!["hola".to_owned()])]
         );
     }
 
@@ -239,8 +211,7 @@ mod tests {
             stdout: String::new(),
             stderr: "fallo\n".to_owned(),
         }));
-        let output =
-            handle_terminal(&bridge, &payload("/usr/bin/which", &["nada"])).expect("salida");
+        let output = handle_terminal(&bridge, &payload("/bin/echo", &["nada"])).expect("salida");
         assert_eq!(text(output), "Salida (código 2):\n[stderr]\nfallo");
     }
 
@@ -271,6 +242,71 @@ mod tests {
     }
 
     #[test]
+    fn solo_binarios_de_consulta_estan_permitidos() {
+        for program in [
+            "/bin/date",
+            "/bin/echo",
+            "/bin/hostname",
+            "/bin/ps",
+            "/bin/pwd",
+            "/bin/sleep",
+            "/bin/test",
+            "/bin/df",
+            "/usr/bin/true",
+            "/usr/bin/false",
+            "/usr/bin/uname",
+            "/usr/bin/whoami",
+            "/usr/bin/id",
+            "/usr/bin/groups",
+            "/usr/bin/uptime",
+            "/usr/bin/sw_vers",
+            "/usr/bin/vm_stat",
+            "/usr/bin/cal",
+            "/usr/bin/seq",
+            "/usr/bin/bc",
+            "/usr/bin/printf",
+            "/usr/bin/yes",
+        ] {
+            assert!(validate_program(program).is_ok(), "{program}");
+        }
+    }
+
+    #[test]
+    fn interpretes_lectores_y_red_se_rechazan() {
+        for program in [
+            "/usr/bin/python3",
+            "/usr/bin/python3.13",
+            "/usr/bin/osascript",
+            "/usr/bin/swift",
+            "/usr/bin/node",
+            "/usr/bin/ruby",
+            "/usr/bin/perl",
+            "/usr/bin/awk",
+            "/usr/bin/sed",
+            "/bin/cat",
+            "/usr/bin/grep",
+            "/usr/bin/find",
+            "/bin/ls",
+            "/usr/bin/vi",
+            "/usr/bin/nano",
+            "/usr/bin/curl",
+            "/usr/bin/ssh",
+            "/usr/bin/open",
+            "/usr/bin/defaults",
+            "/usr/bin/crontab",
+            "/usr/bin/security",
+            "/opt/homebrew/bin/echo",
+            "/usr/local/bin/echo",
+        ] {
+            assert_eq!(
+                validate_program(program),
+                Err("programa no permitido"),
+                "{program}"
+            );
+        }
+    }
+
+    #[test]
     fn los_topes_de_argumentos_se_respetan() {
         assert!(validate_args(&vec!["x".to_owned(); MAX_ARGS + 1]).is_err());
         assert!(validate_args(&["x".repeat(MAX_ARG_BYTES + 1)]).is_err());
@@ -281,12 +317,12 @@ mod tests {
     #[test]
     fn el_fallo_del_puente_se_traduce() {
         let bridge = FakeBridge::new(Err(TerminalFailure::Detail("timeout".to_owned())));
-        let output = handle_terminal(&bridge, &payload("/bin/ls", &[])).expect("salida");
+        let output = handle_terminal(&bridge, &payload("/bin/echo", &[])).expect("salida");
         assert_eq!(text(output), "no se pudo ejecutar el comando: timeout");
         let bridge = FakeBridge::new(Err(TerminalFailure::Stable(
             "programa no permitido".to_owned(),
         )));
-        let output = handle_terminal(&bridge, &payload("/bin/ls", &[])).expect("salida");
+        let output = handle_terminal(&bridge, &payload("/bin/echo", &[])).expect("salida");
         assert_eq!(text(output), "programa no permitido");
     }
 

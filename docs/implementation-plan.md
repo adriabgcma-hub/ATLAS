@@ -277,8 +277,25 @@ de prueba autorizados por el usuario (2026-10-28).
       (`lunes 9 nov 10:30` / `jueves 12 nov (todo el día)`); añade
       `period: "next_week"`. 10 pruebas offline (regresión 2026-11-06, semana
       correcta 9–15); Python 596. Commit `71b8d18`, relay desplegado.
-- [ ] Pendiente: captura real con OCR tras conceder el TCC de Grabación de
-      pantalla.
+- [x] Captura real con OCR (2026-11-08): TCC de Grabación de pantalla ya
+      concedido; la prueba en vivo de la tanda de testing generó PNG en
+      `~/Documents/Atlas/capturas/` y reconoció texto real (menús y chat de
+      Atlas). Detalle en el plan de testing.
+- [ ] **Correcciones pendientes de la tanda de testing (2026-11-08)** —
+      detalle y evidencia en
+      [plan de testing](./superpowers/plans/2026-11-08-tools-exhaustive-testing.md) §8:
+      1. Terminal general: denegar intérpretes y binarios de riesgo por nombre
+         (relay `_TERMINAL_DENIED` + dispositivo `DENIED`); `python3 -c` se
+         ejecutó de verdad en la prueba (hueco de seguridad). **Implementado
+         2026-11-08 (TDD) con lista blanca de 22 binarios de consulta en relay,
+         journal, dispositivo y puente; tests verdes. Pendiente commit,
+         despliegue, bundle y prueba en vivo.**
+      2. `hefesto_apps open`: activar la app tras lanzarla.
+      3. Mensajes >4000 caracteres: rechazar en vez de truncar en silencio.
+      4. Pulido: echo vacío, `{}` → `bad_body`, prompt que repita el texto
+         estable de la tool (narraciones erróneas ×2).
+      5–7. Relajaciones pendientes de decisión: media sin tarjeta, lecturas
+      con consentimiento por raíz, update/delete por título único.
 
 La API HTTP actual no puede lanzar Hefesto; el dispositivo se inicia dentro de la
 app Tauri al abrirla, leyendo sus credenciales del entorno o de
@@ -288,7 +305,7 @@ el teclado sintético con consentimiento, el control multimedia por teclas de
 sistema con tarjeta, la gestión de ventanas por Accessibility, las consultas de
 sistema por adaptadores, el terminal general por argv directo con tarjeta y la
 captura de pantalla con OCR local. La ventana de tablas está verificada en la app;
-la captura real con TCC concedido queda como verificación final.
+la captura real con TCC concedido quedó verificada el 2026-11-08.
 
 ## Variables de entorno (nombres; valores solo en `.env` local, nunca en Git)
 

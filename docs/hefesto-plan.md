@@ -39,10 +39,10 @@ Estos valores permiten construir la base sin resolver decisiones sensibles por e
   Antes de las herramientas reales se implementará consentimiento de exportación
   delimitado por contenido y destino; compartir chat no comparte todos los datos.
 - No `sudo`, llaveros, claves, `.env`, dotfiles ni LaunchAgents. Las prohibiciones no
-  se levantan mediante un botón de confirmación. El terminal general solo ejecuta
-  argv directo dentro de las raíces de binarios del sistema, con intérpretes y vías
-  de elevación o persistencia denegados por nombre; nunca concede `sudo`, shell ni
-  autoarranque.
+  se levantan mediante un botón de confirmación. El terminal general es de
+  **consulta**: solo binarios de una lista blanca fija del sistema, sin
+  intérpretes, lectores o escritores de archivos, red, persistencia ni
+  configuración; nunca concede `sudo`, shell ni autoarranque.
 - La automatización de interfaz se pausará al bloquear/dormir el Mac y no se reanudará
   automáticamente. Las operaciones sin interfaz tendrán una política explícita propia.
 - 12 turnos, 5 min de trabajo, 30 s por comando y 64 KiB de salida son presupuestos
@@ -350,11 +350,15 @@ sistema trivial por adaptador, sin tarjeta y sin burbuja.
    timeout de 2 s, grupo de procesos propio con `SIGKILL` al vencer y salida
    acotada a 16 KiB. Sin tarjeta ni burbuja; el journal valida `{action}` y
    deja `unknown` una consulta en vuelo tras reinicio.
-   El **terminal general** (`hefesto_terminal`, protocolo v9) ejecuta argv
-   directo sin shell: ruta absoluta dentro de `/usr/bin`, `/bin`, `/usr/sbin`,
-   `/sbin`, `/usr/local/bin` u `/opt/homebrew/bin`, ≤32 argumentos y ≤4096 bytes
-   de comando, con los intérpretes y las vías de elevación/persistencia
-   denegados por nombre. Corre con entorno limpio, `stdin` nulo, grupo propio,
+   El **terminal de consulta** (`hefesto_terminal`, protocolo v9) ejecuta argv
+   directo sin shell: ruta absoluta dentro de `/usr/bin`, `/bin`, `/usr/sbin` o
+   `/sbin` **y nombre en la lista blanca** de 22 binarios de solo lectura
+   (`date`, `echo`, `hostname`, `ps`, `pwd`, `sleep`, `test`, `df`, `true`,
+   `false`, `uname`, `whoami`, `id`, `groups`, `uptime`, `sw_vers`, `vm_stat`,
+   `cal`, `seq`, `bc`, `printf`, `yes`), ≤32 argumentos y ≤4096 bytes de
+   comando; intérpretes, lectores/escritores de archivos, red, persistencia y
+   binarios fuera de las raíces de sistema se rechazan antes de la tarjeta
+   (relay y dispositivo). Corre con entorno limpio, `stdin` nulo, grupo propio,
    timeout de 10 s con `SIGKILL` del grupo y 24 KiB por tubería; **cada
    ejecución pide confirmación** con el comando exacto y no emite burbuja. El
    journal no guarda el comando (solo `commandBytes`/`commandSha256`) y deja

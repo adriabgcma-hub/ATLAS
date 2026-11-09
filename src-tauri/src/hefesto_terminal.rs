@@ -197,6 +197,21 @@ mod tests {
     }
 
     #[test]
+    fn un_interprete_se_rechaza_aunque_este_en_una_raiz() {
+        let bridge = MacTerminal::new();
+        let error = bridge
+            .run(
+                "/usr/bin/python3",
+                &["-c".to_owned(), "print(1)".to_owned()],
+            )
+            .expect_err("rechazado");
+        assert_eq!(
+            error,
+            TerminalFailure::Stable("programa no permitido".to_owned())
+        );
+    }
+
+    #[test]
     fn un_timeout_mata_el_grupo_y_lo_dice() {
         let bridge = MacTerminal::with_timeout(Duration::from_millis(100));
         let error = bridge
