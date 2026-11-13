@@ -143,11 +143,8 @@ de atlas-hub (2026-10):
   `.local` intenta antes la IPv6 link-local; con la conexión reutilizada cada
   endpoint cálido tarda ~10 ms. Antes (HTTP/1.0 + `Connection: close`) cada
   sondeo pagaba ese handshake completo.
-- **Fuera del panel hasta que existan en atlas-hub** (no se observan, ni se
-  piden): docker/contenedores, nube Nextcloud (compose, tailscale serve),
-  unidades del servidor antiguo (cups, macfan, lid-monitor, smartmontools,
-  NetworkManager) y unidades de usuario (sin linger). Volverán cuando se
-  integren de verdad, una a una.
+- **Fuera del panel** (no existen en atlas-hub, no se observan ni se piden):
+  docker/contenedores, Nextcloud y unidades del servidor antiguo.
 - Acciones systemd = lista blanca `PANEL_ACTION_UNITS`, que por defecto está
   **VACÍA** en atlas-hub: sin reglas polkit para el usuario `atlas`, ninguna
   acción de unidad puede prosperar. Flujo de doble confirmación intacto
@@ -155,26 +152,12 @@ de atlas-hub (2026-10):
   permiso implícito).
 - Piezas de host del servidor antiguo (polkit `50-atlas-panel.rules`,
   sudoers `atlas-panel`, ayudante `/usr/local/lib/atlas/panel-docker.sh`)
-  NO existen en atlas-hub: se reinstalarán solo cuando se decida qué
-  unidades/compose son accionables (ver §7).
+  no existen en atlas-hub.
 
-## 7. Nube del servidor antiguo (Nextcloud)
+## 7. Nube del servidor antiguo (fuera de Atlas)
 
-> ⚠️ **PENDIENTE DE MIGRAR a `atlas-hub`.** La nube Nextcloud
-> (compose + Tailscale) sigue en el servidor antiguo; estos comandos
-> (`/home/adria/nextcloud/…`) no valen en `atlas-hub` hasta que se decida la
-> migración. No tocar. El panel ya no muestra tarjeta de nube/docker (ver §6);
-> si se migra la nube, entonces se reintegrará al panel.
-
-- `~/nextcloud/` con `docker-compose.yml`: servicios `db` (mariadb:10.6) y
-  `app` (nextcloud:apache, expuesto solo en `127.0.0.1:8080`). *(En el
-  servidor antiguo; en atlas-hub no existe.)*
-- Se publica vía **`tailscale serve`**: `https://macbook-nube.tail971f40.ts.net`
-  → proxy a `127.0.0.1:8080` (HTTPS intra-tailnet; cert válido, solo tailnet).
-- Reglas: NO tocar `nextcloud/data/` a mano (el contenedor maneja uid/perms);
-  NO sincronizar esa carpeta al repo Git; restaurar/reiniciar SOLO con
-  `docker compose -f /home/adria/nextcloud/docker-compose.yml …`. El `.env`
-  del compose carga contraseñas en claro: nunca en Git.
+Nextcloud (compose + Tailscale) queda fuera de Atlas: no existe en `atlas-hub`
+y no se integra en el panel.
 
 ## 8. Operación desde el Mac de desarrollo
 
@@ -189,7 +172,7 @@ ssh adria_admin@atlas-hub "tail -f /opt/atlas/repo/temp/atlas-relay/relay.log"
 git add -A && git commit -m "feat(relay): …"
 ./scripts/deploy-relay.sh     # push → git pull como atlas en atlas-hub → sudo systemctl restart → health
 
-# panel: build estático antes de desplegar (lo sirve el relay; PENDIENTE DE MIGRAR)
+# panel: build estático antes de desplegar (lo sirve el relay)
 cd apps/panel && npm install && npm run build
 ```
 

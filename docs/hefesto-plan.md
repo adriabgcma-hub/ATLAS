@@ -107,7 +107,7 @@ Precedencia: prohibición > autorización individual > plan > trivial.
 | Borrado, cierre forzado, matar procesos del usuario | Individual, identidad revalidada |
 | Capturas, accesibilidad, comunicación externa | Individual y consentimiento de datos |
 | Terminal de consulta | Adaptadores y opciones permitidos |
-| Terminal general | Pendiente de aislamiento, nunca trivial por nombre del binario |
+| Terminal general | Lista blanca de binarios de consulta; nunca trivial, tarjeta por ejecución |
 | Accesos excluidos o elevación | Rechazo |
 
 Un consentimiento identifica tarea, invocación o versión de plan, argumentos exactos,
@@ -317,8 +317,8 @@ sistema trivial por adaptador, sin tarjeta y sin burbuja.
    suspensión persistente entre reinicios, aborto local independiente de red y estado
    recuperable, implementados y probados en dev. Verificado en vivo el ciclo
    activar → eco → suspender con el relay real y la recuperación tras reiniciar el Mac.
-   Pendientes de esta entrega: atajo y control Hub Panel, y la matriz completa de
-   salida normal/crash/pérdida de red/suspensión/reinicios antes de ejecutar.
+   Cerrada el 2026-10-30: atajo local, control desde Hub Panel y matriz de fallos
+   verificada.
 3. **Delegación e identidad:** entradas autenticadas, continuaciones no bloqueantes,
    orbe/etiquetas, snapshots atómicos de tareas/confirmaciones/cursor; mantener Atlas
    operativo mientras Hefesto espera. Medir resultados, latencia y tokens.
@@ -1049,9 +1049,9 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
      `Ejecutar /bin/echo hola — la salida volverá al modelo` (riesgo
      `destructive`); tras aprobar, el modelo recibió `hola`. `hefesto_capture`
      abrió la tarjeta de captura (riesgo `external`) y devolvió el texto estable
-     de permiso denegado porque el Mac aún no tiene concedido el TCC de Grabación
-     de pantalla; la ruta OCR real queda pendiente de conceder ese permiso y
-     reiniciar Atlas. La ventana de tablas está cubierta por pruebas de unidad y
+     de permiso denegado porque el Mac aún no tenía concedido el TCC de Grabación
+     de pantalla; la ruta OCR real se verificó el 2026-11-08 con el permiso
+     concedido. La ventana de tablas está cubierta por pruebas de unidad y
      build, y verificada visualmente en la app por el usuario (2026-11-04).
   Commit `3cfe4da`. Pruebas: `cargo test --workspace` 207 (2 ignoradas), clippy
   `--workspace --all-targets -- -D warnings` y `cargo fmt --check` limpios,

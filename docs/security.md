@@ -17,7 +17,7 @@ La ausencia de respuesta nunca equivale a autorización. Las confirmaciones debe
 Para Hefesto rige la matriz de [su plan](./hefesto-plan.md): prohibición > permiso
 individual > plan > adaptador trivial. Crear no permite sobrescribir, un plan no
 permite saltar la confirmación destructiva y no se admite elevación mediante `sudo`.
-Las excepciones triviales describen herramientas futuras: la base solo admite eco.
+Las excepciones triviales están limitadas a las herramientas definidas en el plan.
 
 ## Frontera de Hefesto (dispositivo en la app; listener de prueba activo en atlas-hub)
 
@@ -28,7 +28,7 @@ certificado no listado se cierra sin respuesta; cada conexión tiene un plazo
 absoluto que la cierra aunque el cliente gotee bytes, para que el trabajo lento
 previo a la autenticación no agote las plazas del listener.
 No hay activación por defecto, downgrade, credenciales en frontend ni ejecución desde
-mensajes de chat. Las entradas y confirmaciones de delegación real siguen pendientes.
+mensajes de chat. Las entradas y confirmaciones de delegación real están implementadas.
 
 El ejecutor solo acepta encargos con el dispositivo activo: al arrancar se activa
 solo si no hay una suspensión pendiente; suspender (app, Hub Panel o control remoto)
@@ -39,9 +39,8 @@ reejecuta. El aborto local no depende de la red y no revierte efectos ya produci
 Desde 2026-10-28 el bucle nativo vive dentro de la app Tauri (un solo hilo, ligado a
 su vida): lee las credenciales mTLS solo del entorno del proceso, el webview nunca
 las ve y no ejecuta nada hasta que la app activa el dispositivo (sola al arrancar o a
-mano tras suspender). Sin credenciales no hay hilo ni indicador. Atajo, control desde
-Hub Panel y la matriz completa de fallos siguen pendientes antes de habilitar
-capacidades reales.
+mano tras suspender). Sin credenciales no hay hilo ni indicador. El atajo, el
+control desde Hub Panel y la matriz de fallos están verificados.
 
 Las pruebas usan certificados efímeros y texto ficticio. No provisionar certificados,
 TCC ni secretos reales sin permiso. El journal de eco persiste texto de prueba para

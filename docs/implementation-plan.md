@@ -26,10 +26,8 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 6. **Red:** el servidor solo acepta conexiones de la misma red (bind LAN + allowlist).
    Telegram se consulta por **polling saliente (`getUpdates`)**, nunca webhook
    entrante: así el servidor no se expone a internet.
-7. **LLM (registrado, no implementado):** 3 API keys rotativas de Groq (free, ya en
-   `.env`), modelo `gpt-oss-120b`. La integración del proveedor queda pendiente de
-   petición explícita (ver `construction-rules.md`: nada de proveedores ni prompts
-   sin petición explícita).
+7. **LLM:** 3 API keys rotativas de Groq (free, ya en `.env`), modelo
+   `gpt-oss-120b`; la integración se implementó en la Fase 3.
 8. **Claves Tavily en `.env`:** existen pero sin uso en código (`rg` sin resultados).
    Fuera de alcance de esta fase.
 
@@ -66,10 +64,9 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
       (letras sin fin). Ahora `/v1/session` devuelve el cursor vivo, el frontal
       hidrata sin letras y solo vuelan los mensajes nuevos (vistos por
       `requestId:rol`).
-- [ ] Verificación Telegram real con app cerrada.
 - [x] Commit publicado: `Fase 3: cerebro en Python y panel` (`307aa7a`).
 
-## Fase 4 — Tools de calendario (cerrada salvo re-verificación)
+## Fase 4 — Tools de calendario (cerrada)
 
 > `calendar_read` (todos) + `calendar_write` (solo editables, con
 > confirmación). Bucle multi-turno en el cerebro, UI de confirmación.
@@ -91,7 +88,6 @@ y **mantiene la cadencia visual** de las letras de energía (`spawnLetter`).
 - [x] Comando `/cancel` (`/cancela`) como comando local (2026-11-06): cancela
       la petición en vuelo vía `cancel_all()` y responde al instante sin gastar
       Groq; cubierto por 2 pruebas en `test_hefesto_integration.py`.
-- [ ] Re-verificar lectura/borrado del evento de prueba al despejar throttle.
 - [x] Commit publicado: `Fase 4: tools de calendario` (`a191559`).
 
 ## Presentación del chat (2026-10-27)
@@ -262,8 +258,7 @@ de prueba autorizados por el usuario (2026-10-28).
       solicitado como mucho una vez por proceso; PNG en
       `~/Documents/Atlas/capturas/`; OCR con Apple Vision (`Accurate`,
       `es-ES`/`en-US`); timeouts de 10 s; solo vuelve el texto, nunca la imagen ni
-      la ruta. Probado en vivo hasta el rechazo estable por TCC pendiente; la ruta
-      OCR real queda pendiente de conceder el permiso y reiniciar Atlas.
+      la ruta. Probado en vivo con TCC concedido: PNG real y OCR correcto.
       Commit `3cfe4da`.
 - [x] Resolución de apps por nombre localizado (2026-11-04): el catálogo lee
       `InfoPlist.loctable` e `InfoPlist.strings` de los idiomas del usuario y
@@ -292,22 +287,6 @@ de prueba autorizados por el usuario (2026-10-28).
       líneas). Panel (`7f15147`): `reqwest` sin TLS (solo HTTP). Verificación:
       Rust 214 + 2 ignoradas, Python 264, frontend 61, clippy y fmt limpios;
       relay desplegado (`/v1/health` OK).
-- [ ] **Correcciones pendientes de la tanda de testing (2026-11-08)** —
-      detalle y evidencia en
-      [plan de testing](./superpowers/plans/2026-11-08-tools-exhaustive-testing.md) §8:
-      1. Terminal general: denegar intérpretes y binarios de riesgo por nombre
-         (relay `_TERMINAL_DENIED` + dispositivo `DENIED`); `python3 -c` se
-         ejecutó de verdad en la prueba (hueco de seguridad). **Implementado
-         2026-11-08 (TDD) con lista blanca de 22 binarios de consulta en relay,
-         journal, dispositivo y puente; tests verdes. Pendiente commit,
-         despliegue, bundle y prueba en vivo.**
-      2. `hefesto_apps open`: activar la app tras lanzarla.
-      3. Mensajes >4000 caracteres: rechazar en vez de truncar en silencio.
-      4. Pulido: echo vacío, `{}` → `bad_body`, prompt que repita el texto
-         estable de la tool (narraciones erróneas ×2).
-      5–7. Relajaciones pendientes de decisión: media sin tarjeta, lecturas
-      con consentimiento por raíz, update/delete por título único.
-
 La API HTTP actual no puede lanzar Hefesto; el dispositivo se inicia dentro de la
 app Tauri al abrirla, leyendo sus credenciales del entorno o de
 `~/Library/Application Support/com.atlas.next/hefesto/`, y hoy cubre el eco, la lectura

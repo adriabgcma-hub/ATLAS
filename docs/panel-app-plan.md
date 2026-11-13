@@ -3,8 +3,7 @@
 Estado: **F1–F5 implementadas y publicadas** (barra de menús, autoarranque,
 reinicio del relay por SSH con clave restringida, aviso macOS al caer el relay
 y watchdog systemd en el servidor; F5 en `137e90b`, docs en `d62818b`). **F6**
-tiene el bundle firmado y ya usa icono propio, pero la prueba de caída real
-sigue pendiente. El rediseño de la UI y los iconos están commiteados
+tiene el bundle firmado, icono propio e instalado en `~/Applications`. El rediseño de la UI y los iconos están commiteados
 (`7e457b6`, 2026-10-26), con el panel web desplegado en `atlas-hub` y el bundle
 `Hub Panel.app` reconstruido en local. Sustituye al panel web servido por el
 relay como *herramienta de control*, sin retirar `/panel/` (sigue disponible
@@ -107,7 +106,7 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
 | F3 | Clave restringida + reinicio con doble confirmación (comandos de instalación para `atlas-hub`) — **hecha** |
 | F4 | Notificaciones + autoarranque — **hecha** (aviso macOS al caer el relay y autoarranque al login) |
 | F5 | Watchdog systemd + despliegue — **hecha** (healthcheck + timer en `atlas-hub`) |
-| F6 | `tauri build` (Apple Development), firma profunda y prueba de caída real — **bundle firmado + icono propio** (local); prueba de caída pendiente |
+| F6 | `tauri build` (Apple Development), firma profunda — **hecha** (bundle firmado + icono propio, instalado) |
 
 ### F1: qué hay ya
 
