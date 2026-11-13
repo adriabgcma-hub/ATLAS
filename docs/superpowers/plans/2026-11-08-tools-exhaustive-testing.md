@@ -389,7 +389,9 @@ TextEdit (abierta desde el Dock por el usuario).
   en vivo tras el despliegue: `/usr/bin/python3` rechazado **sin tarjeta** y
   `/bin/echo` con tarjeta y salida. Tests: Python 264, workspace Rust 214
   (2 ignoradas), clippy y fmt limpios; los RED se vieron fallar antes
-  (el puente devolvía `1\n` de python3). **Pendiente:** bundle nuevo para la
-  defensa del dispositivo (el relay ya rechaza primero).
+  (el puente devolvía `1\n` de python3). **Bundle reconstruido con Apple
+  Development** (incluido el DMG), firma profunda válida e instalado en
+  `/Applications/Atlas.app`; app relanzada con el bundle nuevo (instancia
+  `app-27415-…`, gen 1232, online).
 - C2–C4, R5–R7 y V1: pendientes.
 
