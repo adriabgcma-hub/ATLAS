@@ -75,6 +75,11 @@ la app (o con la tarea de trabajo) que lo necesita.
 - iCloud CalDAV: prohibido martillear. Cada prueba contra iCloud (una sola
   petición de lectura o más) requiere permiso explícito del usuario, con pausa
   entre intentos. Apple limita (throttle 403) ante ráfagas.
+- **Tailscale (acceso remoto):** red mesh gestionada por Tailscale para llegar
+  al relay, Cockpit y los servicios desde fuera de casa, sin abrir puertos ni
+  tocar el router. **Mantener el cliente `tailscaled` parcheado y revisar su
+  versión con regularidad** en cada mantenimiento. Cualquier cambio en él
+  requiere permiso explícito, igual que el resto del servidor.
 
 ## App Hub Panel (`apps/panel-app`)
 
