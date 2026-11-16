@@ -712,6 +712,12 @@ def read_env() -> dict:
         "editable": {norm_name(name) for name in editable_names},
         "editable_names": editable_names,
         "host": os.environ.get("RELAY_HOST", "").strip(),
+        "extra_hosts": [h.strip() for h in
+                        os.environ.get("RELAY_EXTRA_HOSTS", "").split(",")
+                        if h.strip()],
+        "allow_networks": [n.strip() for n in
+                           os.environ.get("RELAY_ALLOW_NETWORKS", "").split(",")
+                           if n.strip()],
         "port": port,
         "data_dir": resolved,
         "cors_origin": os.environ.get("RELAY_CORS_ORIGIN", "").strip(),
@@ -728,6 +734,16 @@ def lan_ip() -> str:
         return "127.0.0.1"
     finally:
         sock.close()
+
+
+def client_allowed(client_ip: str, networks: list) -> bool:
+    """True si client_ip es IPv4 y cae dentro de alguna red permitida."""
+    try:
+        client = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    return isinstance(client, ipaddress.IPv4Address) and any(
+        client in n for n in networks)
 
 
 def atomic_write(path: str, payload: dict) -> None:
@@ -2439,8 +2455,12 @@ class Brain:
             self._save_offset()
 
 
-def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
+def make_handler(brain: Brain, networks, status: dict,
                  sysmon: system_monitor.SystemMonitor):
+    # `networks` es la lista de redes permitidas (LAN + extras). Se sigue
+    # aceptando una única red suelta por compatibilidad con llamadas antiguas.
+    if isinstance(networks, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
+        networks = [networks]
     # RELAY_CORS_ORIGIN Puede llevar varios orígenes separados por comas
     # (dev 5173 del app + dev 5174 del panel): se devuelve SOLO el Origin que
     # hace petición si está en la lista (formato válido de CORS multi-origen).
@@ -2476,7 +2496,7 @@ def make_handler(brain: Brain, network: ipaddress.IPv4Network, status: dict,
                 return False
             if client.is_loopback:
                 return True
-            return isinstance(client, ipaddress.IPv4Address) and client in network
+            return client_allowed(self.client_address[0], networks)
 
         def _json(self, status_code: int, payload: dict) -> None:
             body = json.dumps(payload).encode("utf-8")
@@ -2778,7 +2798,10 @@ def load_dotenv(path: str = ".env") -> None:
 
 
 @contextmanager
-def hefesto_listener(host: str, data_dir: str):
+def hefesto_listener(hosts, data_dir: str):
+    # Acepta un único host como string (compatibilidad) o una lista de hosts.
+    if isinstance(hosts, str):
+        hosts = [hosts]
     names = ("HEFESTO_PORT", "HEFESTO_TLS_CERT", "HEFESTO_TLS_KEY",
              "HEFESTO_TLS_CA", "HEFESTO_PEERS_FILE")
     if not any(name in os.environ for name in names):
@@ -2794,6 +2817,7 @@ def hefesto_listener(host: str, data_dir: str):
         fail_config("Puerto de Hefesto inválido.")
 
     with ExitStack() as resources:
+        servers = []
         try:
             peers = hefesto.load_peers(os.environ["HEFESTO_PEERS_FILE"])
             devices = {peer.device_id for peer in peers.values()
@@ -2803,39 +2827,51 @@ def hefesto_listener(host: str, data_dir: str):
             device_id = next(iter(devices)) if devices else None
             journal = hefesto.Journal(os.path.join(data_dir, "hefesto.sqlite"))
             resources.callback(journal.close)
-            server = hefesto.create_server(
-                (host, port), journal, peers,
-                certfile=os.environ["HEFESTO_TLS_CERT"],
-                keyfile=os.environ["HEFESTO_TLS_KEY"],
-                cafile=os.environ["HEFESTO_TLS_CA"],
-            )
+            for h in hosts:
+                srv = hefesto.create_server(
+                    (h, port), journal, peers,
+                    certfile=os.environ["HEFESTO_TLS_CERT"],
+                    keyfile=os.environ["HEFESTO_TLS_KEY"],
+                    cafile=os.environ["HEFESTO_TLS_CA"],
+                )
+                servers.append(srv)
+                # Registrar el cierre nada más crear: si un host posterior
+                # falla, los ya creados se cierran al salir del ExitStack.
+                resources.callback(srv.server_close)
         except (OSError, ValueError, sqlite3.Error):
             fail_config("Configuración segura de Hefesto no disponible.")
-        resources.callback(server.server_close)
         lifecycle = threading.Lock()
         stopping = threading.Event()
-        serving = threading.Event()
+        serving = [threading.Event() for _ in servers]
+        threads: list[threading.Thread] = []
 
-        def serve():
-            with lifecycle:
-                if stopping.is_set():
-                    return
-                serving.set()
-            server.serve_forever()
+        def make_serve(srv, started: threading.Event):
+            def serve():
+                with lifecycle:
+                    if stopping.is_set():
+                        return
+                    started.set()
+                srv.serve_forever()
+            return serve
 
         def stop():
             with lifecycle:
                 stopping.set()
-                started = serving.is_set()
-            if started:
-                server.shutdown()
-            if thread.ident is not None:
-                thread.join()
+                started = [srv for srv, ev in zip(servers, serving)
+                           if ev.is_set()]
+            for srv in started:
+                srv.shutdown()
+            for thread in threads:
+                if thread.ident is not None:
+                    thread.join()
 
-        thread = threading.Thread(target=serve, name="hefesto-https", daemon=True)
         # También cubre una interrupción dentro de start(), antes de entrar al with.
         resources.callback(stop)
-        thread.start()
+        for srv, started in zip(servers, serving):
+            thread = threading.Thread(target=make_serve(srv, started),
+                                      name="hefesto-https", daemon=True)
+            threads.append(thread)
+            thread.start()
         log("Hefesto: listener mTLS habilitado (solo eco).")
         yield {"journal": journal, "device_id": device_id}
 
@@ -2861,11 +2897,18 @@ def main() -> int:
             host = lan_ip()
         if ipaddress.ip_address(host).is_loopback:
             fail_config("no se pudo autodetectar la IP LAN (¿red no lista al arrancar?)")
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        fail_config(f"RELAY_HOST no es una IP válida: {host!r}")
-    network = ipaddress.ip_network(host + "/24", strict=False)
+    hosts = list(dict.fromkeys([host] + cfg["extra_hosts"]))
+    for h in hosts:
+        try:
+            ipaddress.ip_address(h)
+        except ValueError:
+            fail_config(f"RELAY_HOST/RELAY_EXTRA_HOSTS no es una IP válida: {h!r}")
+    networks = [ipaddress.ip_network(h + "/24", strict=False) for h in hosts]
+    for n in cfg["allow_networks"]:
+        try:
+            networks.append(ipaddress.ip_network(n, strict=False))
+        except ValueError:
+            fail_config(f"RELAY_ALLOW_NETWORKS no es una red válida: {n!r}")
 
     brain = Brain(cfg)
     status = {
@@ -2881,19 +2924,32 @@ def main() -> int:
     sysmon = system_monitor.SystemMonitor(
         log_panel=lambda _kind, message: dlog(brain, "PANEL", message))
 
-    with ThreadingHTTPServer((host, cfg["port"]),
-                             make_handler(brain, network, status, sysmon)) as server:
-        with hefesto_listener(host, cfg["data_dir"]) as hefesto_ctx:
+    handler = make_handler(brain, networks, status, sysmon)
+    servers = [ThreadingHTTPServer((h, cfg["port"]), handler) for h in hosts]
+    http_threads: list[threading.Thread] = []
+    with ExitStack() as stack:
+        for srv in servers:
+            stack.callback(srv.server_close)
+            thread = threading.Thread(target=srv.serve_forever, daemon=True,
+                                      name="relay-http")
+            thread.start()
+            # shutdown registrado tras start(): solo se llama si el hilo llegó
+            # a arrancar (shutdown sin serve_forever bloquearía para siempre).
+            stack.callback(srv.shutdown)
+            http_threads.append(thread)
+        with hefesto_listener(hosts, cfg["data_dir"]) as hefesto_ctx:
             if hefesto_ctx is not None:
                 brain.hefesto_start(hefesto_ctx["journal"], hefesto_ctx["device_id"])
             threading.Thread(target=brain.worker, daemon=True, name="brain-worker").start()
             if cfg["token"]:
                 threading.Thread(target=brain.telegram_loop, daemon=True,
                                  name="telegram-poll").start()
-            log(f"escuchando en {host}:{cfg['port']} (solo red local {network}).")
+            log(f"escuchando en {', '.join(hosts)}:{cfg['port']} "
+                f"(redes {', '.join(str(n) for n in networks)}).")
             log(f"panel estático en /panel/ ({sysmon.panel_dist}).")
             try:
-                server.serve_forever()
+                for thread in http_threads:
+                    thread.join()
             except KeyboardInterrupt:
                 pass
             finally:
