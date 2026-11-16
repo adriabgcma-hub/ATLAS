@@ -58,10 +58,10 @@ for i in $(seq 1 36); do
 done
 
 echo "== dominios de confianza de Nextcloud =="
-occ() { "${U[@]}" podman exec -u abc nextcloud php /config/www/nextcloud/occ "$@"; }
-occ config:system:set trusted_domains 1 --value=atlas-hub || true
-occ config:system:set trusted_domains 2 --value=atlas-hub.local || true
-occ config:system:set trusted_domains 3 --value=100.121.19.28 || true
+occ() { "${U[@]}" podman exec -u abc nextcloud php /app/www/public/occ "$@"; }
+occ config:system:set trusted_domains 1 --value=atlas-hub
+occ config:system:set trusted_domains 2 --value=atlas-hub.local
+occ config:system:set trusted_domains 3 --value=100.121.19.28
 
 echo "== comprobación de MariaDB =="
 PW=$(sed -n 's/^MARIADB_PASSWORD=//p' "$S/secrets/mariadb.env")
