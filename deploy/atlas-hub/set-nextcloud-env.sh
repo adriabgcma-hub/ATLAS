@@ -18,7 +18,7 @@ grep -vE '^(CALDAV_URL|CALDAV_USERNAME|CALDAV_APP_PASSWORD|CALDAV_EDIT_CALENDARS
   echo "CALDAV_URL=http://atlas-hub:8080/remote.php/dav"
   echo "CALDAV_USERNAME=${NC_USER}"
   echo "CALDAV_APP_PASSWORD=${NC_PASS}"
-  echo "CALDAV_EDIT_CALENDARS=Exámenes,Celebraciones,Horario,Deberes"
+  echo "CALDAV_EDIT_CALENDARS=Exámenes,Eventos,Horario,Deberes"
   echo "PANEL_SERVICE_PROBES=nextcloud=http://atlas-hub:8080,jellyfin=http://atlas-hub:8096"
   echo "PANEL_SYSTEM_UNITS=ssh.service,avahi-daemon.service,ufw.service,atlas-relay.service,tailscaled.service,cockpit.service"
 } >> "$tmp"
