@@ -9,6 +9,8 @@ S=/opt/services
 U=(sudo -u services env HOME="$S" XDG_RUNTIME_DIR=/run/user/997)
 
 install -d -o services -g services "$S/.config/containers/systemd"
+# install -d crea los padres como root; podman rootless exige que ~/.config sea suyo
+chown -R services:services "$S/.config"
 
 if ! grep -q '^services:' /etc/subuid; then
   usermod --add-subuids 200000-265535 --add-subgids 200000-265535 services
