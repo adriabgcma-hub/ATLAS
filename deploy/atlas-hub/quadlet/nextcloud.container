@@ -1,0 +1,13 @@
+[Unit]
+Description=Nextcloud
+Requires=mariadb.service
+After=mariadb.service
+
+[Container]
+Image=docker.io/linuxserver/nextcloud:latest
+EnvironmentFile=/opt/services/secrets/nextcloud.env
+Volume=nextcloud-config:/config:Z
+Volume=nextcloud-data:/data:Z
+PublishPort=8080:80
+Network=atlas-services.network
+ContainerName=nextcloud

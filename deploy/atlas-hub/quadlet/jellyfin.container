@@ -1,0 +1,11 @@
+[Unit]
+Description=Jellyfin
+
+[Container]
+Image=docker.io/jellyfin/jellyfin:latest
+Volume=jellyfin-config:/config:Z
+Volume=jellyfin-cache:/cache:Z
+Volume=/opt/services/media:/media:ro
+PublishPort=8096:8096
+Network=atlas-services.network
+ContainerName=jellyfin

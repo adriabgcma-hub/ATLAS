@@ -1,0 +1,9 @@
+[Unit]
+Description=MariaDB (Nextcloud)
+
+[Container]
+Image=docker.io/library/mariadb:11
+EnvironmentFile=/opt/services/secrets/mariadb.env
+Volume=mariadb-data:/var/lib/mysql:Z
+Network=atlas-services.network
+ContainerName=mariadb
