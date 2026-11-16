@@ -85,6 +85,7 @@ export interface Snapshot {
   generated_at: string
   units: Unit[]
   ports: { port: number; address: string; service?: string | null }[]
+  services: { name: string; url: string; up: boolean }[]
   resources: {
     mem_total_kb?: number
     mem_available_kb?: number

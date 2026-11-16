@@ -51,6 +51,31 @@ export function UnitsCard({ snap, onAct }: { snap: Snapshot; onAct: (unit: strin
   )
 }
 
+/** Sondas HTTP de los servicios del hub (Nextcloud, Jellyfin…) + acceso a Cockpit. */
+export function ServicesCard({ snap }: { snap: Snapshot }) {
+  // Tolerante con relays antiguos que aún no publican `services`.
+  const services = snap.services ?? []
+  return (
+    <Card title="Servicios" badge={`${services.length} sondas`}>
+      {services.map(s => (
+        <div className="row" key={s.name}>
+          <span className={`dot ${s.up ? 'ok' : 'dim'}`}></span>
+          <div className="grow">
+            <div className="name">{s.name}</div>
+            <div className="sub">{s.up ? 'activo' : 'sin respuesta'}</div>
+          </div>
+        </div>
+      ))}
+      <div style={{ marginTop: 8 }}>
+        <a className="btn" href="https://atlas-hub:9090" target="_blank" rel="noreferrer"
+           style={{ display: 'inline-block', textDecoration: 'none' }}>
+          Abrir Cockpit
+        </a>
+      </div>
+    </Card>
+  )
+}
+
 export function PortsCard({ snap }: { snap: Snapshot }) {
   return (
     <Card title="Puertos a la escucha" badge={String(snap.ports.length)}>

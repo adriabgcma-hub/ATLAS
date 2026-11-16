@@ -8,7 +8,7 @@ import {
 } from './api'
 import {
   Card, ConfirmCard, HefestoCard, LogsCard, PeticionesCard,
-  PortsCard, RelayCard, RestartCard, UnitsCard,
+  PortsCard, RelayCard, RestartCard, ServicesCard, UnitsCard,
 } from './components/Cards'
 
 interface Pending { op: string; kind: string; summary: string }
@@ -155,6 +155,7 @@ export default function App() {
         <RelayCard health={health} stats={stats} relayUnit={relayUnit} />
         <HefestoCard status={hefesto} busy={suspending} onSuspend={doSuspend} />
         <UnitsCard snap={snap} onAct={(unit, verb) => ask('service', { unit, verb })} />
+        <ServicesCard snap={snap} />
         <PortsCard snap={snap} />
         <PeticionesCard health={health} session={session}
                         onCancelAll={() => ask('cancel_all', {})} />
