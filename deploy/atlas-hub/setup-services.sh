@@ -3,6 +3,8 @@
 # Idempotente. Ejecutar como root: sudo bash setup-services.sh
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "ejecuta con sudo" >&2; exit 1; }
+trap 'chmod 644 /tmp/atlas-setup.log 2>/dev/null || true' EXIT
+exec > >(tee /tmp/atlas-setup.log) 2>&1
 
 R=/opt/atlas/repo
 S=/opt/services
