@@ -12,6 +12,9 @@ P1=$(printf '%s' "$P1" | tr -d '\r\n\033')
 P1=${P1#\[200~}; P1=${P1%\[201~}
 
 cd /
-sudo -u services env HOME=/opt/services XDG_RUNTIME_DIR=/run/user/997 OC_PASS="$P1" \
-  podman exec -u abc nextcloud php /app/www/public/occ user:resetpassword --password-from-env adria-admin
+# Se pasa por stdin (occ lee la línea del prompt sin necesidad de TTY);
+# así la contraseña no queda en argv ni en variables del proceso.
+printf '%s\n' "$P1" | \
+sudo -u services env HOME=/opt/services XDG_RUNTIME_DIR=/run/user/997 \
+  podman exec -i -u abc nextcloud php /app/www/public/occ user:resetpassword adria-admin
 echo "contraseña restablecida"
