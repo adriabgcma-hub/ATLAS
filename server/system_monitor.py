@@ -18,6 +18,10 @@ Variables de entorno:
   PANEL_SYSTEM_UNITS  unidades systemd de nivel de sistema para mostrar.
   PANEL_ACTION_UNITS  unidades de sistema ACCIONABLES (lista blanca; vacía
                       por defecto hasta instalar reglas polkit en atlas-hub).
+  PANEL_SERVICE_PROBES  servicios a sondear por HTTP, `nombre=url` separados
+                      por comas. Las URLs usan el nombre del host (se abren
+                      desde el Mac), no loopback: p. ej.
+                      `nextcloud=http://atlas-hub:8080,jellyfin=http://atlas-hub:8096`.
   PANEL_DIST_DIR      raíz estática del panel (apps/panel/dist).
 """
 
@@ -29,6 +33,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.request
 
 SNAPSHOT_TTL_S = 3
 SUBPROC_TIMEOUT_S = 6
@@ -65,6 +70,19 @@ def _run(cmd: list[str], timeout: int = SUBPROC_TIMEOUT_S
 
 def _parse_since(raw: str) -> str:
     return raw.strip() if raw.strip() else ""
+
+
+def _parse_probes(raw: str) -> dict[str, str]:
+    """`nombre=url,nombre=url` -> {nombre: url}; descarta trozos inválidos."""
+    out: dict[str, str] = {}
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk or "=" not in chunk:
+            continue
+        name, url = chunk.split("=", 1)
+        if name.strip() and url.strip().startswith("http"):
+            out[name.strip()] = url.strip()
+    return out
 
 
 class Ops:
@@ -112,6 +130,8 @@ class SystemMonitor:
     def __init__(self, log_panel=None) -> None:
         self.system_units = _env_list("PANEL_SYSTEM_UNITS", DEFAULT_SYSTEM_UNITS)
         self.action_units = set(_env_list("PANEL_ACTION_UNITS", DEFAULT_ACTION_UNITS))
+        self.service_probes = _parse_probes(
+            os.environ.get("PANEL_SERVICE_PROBES", ""))
         self.panel_dist = os.path.realpath(os.environ.get(
             "PANEL_DIST_DIR", os.path.join("apps", "panel", "dist")))
         self.log_panel = log_panel  # callable(kind, message)
@@ -201,6 +221,20 @@ class SystemMonitor:
                                     "address": local.rpartition(":")[0],
                                     "service": KNOWN_PORTS.get(port)})
         return [found[p] for p in sorted(found, key=int)]
+
+    # -- snapshot: servicios ------------------------------------------------
+    def _services(self) -> list[dict]:
+        """Sondeo HTTP breve de cada servicio; cualquier fallo => `up` False."""
+        items: list[dict] = []
+        for name, url in self.service_probes.items():
+            up = False
+            try:
+                with urllib.request.urlopen(url, timeout=2) as resp:
+                    up = resp.status < 400
+            except Exception:
+                up = False
+            items.append({"name": name, "url": url, "up": up})
+        return items
 
     # -- snapshot: recursos ---------------------------------------------------
     def _resources(self) -> dict:
@@ -312,6 +346,7 @@ class SystemMonitor:
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "units": self._units(),
             "ports": self._ports(),
+            "services": self._services(),
             "resources": self._resources(),
             "actions": {
                 "verbs": list(ACTION_VERBS),
