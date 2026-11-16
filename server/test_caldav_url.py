@@ -58,6 +58,20 @@ class CalDavUrlTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CALDAV_URL": NEXTCLOUD}, clear=True):
             self.assertEqual(atlas_caldav.caldav_base(), NEXTCLOUD)
 
+    def test_absolute_ruta_relativa_al_origen(self):
+        # Nextcloud devuelve hrefs tipo "/remote.php/dav/..." (relativos al
+        # origen), no a la ruta completa de CALDAV_URL.
+        self.assertEqual(
+            atlas_caldav._absolute("http://atlas-hub:8080/remote.php/dav",
+                                   "/remote.php/dav/principals/users/u/"),
+            "http://atlas-hub:8080/remote.php/dav/principals/users/u/")
+
+    def test_absolute_absoluto_y_relativo_sin_barra(self):
+        self.assertEqual(atlas_caldav._absolute("http://h/path", "https://x/y"),
+                         "https://x/y")
+        self.assertEqual(atlas_caldav._absolute("http://h/path", "rel"),
+                         "http://h/pathrel")
+
     def test_el_cliente_usa_la_base_configurada(self):
         recorded: list[tuple[str, str]] = []
         with mock.patch.dict(os.environ, {"CALDAV_URL": NEXTCLOUD}, clear=True), \

@@ -14,6 +14,7 @@ import datetime
 import os
 import time
 import urllib.error
+import urllib.parse
 import zoneinfo
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -23,9 +24,14 @@ DAV = "{DAV:}"
 CALDAV = "{urn:ietf:params:xml:ns:caldav}"
 
 def _absolute(base: str, href: str) -> str:
-    """El href CalDAV puede ser relativo (/…) o absoluto (shard de Apple)."""
+    """Resuelve hrefs CalDAV. Absolutos, tal cual; los que empiezan por "/"
+    son relativos al origen (esquema+host), no a la ruta del base: Nextcloud
+    devuelve "/remote.php/dav/..." y CALDAV_URL ya lleva esa ruta."""
     if href.startswith("http://") or href.startswith("https://"):
         return href
+    if href.startswith("/"):
+        parsed = urllib.parse.urlsplit(base)
+        return f"{parsed.scheme}://{parsed.netloc}{href}"
     return base + href
 
 
