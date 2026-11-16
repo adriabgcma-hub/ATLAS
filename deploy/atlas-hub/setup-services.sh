@@ -9,6 +9,8 @@ exec > >(tee /tmp/atlas-setup.log) 2>&1
 R=/opt/atlas/repo
 S=/opt/services
 U=(sudo -u services env HOME="$S" XDG_RUNTIME_DIR=/run/user/997)
+# podman rootless re-ejecuta y no puede heredar un cwd inaccesible (p. ej. /home/adria_admin)
+cd "$S"
 
 install -d -o services -g services "$S/.config/containers/systemd"
 # install -d crea los padres como root; podman rootless exige que ~/.config sea suyo
