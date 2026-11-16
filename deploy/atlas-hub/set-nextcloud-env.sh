@@ -10,7 +10,23 @@ read -r -p "Usuario de Nextcloud [adria-admin]: " NC_USER
 NC_USER=${NC_USER:-adria-admin}
 read -r -s -p "Contraseña de aplicación de Nextcloud: " NC_PASS
 echo
+# Un pegado con bracketed paste puede colar caracteres de control
+NC_USER=$(printf '%s' "$NC_USER" | tr -d '\r\n\033')
+NC_PASS=$(printf '%s' "$NC_PASS" | tr -d '\r\n\033')
+NC_USER=${NC_USER#\[200~}; NC_USER=${NC_USER%\[201~}
+NC_PASS=${NC_PASS#\[200~}; NC_PASS=${NC_PASS%\[201~}
 [ -n "$NC_PASS" ] || { echo "contraseña vacía" >&2; exit 1; }
+
+echo "== comprobando credenciales contra Nextcloud =="
+code=$(curl -s -o /dev/null -w '%{http_code}' -u "${NC_USER}:${NC_PASS}" \
+  -X PROPFIND -H 'Depth: 0' \
+  'http://atlas-hub:8080/remote.php/dav/' || true)
+if [ "$code" != "207" ]; then
+  echo "ERROR: Nextcloud respondió HTTP $code (se esperaba 207)." >&2
+  echo "Revisa usuario/contraseña de aplicación; no se ha guardado nada." >&2
+  exit 1
+fi
+echo "credenciales OK"
 
 tmp=$(mktemp)
 grep -vE '^(CALDAV_URL|CALDAV_USERNAME|CALDAV_APP_PASSWORD|CALDAV_EDIT_CALENDARS|PANEL_SERVICE_PROBES|PANEL_SYSTEM_UNITS)=' "$ENV" > "$tmp" || true
