@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import datetime
+import os
 import time
 import urllib.error
 import zoneinfo
@@ -28,7 +29,11 @@ def _absolute(base: str, href: str) -> str:
     return base + href
 
 
-BASE = "https://caldav.icloud.com"
+def caldav_base() -> str:
+    """Base CalDAV: CALDAV_URL si está definida; iCloud por defecto."""
+    return os.environ.get("CALDAV_URL", "").strip() or "https://caldav.icloud.com"
+
+
 MAX_EVENTS_PER_CALENDAR = 50
 
 USER_AGENT = "AtlasRelay/3"
@@ -106,13 +111,16 @@ def _prop(xml: bytes, *path: str) -> str | None:
 
 
 class CalDAVClient:
-    """Conexión autenticada a los calendarios iCloud."""
+    """Conexión autenticada a un servidor CalDAV (iCloud por defecto)."""
 
-    WELL_KNOWN = "https://caldav.icloud.com/.well-known/caldav"
-
-    def __init__(self, username: str, password: str) -> None:
+    def __init__(self, username: str, password: str,
+                 base_url: str | None = None) -> None:
         self.username = username
         self.password = password
+        # La base se resuelve al construir: cambiar CALDAV_URL exige reiniciar
+        # el cliente (el relay lo hace al reiniciarse).
+        self.base = (base_url or caldav_base()).rstrip("/")
+        self.well_known = self.base + "/.well-known/caldav"
         self.home_set = ""
         self.calendars: list[dict] = []
 
@@ -136,7 +144,7 @@ class CalDAVClient:
     def discover(self) -> list[dict]:
         """Autentica y lista calendarios. Devuelve [{id, name}]."""
         # 1. Principal del usuario actual.
-        root = self._call("https://caldav.icloud.com/", "PROPFIND",
+        root = self._call(self.base + "/", "PROPFIND",
                           f"""<?xml version="1.0" encoding="utf-8" ?>
                           <D:propfind xmlns:D="DAV:"><D:prop>
                           <D:current-user-principal /></D:prop></D:propfind>""",
@@ -144,7 +152,7 @@ class CalDAVClient:
         principal = _prop(root, f"{DAV}current-user-principal", f"{DAV}href")
         if not principal:
             raise CalDAVError("sin principal")
-        principal_url = _absolute(BASE, principal)
+        principal_url = _absolute(self.base, principal)
         # 2. Casa de calendarios.
         home_xml = self._call(principal_url, "PROPFIND",
                               f"""<?xml version="1.0" encoding="utf-8" ?>
@@ -155,7 +163,7 @@ class CalDAVClient:
         home = _prop(home_xml, f"{CALDAV}calendar-home-set", f"{DAV}href")
         if not home:
             raise CalDAVError("sin calendar-home-set")
-        self.home_set = _absolute(BASE, home).rstrip("/") + "/"
+        self.home_set = _absolute(self.base, home).rstrip("/") + "/"
         # 3. Colecciones: quedarse con las que son calendarios (VCALENDAR).
         listing = self._call(self.home_set, "PROPFIND",
                              f"""<?xml version="1.0" encoding="utf-8" ?>
@@ -209,7 +217,7 @@ class CalDAVClient:
         cal_by_id = {c["id"].rstrip("/"): c["name"] for c in targets}
         events = []
         for calendar in targets:
-            cal_url = _absolute(BASE, calendar["id"])
+            cal_url = _absolute(self.base, calendar["id"])
             # 1. PROPFIND para listar los .ics del calendario.
             prop_body = """<?xml version="1.0" encoding="utf-8" ?>
             <D:propfind xmlns:D="DAV:"><D:prop><D:getetag /></D:prop></D:propfind>"""
@@ -228,7 +236,7 @@ class CalDAVClient:
             ics_hrefs = ics_hrefs[:MAX_EVENTS_PER_CALENDAR]
 
             def _fetch_one(href):
-                event_url = _absolute(BASE, href)
+                event_url = _absolute(self.base, href)
                 try:
                     return self._call_get(event_url)
                 except CalDAVError:
@@ -271,7 +279,7 @@ class CalDAVClient:
             matches = [c for c in self.calendars if c["id"] == calendar_id]
         if not matches:
             raise CalDAVError("calendario desconocido")
-        return _absolute(BASE, matches[0]["id"]).rstrip("/") + "/"
+        return _absolute(self.base, matches[0]["id"]).rstrip("/") + "/"
 
     def _calendar_url(self, calendar_id: str) -> str:
         return self.collection_url(calendar_id)
@@ -293,7 +301,7 @@ class CalDAVClient:
             href = response.findtext(f"{DAV}href") or ""
             if not href.endswith(".ics"):
                 continue
-            event_url = _absolute(BASE, href)
+            event_url = _absolute(self.base, href)
             try:
                 ics_data = self._call_get(event_url)
             except CalDAVError:
