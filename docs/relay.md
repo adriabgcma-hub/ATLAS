@@ -39,11 +39,13 @@ corresponde es commitear en el Mac y desplegar.
   `127.0.0.1` también pasa el filtro `/24` (probes locales), pero como no
   escucha en loopback, desde el propio servidor se consulta vía IP LAN o
   `atlas-hub.local`.
-- **Red**: `ufw` en `atlas-hub` deja pasar `8765/tcp` SOLO desde
-  `192.168.100.0/24`. Nada abierto a internet. **Estado real (2026-10):** la
-  unidad `ufw` está instalada y `enabled`, pero **INACTIVA**; mientras se
-  activa (requiere sudo interactivo), el perímetro operativo es el filtro
-  `same_network_only` del relay más el bind a la IP LAN.
+- **Red**: `ufw` en `atlas-hub` **activo** con reglas versionadas en
+  `deploy/atlas-hub/ufw.sh` (idempotente): 8765/8767 (relay/Hefesto), 9090
+  (Cockpit), 8080 (Nextcloud) y 8096 (Jellyfin) abiertos SOLO desde
+  `192.168.100.0/24` (LAN) y `100.64.0.0/10` (Tailscale). Nada abierto a
+  internet. El relay además aplica `same_network_only` (LAN + redes de
+  `RELAY_ALLOW_NETWORKS`) y escucha en la IP LAN y en la de Tailscale
+  (`RELAY_EXTRA_HOSTS`).
 - **Servicio**: systemd **de sistema**: `atlas-relay.service`
   (`/etc/systemd/system/atlas-relay.service`; fuente versionada en
   `deploy/server/atlas-relay.service`), `User=atlas`,
@@ -281,8 +283,8 @@ Estado previo (ya así en el servidor): hostname `atlas-hub`; `adria_admin`
 administrador con la clave pública del Mac en `authorized_keys` (acceso SSH
 solo con clave); usuario de sistema `atlas` (home `/opt/atlas`, sin login ni
 sudo) que posee `/opt/atlas/repo` (repo público clonado por HTTPS); `ufw`
-instalado y `enabled` pero **INACTIVO** a fecha 2026-10 (ver §2: el perímetro
-efectivo es `same_network_only` + bind a la IP LAN). Todos los comandos se
+instalado y `enabled`, **ACTIVO** desde 2026-11 (perímetro LAN + Tailscale,
+reglas en `deploy/atlas-hub/ufw.sh`). Todos los comandos se
 ejecutan **en atlas-hub** como `adria_admin`;
 el sudo de la instalación es interactivo (con contraseña), mientras que el
 sudo sin contraseña del sudoers.d solo sirve al despliegue automatizado
