@@ -1,5 +1,6 @@
 import type { Health, HefestoStatus, Snapshot, Stats, Unit } from '../api'
 import { dotClass, unitLabel } from './format'
+import { openExternal } from '../api'
 
 /* Léxico visual: tarjetas sueltas; nada de framework (tokens en panel.css). */
 
@@ -68,7 +69,8 @@ export function ServicesCard({ snap }: { snap: Snapshot }) {
       ))}
       <div style={{ marginTop: 8 }}>
         <a className="btn" href="https://atlas-hub:9090" target="_blank" rel="noreferrer"
-           style={{ display: 'inline-block', textDecoration: 'none' }}>
+           style={{ display: 'inline-block', textDecoration: 'none' }}
+           onClick={(e) => { e.preventDefault(); openExternal('https://atlas-hub:9090') }}>
           Abrir Cockpit
         </a>
       </div>

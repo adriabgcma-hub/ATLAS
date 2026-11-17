@@ -529,6 +529,7 @@ fn main() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(PanelState {
             status: Mutex::new(RelayStatus::Down),
             restart_requested: AtomicBool::new(false),

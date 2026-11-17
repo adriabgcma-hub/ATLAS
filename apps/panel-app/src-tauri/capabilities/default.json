@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos mínimos de ATLAS Panel: solo la ventana principal.",
+  "description": "Permisos mínimos de ATLAS Panel: ventana principal y abrir Cockpit.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://atlas-hub:9090/*" }]
+    }
+  ]
 }

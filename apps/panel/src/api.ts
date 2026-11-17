@@ -26,6 +26,17 @@ export interface RestartResp {
 /** Reinicia el relay por SSH (solo app Tauri; comando fijo en authorized_keys). */
 export const restartRelay = () => invoke<RestartResp>('restart_relay')
 
+/** Abre una URL externa: en la app con el plugin opener (permiso restringido),
+ *  en el panel web con una pestaña nueva. */
+export async function openExternal(url: string): Promise<void> {
+  if (IN_TAURI) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(url)
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
 /** El menú de la barra pidió reiniciar antes de crear la ventana. */
 export const hasPendingRestart = () => invoke<boolean>('pending_restart')
 
