@@ -57,10 +57,24 @@ mkdir -p "$DEST"
 log "destino: $DEST"
 
 log "exportando volúmenes de Podman…"
+# podman no puede abrir /dev/stdout como `services` ("open /dev/stdout:
+# permission denied") y devolvería un tar vacío; se exporta a un fichero
+# temporal suyo y se comprime después.
+TMP_TAR=""
+trap '[ -n "$TMP_TAR" ] && rm -f "$TMP_TAR"' EXIT
 for vol in "${VOLUMES[@]}"; do
   if as_services podman volume exists "$vol" 2>/dev/null; then
     log "  - $vol"
-    as_services podman volume export -o - "$vol" | gzip -c > "$DEST/$vol.tar.gz"
+    TMP_TAR="/opt/services/.atlas-backup-$vol.tar"
+    rm -f "$TMP_TAR"
+    as_services podman volume export -o "$TMP_TAR" "$vol"
+    if [ ! -s "$TMP_TAR" ]; then
+      log "ERROR: export vacío de $vol; aborto"
+      exit 1
+    fi
+    gzip -c "$TMP_TAR" > "$DEST/$vol.tar.gz"
+    rm -f "$TMP_TAR"
+    TMP_TAR=""
   else
     log "  - $vol (no existe; se omite)"
   fi

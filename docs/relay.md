@@ -248,6 +248,33 @@ command="sudo systemctl restart atlas-relay && sudo systemctl is-active atlas-re
   el watchdog lo reinició a las 23:26:01 y `/v1/health` volvió a 200 a las
   23:26:05. `NRestarts` sigue a 0 porque no cuenta reinicios manuales.
 
+### Backup semanal del hub (`atlas-backup.timer`)
+
+- Instalación (una vez, tras desplegar para que `deploy/server/atlas-backup.sh`
+  esté en `/opt/atlas/repo`): `./scripts/deploy-backup.sh` → pide la contraseña
+  de `adria_admin`. Deja `atlas-backup.service` (oneshot, root) y
+  `atlas-backup.timer` (domingos 03:00, `Persistent=true`, retardo aleatorio
+  de hasta 1 h).
+- Destino: tarjeta exFAT con etiqueta `ATLASBACKUP` (se monta por etiqueta;
+  rotación manual entre 2 tarjetas). Copia en `<tarjeta>/<fecha>/`:
+  volúmenes `mariadb-data`, `nextcloud-config`, `nextcloud-data`,
+  `jellyfin-config` (export de Podman comprimido), `secrets`, `media` y el
+  `.env` del relay, más `SHA256SUMS`. Se conservan los 2 backups más recientes.
+- **Sin tarjeta no es error:** el servicio sale 0 y el timer semanal no falla.
+  Nunca escribe en el disco interno (aborta si la etiqueta resuelve a
+  `/dev/sda*`).
+- `podman` se ejecuta como `services` desde `/opt/services` (su home): otro cwd
+  da `cannot chdir` y no puede abrir `/dev/stdout` (daría un tar vacío), por
+  eso exporta a un temporal suyo (`/opt/services/.atlas-backup-*.tar`) antes
+  de comprimir. Si el export queda vacío, el servicio falla en vez de guardar
+  un backup hueco. Hace falta espacio libre en `/opt` para el mayor volumen.
+- Ver: `systemctl list-timers atlas-backup.timer` y
+  `journalctl -u atlas-backup -n 50`. Prueba manual:
+  `sudo systemctl start atlas-backup.service` (o `sudo bash
+  /opt/atlas/repo/deploy/server/atlas-backup.sh`) con la tarjeta puesta.
+- Restaurar: `podman volume import <volumen> < <volumen>.tar.gz` como
+  `services` y extraer `secrets`/`.env` con permisos correctos.
+
 ### Prohibiciones explícitas
 
 - NO martillear iCloud CalDAV: cada prueba real contra iCloud requiere el
