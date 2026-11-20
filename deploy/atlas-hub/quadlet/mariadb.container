@@ -7,3 +7,6 @@ EnvironmentFile=/opt/services/secrets/mariadb.env
 Volume=mariadb-data:/var/lib/mysql:Z
 Network=atlas-services.network
 ContainerName=mariadb
+
+[Install]
+WantedBy=default.target

@@ -11,3 +11,6 @@ Volume=nextcloud-data:/data:Z
 PublishPort=8080:80
 Network=atlas-services.network
 ContainerName=nextcloud
+
+[Install]
+WantedBy=default.target

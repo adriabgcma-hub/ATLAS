@@ -9,3 +9,6 @@ Volume=/opt/services/media:/media:ro
 PublishPort=8096:8096
 Network=atlas-services.network
 ContainerName=jellyfin
+
+[Install]
+WantedBy=default.target
