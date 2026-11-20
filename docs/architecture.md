@@ -110,7 +110,7 @@ ni ciclo de vida: si una app falla, la otra sigue.
 - **Red de seguridad**: el watchdog `atlas-health.timer` del servidor reinicia
   el relay aunque no haya nadie delante del Mac.
 
-Detalle de fases y operación en `panel-app-plan.md` y `relay.md` §8.
+Detalle de fases y operación en `panel-app-plan.md` y `atlas-hub.md` §8.
 
 ## Flujo de una petición
 

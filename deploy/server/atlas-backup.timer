@@ -1,6 +1,6 @@
 [Unit]
 Description=Backup semanal de Atlas Hub
-Documentation=file:/opt/atlas/repo/docs/relay.md
+Documentation=file:/opt/atlas/repo/docs/atlas-hub.md
 
 [Timer]
 # Domingos a las 03:00; si el hub estaba apagado, lo recupera al arrancar.

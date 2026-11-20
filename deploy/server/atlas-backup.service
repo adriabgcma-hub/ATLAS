@@ -1,6 +1,6 @@
 [Unit]
 Description=Backup de Atlas Hub a la tarjeta ATLASBACKUP
-Documentation=file:/opt/atlas/repo/docs/relay.md
+Documentation=file:/opt/atlas/repo/docs/atlas-hub.md
 After=network-online.target
 Wants=network-online.target
 

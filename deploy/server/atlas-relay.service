@@ -16,6 +16,7 @@
 
 [Unit]
 Description=ATLAS relay (cerebro HTTP + Telegram, solo stdlib)
+Documentation=file:/opt/atlas/repo/docs/atlas-hub.md
 After=network-online.target
 Wants=network-online.target
 

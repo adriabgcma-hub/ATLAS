@@ -56,7 +56,7 @@ la app (o con la tarea de trabajo) que lo necesita.
   sea: despliega el relay antes). Comprueba `/v1/health` en la IP LAN cada
   60 s y reinicia `atlas-relay` tras 2 fallos seguidos. Para parar el relay a
   mano, antes `sudo systemctl stop atlas-health.timer` y después `start`; si
-  no, el watchdog lo levanta en 1-2 min. Detalle en `docs/relay.md` §9.
+  no, el watchdog lo levanta en 1-2 min. Detalle en `docs/atlas-hub.md` §9.
 - El relay solo escucha en la IP LAN de `atlas-hub` (8765, autodetectada, no
   en `127.0.0.1`); el firewall `ufw` de `atlas-hub` debe dejar pasar
   `8765/tcp` SOLO desde `192.168.100.0/24`.
