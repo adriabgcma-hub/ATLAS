@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Backup de Atlas Hub a la tarjeta exFAT etiquetada ATLASBACKUP.
+# Backup de Atlas Hub a la unidad exFAT etiquetada ATLASBACKUP.
 #
 # Lo ejecuta atlas-backup.timer (root). También a mano:
 #   sudo bash /opt/atlas/repo/deploy/server/atlas-backup.sh
 #
-# Copia al directorio <tarjeta>/<fecha>/:
+# Copia al directorio <unidad>/<fecha>/:
 #   - volúmenes de Podman: mariadb-data, nextcloud-config, nextcloud-data,
 #     jellyfin-config (jellyfin-cache se omite: se regenera)
 #   - /opt/services/secrets (credenciales de MariaDB y Nextcloud)
 #   - /opt/services/media (contenido de Jellyfin; hoy vacío)
 #   - /opt/atlas/repo/.env (entorno del relay)
-# Conserva los 2 backups más recientes en la tarjeta (rotación de 2 tarjetas).
+# Conserva los 2 backups más recientes en la unidad (rotación de 2 unidades).
 # Si la tarjeta no está puesta, sale sin error (el timer semanal no falla).
 set -euo pipefail
 
@@ -28,18 +28,28 @@ as_services() { ( cd /opt/services && runuser -u services -- env HOME=/opt/servi
 
 [ "$(id -u)" -eq 0 ] || { echo "ejecuta como root" >&2; exit 1; }
 
-# Localiza (o monta) la tarjeta por etiqueta.
-if findmnt -n -L "$LABEL" >/dev/null 2>&1; then
-  MP=$(findmnt -n -L "$LABEL" -o TARGET)
+# Localiza (o monta) la tarjeta por etiqueta. Solo puede haber UNA unidad
+# con esta etiqueta conectada: con dos, blkid elegiría al azar y el backup
+# podría ir a la tarjeta equivocada.
+mapfile -t DEVS < <(blkid -t LABEL="$LABEL" -o device 2>/dev/null || true)
+if [ "${#DEVS[@]}" -eq 0 ]; then
+  log "unidad $LABEL no presente; nada que hacer"
+  exit 0
+fi
+if [ "${#DEVS[@]}" -gt 1 ]; then
+  log "ERROR: ${#DEVS[@]} unidades con etiqueta $LABEL (${DEVS[*]}); deja solo una"
+  exit 1
+fi
+DEV="${DEVS[0]}"
+# findmnt -L no existe en util-linux 2.41: se consulta el punto de montaje
+# del dispositivo concreto.
+if MP=$(findmnt -n -S "$DEV" -o TARGET) && [ -n "$MP" ]; then
   OWN_MOUNT=0
-elif DEV=$(blkid -L "$LABEL" 2>/dev/null) && [ -n "$DEV" ]; then
+else
   mkdir -p "$MOUNT"
   mount "$DEV" "$MOUNT"
   MP="$MOUNT"
   OWN_MOUNT=1
-else
-  log "tarjeta $LABEL no presente; nada que hacer"
-  exit 0
 fi
 
 # Seguridad: nunca escribir en el disco interno.

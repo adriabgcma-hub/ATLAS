@@ -335,8 +335,10 @@ ssh -t adria_admin@atlas-hub 'sudo install -m 600 -o atlas -g atlas /tmp/atlas-e
 
 - Instalación: `./scripts/deploy-backup.sh` → `atlas-backup.service` (oneshot,
   root) + timer (domingos 03:00, `Persistent=true`, retardo aleatorio ≤ 1 h).
-- Destino: microSD **exFAT** etiqueta `ATLASBACKUP` (se monta por etiqueta;
-  rotación manual entre 2 tarjetas). En `<tarjeta>/<fecha>/`: volúmenes
+- Destino: microSD o USB **exFAT** etiqueta `ATLASBACKUP` (montaje por
+  etiqueta; rotación manual entre 2 unidades, p. ej. tarjeta + USB). **Solo una
+  unidad con esa etiqueta conectada a la vez**: con dos, el servicio falla en
+  vez de elegir al azar. En `<unidad>/<fecha>/`: volúmenes
   `mariadb-data`, `nextcloud-config`, `nextcloud-data`, `jellyfin-config`
   (export de Podman comprimido), `secrets`, `media`, `.env` del relay y
   `SHA256SUMS`. Conserva los 2 backups más recientes.
@@ -422,8 +424,11 @@ curl http://atlas-hub.local:8765/v1/health   # NO vale 127.0.0.1
 7. **CalDAV:** `sudo bash /opt/atlas/repo/deploy/atlas-hub/set-nextcloud-env.sh`
    y redeploy del relay.
 8. **Extras:** `./scripts/deploy-healthcheck.sh` y `./scripts/deploy-backup.sh`
-   desde el Mac (tras el primer deploy). Formatear la microSD como exFAT con
-   etiqueta `ATLASBACKUP` (11 caracteres máx.).
+   desde el Mac (tras el primer deploy). Formatear la unidad como exFAT con
+   etiqueta `ATLASBACKUP` (11 caracteres máx., solo en una unidad que no tenga
+   datos personales): `sudo wipefs -a /dev/sdX && sudo parted -s /dev/sdX
+   mklabel gpt mkpart primary 0% 100% && sudo mkfs.exfat -n ATLASBACKUP
+   /dev/sdX1`.
 9. **Verificación:** desde el Mac `./scripts/deploy-relay.sh --pull`; desde el
    iPhone fuera de casa, llegar por Tailscale a Nextcloud/Jellyfin.
 
