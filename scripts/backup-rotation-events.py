@@ -49,6 +49,21 @@ def with_rrule(ics: str) -> str:
     return ics.replace("END:VEVENT", f"RRULE:{RRULE}\r\nEND:VEVENT")
 
 
+def verify(client: CalDAVClient, calendar: dict) -> int:
+    """Lee los .ics guardados y muestra DTSTART/RRULE (sin modificar nada)."""
+    missing = 0
+    for uid, _, summary in EVENTS:
+        url = client.find_event_url(calendar["id"], uid)
+        if not url:
+            print(f"FALTA: {summary}")
+            missing += 1
+            continue
+        lines = [line for line in client.get_event(url).splitlines()
+                 if line.startswith(("DTSTART", "RRULE"))]
+        print(f"{summary}: {'; '.join(lines) or 'sin DTSTART/RRULE'}")
+    return 1 if missing else 0
+
+
 def main() -> int:
     env = load_env(ENV)
     missing = [k for k in ("CALDAV_USERNAME", "CALDAV_APP_PASSWORD") if k not in env]
@@ -66,6 +81,8 @@ def main() -> int:
               file=sys.stderr)
         return 1
     calendar = matches[0]
+    if "--verify" in sys.argv:
+        return verify(client, calendar)
     for uid, start, summary in EVENTS:
         end_dt = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M")
         end = (end_dt + datetime.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M")
