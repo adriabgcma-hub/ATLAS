@@ -22,7 +22,9 @@ VOLUMES=(mariadb-data nextcloud-config nextcloud-data jellyfin-config)
 SERVICES_UID=997
 
 log() { echo "[atlas-backup $(date +%H:%M:%S)] $*"; }
-as_services() { runuser -u services -- env HOME=/opt/services XDG_RUNTIME_DIR=/run/user/"$SERVICES_UID" "$@"; }
+# podman rootless hereda el cwd y falla si `services` no puede entrar en él
+# ("cannot chdir to ..."); se ejecuta siempre desde /opt/services (su home).
+as_services() { ( cd /opt/services && runuser -u services -- env HOME=/opt/services XDG_RUNTIME_DIR=/run/user/"$SERVICES_UID" "$@" ); }
 
 [ "$(id -u)" -eq 0 ] || { echo "ejecuta como root" >&2; exit 1; }
 
