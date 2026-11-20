@@ -1,0 +1,14 @@
+[Unit]
+Description=Backup de Atlas Hub a la tarjeta ATLASBACKUP
+Documentation=file:/opt/atlas/repo/docs/relay.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+# El script vive en el repo desplegado (se actualiza con el git pull del relay).
+ExecStart=/usr/bin/bash /opt/atlas/repo/deploy/server/atlas-backup.sh
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=idle

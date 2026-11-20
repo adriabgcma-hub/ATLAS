@@ -1,0 +1,13 @@
+[Unit]
+Description=Backup semanal de Atlas Hub
+Documentation=file:/opt/atlas/repo/docs/relay.md
+
+[Timer]
+# Domingos a las 03:00; si el hub estaba apagado, lo recupera al arrancar.
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=1h
+Unit=atlas-backup.service
+
+[Install]
+WantedBy=timers.target
