@@ -30,14 +30,14 @@ as_services() { runuser -u services -- env HOME=/opt/services XDG_RUNTIME_DIR=/r
 if findmnt -n -L "$LABEL" >/dev/null 2>&1; then
   MP=$(findmnt -n -L "$LABEL" -o TARGET)
   OWN_MOUNT=0
-else
+elif DEV=$(blkid -L "$LABEL" 2>/dev/null) && [ -n "$DEV" ]; then
   mkdir -p "$MOUNT"
-  if ! mount -L "$LABEL" "$MOUNT" 2>/dev/null; then
-    log "tarjeta $LABEL no presente; nada que hacer"
-    exit 0
-  fi
+  mount "$DEV" "$MOUNT"
   MP="$MOUNT"
   OWN_MOUNT=1
+else
+  log "tarjeta $LABEL no presente; nada que hacer"
+  exit 0
 fi
 
 # Seguridad: nunca escribir en el disco interno.
