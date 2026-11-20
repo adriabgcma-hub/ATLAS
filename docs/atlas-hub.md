@@ -356,6 +356,11 @@ ssh -t adria_admin@atlas-hub 'sudo install -m 600 -o atlas -g atlas /tmp/atlas-e
   `services`; extraer `secrets` y `.env` con sus permisos.
 - Verificado el 2026-11-20: nextcloud-config 157 MB, nextcloud-data 68 MB,
   mariadb-data 22 MB, jellyfin-config 34 KB; `sha256sum -c` y `gzip -t` OK.
+- **Recordatorios de rotación:** domingos 10:00, dos series alternas cada 2
+  semanas («conecta el USB y llévate la SD» / «conecta la SD y llévate el USB»)
+  en el calendario `Eventos` de Apple Calendar y de Nextcloud. Los de Nextcloud
+  se recrean con `sudo python3 /opt/atlas/repo/scripts/backup-rotation-events.py`
+  (idempotente; lee `CALDAV_*` del `.env`).
 
 ### Prohibiciones explícitas
 
