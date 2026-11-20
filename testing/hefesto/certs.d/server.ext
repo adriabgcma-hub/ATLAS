@@ -1,0 +1,6 @@
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always
+subjectAltName=DNS:atlas-hub.local,DNS:atlas-hub,IP:192.168.100.26,IP:127.0.0.1

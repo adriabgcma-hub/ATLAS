@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Consola de control Hefesto con el certificado `controller`.
+
+No registra un dispositivo: sirve para consultar el estado del Mac, activarlo,
+suspenderlo y enviar ecos mientras la app es el dispositivo. Las credenciales
+se leen de HEFESTO_HOME (por defecto
+~/Library/Application Support/atlas-hefesto-test; nunca dentro del repo).
+"""
+import http.client
+import json
+import os
+import socket
+import ssl
+import sys
+import urllib.parse
+import uuid
+from pathlib import Path
+
+HOME = Path(os.environ.get(
+    "HEFESTO_HOME", "~/Library/Application Support/atlas-hefesto-test")).expanduser()
+URL = urllib.parse.urlsplit(os.environ.get("HEFESTO_URL", "https://atlas-hub.local:8767").rstrip("/"))
+HOST, PORT = URL.hostname, URL.port or 443
+
+if not (HOME / "ca.pem").is_file():
+    raise SystemExit(
+        f"faltan las credenciales de prueba en {HOME}; ejecuta testing/hefesto/generate-certs.sh")
+
+CONTEXT = ssl.create_default_context(cafile=str(HOME / "ca.pem"))
+CONTEXT.load_cert_chain(str(HOME / "controller.pem"), str(HOME / "controller.key"))
+
+_IPV4 = None
+
+
+def ipv4():
+    # atlas-hub.local anuncia IPv6 link-local primero; el relay solo escucha IPv4.
+    global _IPV4
+    if _IPV4 is None:
+        _IPV4 = socket.getaddrinfo(HOST, PORT, family=socket.AF_INET,
+                                   type=socket.SOCK_STREAM)[0][4][0]
+    return _IPV4
+
+
+class Connection(http.client.HTTPSConnection):
+    def connect(self):
+        sock = socket.create_connection((ipv4(), self.port), self.timeout, self.source_address)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def call(operation, payload=None):
+    connection = Connection(HOST, PORT, context=CONTEXT, timeout=10)
+    body = None if payload is None else json.dumps(payload).encode()
+    headers = {} if body is None else {"Content-Type": "application/json"}
+    try:
+        connection.request("GET" if body is None else "POST",
+                           f"/v1/hefesto/{operation}", body=body, headers=headers)
+        response = connection.getresponse()
+        raw = response.read()
+        status = response.status
+    finally:
+        connection.close()
+    value = json.loads(raw)
+    if status != 200:
+        raise SystemExit(f"{status} {value.get('error', 'error')}")
+    return value
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise SystemExit("uso: hefesto-control status|resume|abort|submit <texto>")
+    command = sys.argv[1]
+    if command == "status":
+        value = call("status")
+    elif command in ("resume", "abort"):
+        current = call("status")
+        value = call("control", {
+            "protocolVersion": 1,
+            "action": command,
+            "expectedGeneration": current["generation"],
+        })
+    elif command == "submit":
+        if len(sys.argv) < 3:
+            raise SystemExit("falta el texto del eco")
+        value = call("submit", {
+            "protocolVersion": 1,
+            "submissionId": str(uuid.uuid4()),
+            "requestId": str(uuid.uuid4()),
+            "sessionId": "hefesto-console",
+            "taskId": str(uuid.uuid4()),
+            "toolId": "hefesto.echo",
+            "arguments": {"text": " ".join(sys.argv[2:])},
+        })
+    else:
+        raise SystemExit("comando desconocido")
+    print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+main()

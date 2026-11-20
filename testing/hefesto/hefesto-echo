@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Consola de prueba de Hefesto: envía un texto al eco mTLS y muestra el resultado.
+
+Usa las credenciales de HEFESTO_HOME (por defecto
+~/Library/Application Support/atlas-hefesto-test; nunca dentro del repo).
+El listener remoto nunca recibe deviceId.
+"""
+
+import http.client
+import json
+import os
+import socket
+import ssl
+import sys
+import time
+import urllib.parse
+import uuid
+from pathlib import Path
+
+HOME = Path(os.environ.get(
+    "HEFESTO_HOME", "~/Library/Application Support/atlas-hefesto-test")).expanduser()
+URL = urllib.parse.urlsplit(os.environ.get("HEFESTO_URL", "https://atlas-hub.local:8767").rstrip("/"))
+HOST, PORT = URL.hostname, URL.port or 443
+PATH = URL.path + "/v1/hefesto/"
+BASE = f"https://{HOST}:{PORT}/v1/hefesto/"
+STATE = HOME / ".instance"
+
+if not (HOME / "ca.pem").is_file():
+    raise SystemExit(
+        f"faltan las credenciales de prueba en {HOME}; ejecuta testing/hefesto/generate-certs.sh")
+
+
+def context(name):
+    value = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=str(HOME / "ca.pem"))
+    value.load_cert_chain(str(HOME / f"{name}.pem"), str(HOME / f"{name}.key"))
+    return value
+
+
+DEVICE = context("device")
+CONTROLLER = context("controller")
+
+
+class RemoteError(Exception):
+    def __init__(self, code):
+        self.code = code
+
+
+_IPV4 = None
+
+
+def ipv4():
+    global _IPV4
+    if _IPV4 is None:
+        _IPV4 = socket.getaddrinfo(HOST, PORT, family=socket.AF_INET,
+                                   type=socket.SOCK_STREAM)[0][4][0]
+    return _IPV4
+
+
+class Connection(http.client.HTTPSConnection):
+    def connect(self):
+        # mDNS lists a link-local IPv6 first where nothing listens; stdlib would
+        # stall until the timeout before falling back to IPv4 on every request.
+        sock = socket.create_connection((ipv4(), self.port), self.timeout, self.source_address)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def call(role, operation, payload=None):
+    data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    connection = Connection(HOST, PORT, context=DEVICE if role == "device" else CONTROLLER, timeout=10)
+    try:
+        connection.request(
+            "GET" if data is None else "POST",
+            PATH + operation,
+            body=data,
+            headers={} if data is None else {"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        raw = response.read()
+        status = response.status
+    except OSError as exc:
+        raise SystemExit(f"sin conexión con {BASE}: {exc}") from None
+    finally:
+        connection.close()
+    if status != 200:
+        try:
+            code = json.loads(raw)["error"]
+        except Exception:
+            code = f"http_{status}"
+        raise RemoteError(code)
+    return json.loads(raw)
+
+
+def stored_instance():
+    try:
+        value = STATE.read_text(encoding="ascii").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+def new_instance():
+    return "cli-" + uuid.uuid4().hex[:12]
+
+
+def attach(instance):
+    state = call("device", "register", {"protocolVersion": 1, "instanceId": instance})
+    # Registering a live ID does not renew its lease; a lapsed one is swept by
+    # the very next request. Heartbeat immediately so the lease is fresh.
+    return call("device", "heartbeat", {"protocolVersion": 1, "instanceId": instance})
+
+
+def register():
+    instance = stored_instance() or new_instance()
+    for attempt in range(2):
+        try:
+            state = attach(instance)
+            break
+        except RemoteError as exc:
+            if exc.code == "instance_conflict":
+                raise SystemExit(
+                    "hay una instancia viva sin estado local; espera 15 s y reintenta") from None
+            if exc.code not in ("instance_invalidated", "device_offline") or attempt:
+                raise
+            instance = new_instance()
+    STATE.write_text(instance + "\n", encoding="ascii")
+    STATE.chmod(0o600)
+    if state["suspended"]:
+        state = call("device", "control", {
+            "protocolVersion": 1, "action": "resume", "expectedGeneration": state["generation"]})
+    return instance, state
+
+
+def run(text):
+    instance, state = register()
+    generation = state["generation"]
+    ack = call("controller", "submit", {
+        "protocolVersion": 1,
+        "submissionId": "cli-" + uuid.uuid4().hex,
+        "requestId": "cli-" + uuid.uuid4().hex,
+        "sessionId": "hefesto-cli",
+        "taskId": "hefesto-cli",
+        "toolId": "hefesto.echo",
+        "arguments": {"text": text},
+    })
+    invocation = None
+    for _ in range(10):
+        invocation = call("device", "next", {
+            "protocolVersion": 1, "instanceId": instance, "generation": generation})["invocation"]
+        if invocation:
+            break
+        time.sleep(0.1)
+    if not invocation:
+        raise SystemExit("la invocación no llegó al dispositivo")
+    echoed = invocation["arguments"]["text"]
+    result = call("device", "result", {
+        "protocolVersion": 1,
+        "instanceId": instance,
+        "generation": generation,
+        "invocationId": invocation["invocationId"],
+        "output": {"text": echoed},
+    })
+    print(f"dispositivo {state['deviceId']} · instancia {instance} · generación {generation}")
+    print(f"controlador envió: {text!r}")
+    print(f"dispositivo ejecutó hefesto.echo → {result['state']}")
+    print(f"eco: {echoed}")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print('uso: hefesto-echo "texto"     envía un texto al eco mTLS')
+        print("     hefesto-echo --status    estado del dispositivo")
+        return 0
+    try:
+        if args[0] == "--status":
+            print(json.dumps(call("device", "status"), indent=2, ensure_ascii=False))
+            return 0
+        text = " ".join(args)
+        if len(text.encode("utf-8")) > 256:
+            print("error: el texto supera 256 bytes UTF-8; el eco no lo admite")
+            return 1
+        run(text)
+        return 0
+    except RemoteError as exc:
+        print(f"error del listener: {exc.code}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

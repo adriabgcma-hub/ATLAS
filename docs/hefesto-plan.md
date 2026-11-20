@@ -1058,3 +1058,14 @@ requiere commits; queda pendiente hasta autorización explícita de publicación
   Python 586, frontend 61, `npm run build` y `npm run lint` limpios. Relay v9
   desplegado y `/v1/health` OK; bundle Apple Development con firma profunda válida
   e instalado en `/Applications/Atlas.app` (el DMG también se generó esta vez).
+- 2026-11-20, consolas y credenciales de prueba consolidadas: `hefesto-echo`,
+  `hefesto-control`, sus configuraciones (`certs.d/`) y un `generate-certs.sh`
+  pasan al repo en `testing/hefesto/` (sin secretos); los certificados,
+  `peers.json` y `.instance` se movieron de `~/atlas-hefesto` a
+  `~/Library/Application Support/atlas-hefesto-test` (directorio 700, claves
+  600), y los scripts los leen de `HEFESTO_HOME` con esa ruta por defecto.
+  Verificado: `openssl verify` de device/controller/server contra la CA, huellas
+  idénticas a `peers.json`, generador probado en un directorio temporal (cadena
+  válida y rechazo a sobrescribir sin `--force`) y `hefesto-control status` por
+  mTLS devolvió protocolo 9 y `mac-one` (dispositivo suspendido/offline con la
+  app cerrada). La carpeta antigua del home se eliminó.
