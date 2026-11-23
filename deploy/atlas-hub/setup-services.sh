@@ -61,7 +61,7 @@ echo "== dominios de confianza de Nextcloud =="
 NC_CONFIG=/config/www/nextcloud/config/config.php
 if "${U[@]}" podman exec -u abc nextcloud test -f "$NC_CONFIG" \
    && ! "${U[@]}" podman exec -u abc nextcloud grep -q "'version'" "$NC_CONFIG"; then
-  "${U[@]}" podman exec -u abc nextcloud sh -c "printf '%s\n' '<?php' '\$CONFIG = array (' '    \"datadirectory\" => \"/data\",' '    \"trusted_domains\" => array (' '        0 => \"localhost\",' '        1 => \"atlas-hub\",' '        2 => \"atlas-hub.local\",' '        3 => \"100.121.19.28\",' '    ),' ');' > $NC_CONFIG"
+  "${U[@]}" podman exec -u abc nextcloud sh -c "printf '%s\n' '<?php' '\$CONFIG = array (' '    \"datadirectory\" => \"/data\",' '    \"trusted_domains\" => array (' '        0 => \"localhost\",' '        1 => \"atlas-hub\",' '        2 => \"atlas-hub.local\",' '        3 => \"100.121.19.28\",' '        4 => \"atlas-hub.tail971f40.ts.net\",' '    ),' ');' > $NC_CONFIG"
   echo "config.php sembrado con trusted_domains (preinstalación)"
 else
   occ() { "${U[@]}" podman exec -u abc nextcloud php /app/www/public/occ "$@"; }
@@ -69,6 +69,8 @@ else
   occ config:system:set trusted_domains 1 --value=atlas-hub
   occ config:system:set trusted_domains 2 --value=atlas-hub.local
   occ config:system:set trusted_domains 3 --value=100.121.19.28
+  # Nombre MagicDNS de la tailnet: acceso remoto sin el 400 de dominio no fiable.
+  occ config:system:set trusted_domains 4 --value=atlas-hub.tail971f40.ts.net
   echo "trusted_domains aplicados con occ (postinstalación)"
 fi
 
