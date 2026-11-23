@@ -447,12 +447,13 @@ curl http://atlas-hub.local:8765/v1/health   # NO vale 127.0.0.1
 
 - **Implementado:** relay en systemd de sistema; Nextcloud + MariaDB y Jellyfin
   en Podman rootless con arranque al boot; Cockpit; Tailscale; `ufw`;
-  watchdog del relay; backup semanal a microSD; contraseñas unificadas en el
-  hub; 76 eventos migrados de iCloud a Nextcloud.
+  watchdog del relay; backup semanal a dos unidades rotativas (SD + USB) con
+  avisos en Apple Calendar y Nextcloud; contraseñas unificadas en el hub y
+  **contraseña de aplicación** para el CalDAV del relay; 76 eventos migrados de
+  iCloud a Nextcloud.
 - **Pendientes declarados:** prueba real desde el iPhone fuera de casa
-  (Tailscale); rotar la segunda tarjeta de backup; `tailscaled` parcheado y
-  revisado en cada mantenimiento.
+  (Tailscale); revisión de `tailscaled` en cada mantenimiento (aplazada por
+  ahora).
 - **Mejoras futuras:** HTTPS con certificado de Tailscale (`tailscale cert`)
   para servicios y, con él, ventana propia de Cockpit en Hub Panel; media en
-  disco externo cuando la librería crezca; contraseña de aplicación real para
-  CalDAV en vez de la del admin.
+  disco externo cuando la librería crezca.

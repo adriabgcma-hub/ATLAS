@@ -489,6 +489,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 - **Descripción:** dos series alternas (domingos 10:00, `FREQ=WEEKLY;INTERVAL=2`) en el calendario **Eventos**: desde el 22/11 «conecta el USB y llévate la SD» y desde el 29/11 «conecta la SD y llévate el USB», con aviso 10 min antes. En Apple Calendar se crearon vía AppleScript; en Nextcloud con `scripts/backup-rotation-events.py` (idempotente, lee `CALDAV_*` del `.env` del relay; `--verify` imprime DTSTART/RRULE del `.ics` guardado). Verificado en Nextcloud: `DTSTART:20261122T090000Z` / `20261129T090000Z` y `RRULE:FREQ=WEEKLY;INTERVAL=2` en ambos.
 - **Documentación relacionada:** `docs/atlas-hub.md` §9.
 
+### Cierre de la etapa servidor: contraseñas post-GRUB y token de CalDAV
+
+- **Commit:** `80b690c`
+- **Fecha:** `2026-11-23`
+- **Descripción:** operación de cierre del servidor. Tras el reset por GRUB, Nextcloud (`adria-admin`) y Jellyfin se alinean con la contraseña nueva del hub. El botón de contraseñas de aplicación se movió en Nextcloud 35, así que se añadió `deploy/atlas-hub/create-nextcloud-token.sh`: pide la contraseña del admin (oculta), crea una contraseña de aplicación vía `POST /ocs/v2.php/core/getapppassword`, la guarda con `set-nextcloud-env.sh` (valida PROPFIND 207) y reinicia `atlas-relay`; si la API falla, cae a la contraseña del admin. **Verificado:** token creado, relay activo con `calendar: enabled` listando y leyendo los calendarios de Nextcloud, Jellyfin `/health` 200. **Pendiente único:** prueba desde el iPhone por Tailscale.
+- **Documentación relacionada:** `docs/atlas-hub.md` §4 y §12.
+
 ## Plantilla para futuras implementaciones
 
 ### Nombre exacto del commit
