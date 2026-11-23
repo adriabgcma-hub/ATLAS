@@ -364,9 +364,10 @@ ssh -t adria_admin@atlas-hub 'sudo install -m 600 -o atlas -g atlas /tmp/atlas-e
   OK, con tamaños no vacíos. El USB no contenía una pasada del 22/11.
 - **Recordatorios de rotación:** domingos 10:00, dos series alternas cada 2
   semanas («conecta el USB y llévate la SD» / «conecta la SD y llévate el USB»)
-  en el calendario `Eventos` de Apple Calendar y de Nextcloud. Los de Nextcloud
-  se recrean con `sudo python3 /opt/atlas/repo/scripts/backup-rotation-events.py`
-  (idempotente; lee `CALDAV_*` del `.env`).
+  en el calendario `Servidor` de Nextcloud. Se recrean con `sudo python3
+  /opt/atlas/repo/scripts/backup-rotation-events.py` (idempotente; lee
+  `CALDAV_*` del `.env`; el calendario se puede cambiar con
+  `ATLAS_REMINDER_CALENDAR`).
 
 ### Prohibiciones explícitas
 
