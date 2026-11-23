@@ -6,8 +6,8 @@ Uso (en atlas-hub, como root para poder leer el .env del relay):
     sudo python3 /opt/atlas/repo/scripts/backup-rotation-events.py
 
 Idempotente: usa UIDs fijos; si el evento ya existe en el calendario, lo
-reemplaza. Calendario destino: `Servidor` (se puede cambiar con
-ATLAS_REMINDER_CALENDAR; debe existir ya en Nextcloud).
+reemplaza. Calendario destino: `Eventos` (se puede cambiar con
+ATLAS_REMINDER_CALENDAR).
 """
 import datetime
 import os
@@ -20,7 +20,7 @@ sys.path.insert(0, str(REPO / "server"))
 
 from atlas_caldav import CalDAVClient, build_vevent  # noqa: E402
 
-CALENDAR_NAME = os.environ.get("ATLAS_REMINDER_CALENDAR", "Servidor")
+CALENDAR_NAME = os.environ.get("ATLAS_REMINDER_CALENDAR", "Eventos")
 RRULE = "FREQ=WEEKLY;INTERVAL=2"
 DESCRIPTION = (
     "Tras la pasada de las 03:25: cambia la unidad ATLASBACKUP. Solo una "
