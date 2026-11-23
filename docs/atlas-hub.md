@@ -113,7 +113,10 @@ LAN y desde la tailnet.
   `adria-admin`, el calendario falla con `calendar_upstream` (401): re-apuntar
   con `sudo bash /opt/atlas/repo/deploy/atlas-hub/set-nextcloud-env.sh` (valida
   contra Nextcloud y reescribe `CALDAV_*` y las sondas `PANEL_*`). Lo robusto
-  es una **contraseña de aplicación** de Nextcloud, no la de la cuenta.
+  es una **contraseña de aplicación** de Nextcloud, no la de la cuenta:
+  `sudo bash /opt/atlas/repo/deploy/atlas-hub/create-nextcloud-token.sh` la
+  crea con la contraseña del admin (o cae a ella si la API falla), la guarda y
+  recarga el relay.
 - **Sudoers mínimo** (`deploy/server/atlas-deploy.sudoers`, instalado en
   `/etc/sudoers.d/atlas-deploy`): `adria_admin` puede, **sin contraseña y sin
   nada más**, exactamente:
@@ -356,6 +359,9 @@ ssh -t adria_admin@atlas-hub 'sudo install -m 600 -o atlas -g atlas /tmp/atlas-e
   `services`; extraer `secrets` y `.env` con sus permisos.
 - Verificado el 2026-11-20: nextcloud-config 157 MB, nextcloud-data 68 MB,
   mariadb-data 22 MB, jellyfin-config 34 KB; `sha256sum -c` y `gzip -t` OK.
+- Verificado el 2026-11-23: la última copia del USB conectado era
+  `2026-11-21_001259` (237 MB); los siete `sha256sum -c` y todos los `gzip -t`
+  OK, con tamaños no vacíos. El USB no contenía una pasada del 22/11.
 - **Recordatorios de rotación:** domingos 10:00, dos series alternas cada 2
   semanas («conecta el USB y llévate la SD» / «conecta la SD y llévate el USB»)
   en el calendario `Eventos` de Apple Calendar y de Nextcloud. Los de Nextcloud
