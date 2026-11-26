@@ -7,9 +7,10 @@ antes de tocar el servidor.** La API HTTP del relay está en
 [`relay-api.md`](./relay-api.md); la app de barra de menús en
 [`panel-app-plan.md`](./panel-app-plan.md).
 
-Estado (2026-11-20): relay, Nextcloud, Jellyfin, Cockpit, Tailscale y `ufw`
+Estado (2026-11-26): relay, Nextcloud, Jellyfin, Cockpit, Tailscale y `ufw`
 operativos; watchdog del relay y backup semanal a microSD instalados y
-verificados. Pendientes en §12.
+verificados; protección térmica (ventilador + límites de CPU) instalada.
+Pendientes en §12.
 
 ## 1. Reparto de máquinas
 
@@ -48,6 +49,25 @@ verificados. Pendientes en §12.
 | **HTTP sobre el túnel** | WireGuard ya cifra; TLS propio queda como mejora (§12). |
 | **Todo en el SSD** | Sin disco externo por ahora; media fuera cuando crezca. |
 
+### Protección térmica (mbpfan + límites de CPU)
+
+Instalada el 2026-11-26 desde `deploy/atlas-hub/thermal/` (instalador
+idempotente `install-thermal.sh`):
+
+- **Ventilador:** `mbpfan` con curva versionada (`mbpfan.conf`): mínimo
+  1300 RPM, rampa desde 50 °C y máximo a 80 °C. Ojo con la semántica real de
+  mbpfan 2.4: sube por encima de `high_temp` y alcanza el máximo en `max_temp`;
+  `low_temp` es el suelo de histéresis. Al pararlo devuelve el ventilador al SMC
+  (automático); el drop-in `mbpfan.service.d/atlas.conf` lo repite como red de
+  seguridad ante una muerte sin señal.
+- **CPU:** `atlas-cpu-power.service` apaga el turbo (`no_turbo=1`) y limita
+  `max_perf_pct` al 90 %.
+- **Informe:** `/usr/local/bin/atlas-thermal-report` (solo lectura) muestra
+  temperaturas de CPU, PCH y batería, RPM y modo del ventilador, curva y límites.
+- **Verificación (2026-11-26):** ambos servicios activos; ventilador a 1293 RPM
+  en modo manual con el paquete a 47 °C; `no_turbo=1` y `max_perf_pct=90`. Sin
+  prueba de carga: la calibración fina de la curva queda pendiente.
+
 ```
 atlas-hub (Debian 13 · 8 GB · SSD 128 GB · WiFi)
 │
@@ -60,6 +80,7 @@ atlas-hub (Debian 13 · 8 GB · SSD 128 GB · WiFi)
 │   └─ jellyfin   (Quadlet) → media direct play (8096)
 ├─ atlas-health.timer    → watchdog del relay (cada 60 s)
 ├─ atlas-backup.timer    → backup semanal a microSD (§9)
+├─ mbpfan + atlas-cpu-power → protección térmica (§2)
 └─ ufw (activo)
 
 MacBook / iPhone / iPad
@@ -451,10 +472,11 @@ curl http://atlas-hub.local:8765/v1/health   # NO vale 127.0.0.1
   watchdog del relay; backup semanal a dos unidades rotativas (SD + USB) con
   avisos en Apple Calendar y Nextcloud; contraseñas unificadas en el hub y
   **contraseña de aplicación** para el CalDAV del relay; 76 eventos migrados de
-  iCloud a Nextcloud.
+  iCloud a Nextcloud; protección térmica con mbpfan y límites de CPU.
 - **Pendientes declarados:** prueba real desde el iPhone fuera de casa
   (Tailscale); revisión de `tailscaled` en cada mantenimiento (aplazada por
-  ahora).
+  ahora); calibración de la curva térmica con una prueba de carga y la capa de
+  avisos/umbrales (fase 2: `atlas-thermal`, comando `/hub` y tarjeta en Hub Panel).
 - **Mejoras futuras:** HTTPS con certificado de Tailscale (`tailscale cert`)
   para servicios y, con él, ventana propia de Cockpit en Hub Panel; media en
   disco externo cuando la librería crezca.

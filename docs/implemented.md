@@ -496,6 +496,13 @@ Cada entrada debe incluir el nombre exacto del commit que contiene el cambio.
 - **Descripción:** operación de cierre del servidor. Tras el reset por GRUB, Nextcloud (`adria-admin`) y Jellyfin se alinean con la contraseña nueva del hub. El botón de contraseñas de aplicación se movió en Nextcloud 35, así que se añadió `deploy/atlas-hub/create-nextcloud-token.sh`: pide la contraseña del admin (oculta), crea una contraseña de aplicación vía `POST /ocs/v2.php/core/getapppassword`, la guarda con `set-nextcloud-env.sh` (valida PROPFIND 207) y reinicia `atlas-relay`; si la API falla, cae a la contraseña del admin. **Verificado:** token creado, relay activo con `calendar: enabled` listando y leyendo los calendarios de Nextcloud, Jellyfin `/health` 200. **Pendiente único:** prueba desde el iPhone por Tailscale.
 - **Documentación relacionada:** `docs/atlas-hub.md` §4 y §12.
 
+### Protección térmica del hub (mbpfan + límites de CPU)
+
+- **Commit:** `6a0ce40`
+- **Fecha:** `2026-11-26`
+- **Descripción:** instalación de `lm-sensors` y `mbpfan` con curva versionada (`deploy/atlas-hub/thermal/mbpfan.conf`): mínimo 1300 RPM, rampa desde 50 °C y máximo a 80 °C. La semántica real de mbpfan 2.4 rampa entre `high_temp` y `max_temp`, con `low_temp` como suelo de histéresis. Drop-in de systemd que devuelve el ventilador al SMC si el demonio muere sin señal; `atlas-cpu-power.service` apaga el turbo y fija `max_perf_pct=90`; `/usr/local/bin/atlas-thermal-report` resume temperaturas, ventilador, curva y límites. **Verificado:** servicios activos, ventilador a 1293 RPM en manual con el paquete a 47 °C, `no_turbo=1` y `max_perf_pct=90`. Sin prueba de carga: calibración pendiente.
+- **Documentación relacionada:** `docs/atlas-hub.md` §2.
+
 ## Plantilla para futuras implementaciones
 
 ### Nombre exacto del commit
