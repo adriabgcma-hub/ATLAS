@@ -1,0 +1,11 @@
+[Unit]
+Description=Atlas: límites de CPU para protección térmica
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/atlas-cpu-power
+
+[Install]
+WantedBy=multi-user.target

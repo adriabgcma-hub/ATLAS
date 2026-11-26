@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Protección térmica: apaga el turbo y limita el rendimiento de la CPU.
+set -eu
+P=/sys/devices/system/cpu/intel_pstate
+if [ -w "$P/no_turbo" ]; then
+  echo 1 > "$P/no_turbo"
+fi
+if [ -w "$P/max_perf_pct" ]; then
+  echo 90 > "$P/max_perf_pct"
+fi
